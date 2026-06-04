@@ -296,7 +296,11 @@ const DB = {
 
 let clients = DB.load('clients', []);
 let notes = DB.load('notes', []);
+const DEFAULT_WORKERS = ['Jon Benson', 'Jade Atkinson', 'Brett Clarke'];
 let workersList = DB.load('workersList', []);
+// Seed default workers if list is empty
+if(workersList.length === 0) { workersList = [...DEFAULT_WORKERS]; DB.save('workersList', workersList); }
+else { DEFAULT_WORKERS.forEach(w=>{ if(!workersList.includes(w)) { workersList.push(w); DB.save('workersList', workersList); } }); }
 function saveWorkersList() { DB.save('workersList', workersList); }
 let referrals = DB.load('referrals', []);
 function saveReferrals() { DB.save('referrals', referrals); }
