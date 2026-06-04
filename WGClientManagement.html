@@ -2608,6 +2608,226 @@ function renderCultural() {
 // ============================================================
 // REPORTS PAGE
 // ============================================================
+// ===== BULK CLIENT IMPORT =====
+(function() {
+  // Maps common spreadsheet/CSV header variations to internal client fields
+  const FIELD_MAP = {
+    fullname:      'fullName',  name:'fullName',       'full name':'fullName',   'client name':'fullName',
+    firstname:     '_firstName','first name':'_firstName','first':'_firstName',
+    lastname:      '_lastName', 'last name':'_lastName', 'surname':'_lastName',
+    preferredname: 'preferredName','preferred name':'preferredName','preferred':'preferredName',
+    pronouns:      'pronouns',
+    dob:           'dob',       'date of birth':'dob', 'birthdate':'dob',        'birth date':'dob',
+    gender:        'gender',    'sex':'gender',
+    phone:         'phone',     'mobile':'phone',      'mob number':'phone',     'contact number':'phone','phone number':'phone',
+    email:         'email',     'email address':'email',
+    address:       'address',   'home address':'address','street address':'address',
+    community:     'community', 'country':'community', 'location':'community',   'town':'community',
+    mob:           'mob',       'mob group':'mob',     'language group':'mob',   'nation':'mob',          'clan':'mob',
+    languages:     'languages', 'language':'languages','languages spoken':'languages',
+    interpreter:   'interpreter','interpreter required':'interpreter',
+    kinship:       'kinship',   'family structure':'kinship',
+    medicare:      'medicare',  'medicare no':'medicare','medicare number':'medicare',
+    crn:           'crn',       'centrelink crn':'crn','centrelink':'crn',
+    ndis:          'ndis',      'ndis no':'ndis',      'ndis number':'ndis',
+    gp:            'gp',        'doctor':'gp',         'gp/doctor':'gp',         'general practitioner':'gp',
+    housing:       'housing',   'housing situation':'housing',
+    employment:    'employment','employment status':'employment',
+    children:      'children',  'dependants':'children','kids':'children',
+    healthconditions:'healthConditions','health conditions':'healthConditions','health':'healthConditions','medical':'healthConditions',
+    medications:   'medications','meds':'medications',
+    referralsource:'referralSource','referral source':'referralSource','referred by':'referralSource','source':'referralSource',
+    referraldate:  'referralDate','referral date':'referralDate','date referred':'referralDate','date':'referralDate',
+    keyworker:     'keyWorker', 'key worker':'keyWorker','worker':'keyWorker',   'case worker':'keyWorker','caseworker':'keyWorker',
+    risklevel:     'riskLevel', 'risk level':'riskLevel','risk':'riskLevel',
+    status:        'status',
+    clientid:      'clientId',  'client id':'clientId','id':'clientId',
+    programs:      '_programs', 'program':'_programs', 'enrolled in':'_programs',
+    notes:         '_notes',    'case notes':'_notes', 'presenting issues':'referralReason','issue':'referralReason',
+    goals:         'goals',     'client goals':'goals',
+    strengths:     'strengths', 'protective factors':'strengths',
+    referralreason:'referralReason','referral reason':'referralReason','presenting issue':'referralReason',
+    emergencycontact:'emergencyContact','emergency contact':'emergencyContact','next of kin':'emergencyContact',
+    atsi:          'atsi',      'aboriginal':'atsi',   'indigenous':'atsi',      'atsi status':'atsi',
+  };
+
+  function normKey(h) { return h.toLowerCase().replace(/[\s_\-\/]+/g,' ').trim(); }
+
+  function parseCSV(raw) {
+    const lines = raw.split(/\r?\n/).filter(l=>l.trim());
+    if(!lines.length) return [];
+    // Detect separator: tab wins if present, else comma, else treat as plain name list
+    const firstLine = lines[0];
+    const sep = firstLine.includes('\t') ? '\t' : firstLine.includes(',') ? ',' : null;
+
+    function splitRow(line) {
+      if(!sep) return [line.trim()];
+      const result = []; let cur = '', inQ = false;
+      for(let i=0;i<line.length;i++){
+        const ch=line[i];
+        if(ch==='"'){inQ=!inQ;}
+        else if(ch===sep && !inQ){result.push(cur.trim().replace(/^"|"$/g,''));cur='';}
+        else{cur+=ch;}
+      }
+      result.push(cur.trim().replace(/^"|"$/g,''));
+      return result;
+    }
+
+    const firstCells = splitRow(firstLine);
+    // Detect if first row is a header: any cell matches a known field key
+    const hasHeader = firstCells.some(c => FIELD_MAP[normKey(c)] !== undefined || normKey(c).length < 30);
+    let headers, rows;
+    if(hasHeader && sep) {
+      headers = firstCells.map(normKey);
+      rows = lines.slice(1).map(splitRow);
+    } else {
+      // No header — treat each line as a name
+      headers = ['fullname'];
+      rows = lines.map(l=>splitRow(l));
+    }
+    return { headers, rows };
+  }
+
+  function mapRow(headers, cells) {
+    const obj = {};
+    headers.forEach((h,i) => {
+      const field = FIELD_MAP[h];
+      if(field && cells[i]?.trim()) obj[field] = cells[i].trim();
+    });
+    // Merge first+last into fullName if no fullName
+    if(!obj.fullName && (obj._firstName || obj._lastName)) {
+      obj.fullName = [obj._firstName||'', obj._lastName||''].join(' ').trim();
+    }
+    delete obj._firstName; delete obj._lastName;
+    return obj;
+  }
+
+  function previewCols(headers) {
+    // Pick up to 6 most interesting cols to show in preview
+    const priority = ['fullname','name','full name','dob','phone','community','mob','keyworker','worker','programs','risk','risklevel','status'];
+    const sorted = [...headers].sort((a,b) => {
+      const ai = priority.indexOf(a), bi = priority.indexOf(b);
+      return (ai===-1?99:ai)-(bi===-1?99:bi);
+    });
+    return sorted.slice(0,7);
+  }
+
+  window.bulkPreview = function() {
+    const raw = document.getElementById('bulk-paste')?.value||'';
+    const wrap = document.getElementById('bulk-preview-wrap');
+    const countEl = document.getElementById('bulk-preview-count');
+    document.getElementById('bulk-import-result').textContent='';
+    if(!raw.trim()) { wrap.classList.add('hidden'); return; }
+
+    const parsed = parseCSV(raw);
+    if(!parsed || !parsed.rows?.length) { wrap.classList.add('hidden'); return; }
+    const { headers, rows } = parsed;
+    const valid = rows.filter(r=>r.some(c=>c.trim()));
+    if(!valid.length) { wrap.classList.add('hidden'); return; }
+
+    const showCols = previewCols(headers);
+    const thead = document.getElementById('bulk-preview-head');
+    const tbody = document.getElementById('bulk-preview-body');
+
+    thead.innerHTML = '<tr>'+showCols.map(h=>`<th>${h}</th>`).join('')+'<th>Programs</th></tr>';
+    tbody.innerHTML = valid.slice(0,50).map(row => {
+      const mapped = mapRow(headers, row);
+      return '<tr>'+showCols.map(h=>{
+        const field = FIELD_MAP[h]||h;
+        return `<td>${(mapped[field]||row[headers.indexOf(h)]||'').toString().slice(0,40)}</td>`;
+      }).join('')+`<td><span style="font-size:11px;color:#065f46">${mapped._programs||'SEWB'}</span></td></tr>`;
+    }).join('');
+
+    const extra = valid.length>50 ? `<tr><td colspan="${showCols.length+1}" style="color:var(--muted);font-style:italic">…and ${valid.length-50} more rows</td></tr>` : '';
+    tbody.innerHTML += extra;
+
+    countEl.textContent = `✅ ${valid.length} client${valid.length!==1?'s':''} detected — review below, then click Import`;
+    wrap.classList.remove('hidden');
+    wrap._parsedHeaders = headers;
+    wrap._parsedRows = valid;
+  };
+
+  window.bulkImport = function() {
+    const wrap = document.getElementById('bulk-preview-wrap');
+    const headers = wrap._parsedHeaders;
+    const rows = wrap._parsedRows;
+    if(!rows?.length) return;
+
+    const defSewb     = document.getElementById('bi-sewb')?.checked ?? true;
+    const defAod      = document.getElementById('bi-aod')?.checked ?? false;
+    const defJustice  = document.getElementById('bi-justice')?.checked ?? false;
+    const defCultural = document.getElementById('bi-cultural')?.checked ?? false;
+    const defDisab    = document.getElementById('bi-disability')?.checked ?? false;
+    const defStatus   = document.getElementById('bi-status')?.value || 'active';
+    const defRisk     = document.getElementById('bi-risk')?.value || 'low';
+
+    let created = 0, skipped = 0;
+    rows.forEach(row => {
+      const mapped = mapRow(headers, row);
+      if(!mapped.fullName) { skipped++; return; }
+
+      // Don't duplicate — match by fullName + dob if present
+      const dup = clients.find(c =>
+        c.fullName.toLowerCase()===mapped.fullName.toLowerCase() &&
+        (!mapped.dob || c.dob===mapped.dob)
+      );
+      if(dup) { skipped++; return; }
+
+      // Parse program flags from a _programs column if present
+      const progStr = (mapped._programs||'').toLowerCase();
+      delete mapped._programs;
+
+      // Parse notes into a separate note entry
+      const importNote = mapped._notes||'';
+      delete mapped._notes;
+
+      const c = Object.assign({
+        status: defStatus, riskLevel: defRisk,
+        sewb: defSewb, aod: defAod, justice: defJustice,
+        cultural: defCultural, disability: defDisab,
+        referralDate: today(),
+      }, mapped);
+
+      // Override programs if _programs column specified them
+      if(progStr) {
+        c.sewb     = progStr.includes('sewb')     || defSewb;
+        c.aod      = progStr.includes('aod')      || defAod;
+        c.justice  = progStr.includes('justice')  || defJustice;
+        c.cultural = progStr.includes('cultural') || defCultural;
+        c.disability = progStr.includes('disab')  || defDisab;
+      }
+
+      // Normalise risk
+      if(c.riskLevel) {
+        const r=c.riskLevel.toLowerCase();
+        c.riskLevel = r.includes('high')?'high':r.includes('med')?'medium':'low';
+      }
+
+      c.id = uid(); c.created = now();
+      clients.push(c);
+      created++;
+
+      // If there was a notes column, store it as a SEWB case note
+      if(importNote) {
+        notes.push({
+          id: uid(), clientId: c.id, type:'sewb',
+          contactType:'Imported', text: importNote,
+          created: now(), worker: c.keyWorker||'',
+        });
+      }
+    });
+
+    saveAll();
+    const msg = `Imported ${created} client${created!==1?'s':''}${skipped?' ('+skipped+' skipped — duplicate or no name)':''}`;
+    document.getElementById('bulk-import-result').textContent = msg;
+    showToast(msg);
+    document.getElementById('bulk-paste').value = '';
+    wrap.classList.add('hidden');
+    // Refresh the reports page so counts update
+    setTimeout(()=>showPage('reports'), 400);
+  };
+})();
+
 function renderReportsPage() {
   const activeClients = clients.filter(c=>c.status==='active');
   return `
@@ -2751,6 +2971,66 @@ function renderReportsPage() {
         <div class="rc-title">Risk Register</div>
         <div class="rc-desc">All medium and high risk clients with safety plan status</div>
         <span class="rc-badge" style="background:#fee2e2;color:#991b1b">${clients.filter(c=>c.riskLevel==='high'||c.riskLevel==='medium').length} flagged</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- BULK IMPORT -->
+  <div class="card no-print" style="margin-bottom:16px;border-left:4px solid var(--primary-light)">
+    <div class="card-header">
+      <div class="card-title">📥 Bulk Client Import — Paste &amp; Sort into SEWB Files</div>
+      <button class="btn btn-sm btn-outline" onclick="document.getElementById('bulk-help').classList.toggle('hidden')">❓ Help</button>
+    </div>
+    <div id="bulk-help" class="hidden" style="background:#f0f7f3;border-radius:8px;padding:14px;margin-bottom:14px;font-size:12px;line-height:1.7;color:#1a3a2a">
+      <strong>How to use:</strong> Paste any CSV, Excel copy, or plain text client list below. Each row becomes one client.<br>
+      The importer auto-detects common column names (Name, DOB, Phone, Email, Address, Community, Mob, Medicare, CRN, NDIS, GP, Housing, Employment, Worker, Risk, Programs, Notes, etc.).<br>
+      For plain text with no headers, each line is treated as a client name.<br>
+      All imported clients are enrolled in <strong>SEWB</strong> by default and appear instantly in the Clients page.
+    </div>
+    <div class="form-group">
+      <label>Paste client data here (CSV, tab-separated, Excel paste, or plain name list)</label>
+      <textarea id="bulk-paste" style="min-height:160px;font-family:monospace;font-size:12px" placeholder="E.g. paste a spreadsheet selection, CSV export, or just a list of names — one client per line…" oninput="bulkPreview()"></textarea>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+      <div class="form-group" style="margin:0">
+        <label style="white-space:nowrap">Default Program(s) to assign</label>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:6px">
+          <label style="font-size:13px;display:flex;align-items:center;gap:5px"><input type="checkbox" id="bi-sewb" checked> SEWB</label>
+          <label style="font-size:13px;display:flex;align-items:center;gap:5px"><input type="checkbox" id="bi-aod"> AOD</label>
+          <label style="font-size:13px;display:flex;align-items:center;gap=5px"><input type="checkbox" id="bi-justice"> Justice</label>
+          <label style="font-size:13px;display:flex;align-items:center;gap:5px"><input type="checkbox" id="bi-cultural"> Cultural</label>
+          <label style="font-size:13px;display:flex;align-items:center;gap:5px"><input type="checkbox" id="bi-disability"> Disability</label>
+        </div>
+      </div>
+      <div class="form-group" style="margin:0">
+        <label>Default Status</label>
+        <select id="bi-status" style="width:140px">
+          <option value="active">Active</option>
+          <option value="waitlist">Waitlist</option>
+          <option value="closed">Closed</option>
+        </select>
+      </div>
+      <div class="form-group" style="margin:0">
+        <label>Default Risk Level</label>
+        <select id="bi-risk" style="width:120px">
+          <option value="low">Low</option>
+          <option value="medium">Medium</option>
+          <option value="high">High</option>
+        </select>
+      </div>
+    </div>
+    <div id="bulk-preview-wrap" class="hidden">
+      <div style="font-size:13px;font-weight:700;margin-bottom:8px;color:var(--primary-light)" id="bulk-preview-count"></div>
+      <div class="table-wrap" style="max-height:320px;overflow-y:auto;margin-bottom:14px">
+        <table id="bulk-preview-table">
+          <thead id="bulk-preview-head"></thead>
+          <tbody id="bulk-preview-body"></tbody>
+        </table>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <button class="btn btn-primary" onclick="bulkImport()">✅ Import All Clients</button>
+        <button class="btn btn-outline" onclick="document.getElementById('bulk-paste').value='';document.getElementById('bulk-preview-wrap').classList.add('hidden')">🗑️ Clear</button>
+        <span id="bulk-import-result" style="font-size:13px;font-weight:600;color:var(--success)"></span>
       </div>
     </div>
   </div>
