@@ -287,12 +287,185 @@
 <!-- MODAL CONTAINER -->
 <div id="modal-container"></div>
 
+<!-- Firebase SDK (compat build — loads before app script) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script>
 // ===== DATA LAYER =====
 const DB = {
   load(k, def) { try { return JSON.parse(localStorage.getItem('sewb_cms_'+k)) ?? def; } catch { return def; } },
   save(k, v) { localStorage.setItem('sewb_cms_'+k, JSON.stringify(v)); }
 };
+
+// ===== FIREBASE CLOUD SYNC =====
+const FSYNC = (() => {
+  let db = null, teamId = null, _listeners = [];
+
+  function getCfg()     { try { return JSON.parse(localStorage.getItem('fb_cfg')||'null'); } catch { return null; } }
+  function saveCfg(c)   { localStorage.setItem('fb_cfg', JSON.stringify(c)); }
+  function isReady()    { return !!db; }
+
+  function col(name) { return db.collection('teams').doc(teamId).collection(name); }
+
+  async function init() {
+    const cfg = getCfg();
+    if (!cfg?.apiKey) return false;
+    try {
+      if (!window.firebase) return false;
+      if (!firebase.apps.length) firebase.initializeApp(cfg);
+      db = firebase.firestore();
+      teamId = cfg.teamId || 'wg_default';
+      await firebase.auth().signInAnonymously();
+      await _loadAll();
+      _startListeners();
+      _showSyncBadge(true);
+      return true;
+    } catch(e) {
+      console.warn('Firebase sync failed:', e.message);
+      _showSyncBadge(false, e.message);
+      return false;
+    }
+  }
+
+  async function _loadAll() {
+    const [cs,ns,ts,rs,ws,wks] = await Promise.all([
+      col('clients').get(), col('notes').get(), col('timelogs').get(),
+      col('referrals').get(), col('workersList').get(), col('workflowTasks').get(),
+    ]);
+    if (!cs.empty) { clients = cs.docs.map(d=>d.data()); DB.save('clients', clients); }
+    if (!ns.empty) { notes   = ns.docs.map(d=>d.data()); DB.save('notes', notes); }
+    if (!ts.empty) { timeLogs = ts.docs.map(d=>d.data()); DB.save('timelogs', timeLogs); }
+    if (!rs.empty) { referrals = rs.docs.map(d=>d.data()); DB.save('referrals', referrals); }
+    if (!ws.empty) { const w=ws.docs[0]?.data()?.list; if(w){workersList=w;DB.save('workersList',workersList);} }
+    if (!wks.empty) { const t=wks.docs[0]?.data()?.list; if(t){workflowTasks=t;DB.save('workflowTasks',workflowTasks);} }
+  }
+
+  function _startListeners() {
+    _listeners.forEach(u=>u()); _listeners=[];
+    const refresh = () => {
+      if (['clients','dashboard','sewb','aod','justice','cultural','disability','reports','sessions'].includes(currentPage))
+        setTimeout(()=>showPage(currentPage), 50);
+    };
+    _listeners.push(col('clients').onSnapshot(snap=>{
+      if (snap.metadata.hasPendingWrites) return;
+      clients = snap.docs.map(d=>d.data()); DB.save('clients',clients); refresh();
+    }));
+    _listeners.push(col('notes').onSnapshot(snap=>{
+      if (snap.metadata.hasPendingWrites) return;
+      notes = snap.docs.map(d=>d.data()); DB.save('notes',notes);
+    }));
+    _listeners.push(col('timelogs').onSnapshot(snap=>{
+      if (snap.metadata.hasPendingWrites) return;
+      timeLogs = snap.docs.map(d=>d.data()); DB.save('timelogs',timeLogs);
+    }));
+    _listeners.push(col('referrals').onSnapshot(snap=>{
+      if (snap.metadata.hasPendingWrites) return;
+      referrals = snap.docs.map(d=>d.data()); DB.save('referrals',referrals);
+      if (currentPage==='referrals') setTimeout(()=>showPage('referrals'),50);
+    }));
+  }
+
+  async function _batch(colName, items, idFn) {
+    if (!db || !items.length) return;
+    // Firestore batch limit = 500 writes
+    for (let i=0; i<items.length; i+=400) {
+      const batch = db.batch();
+      items.slice(i,i+400).forEach(item => batch.set(col(colName).doc(idFn(item)), item));
+      await batch.commit().catch(e=>console.warn('Sync write error:', e.message));
+    }
+  }
+
+  async function pushAll() {
+    if (!db) return;
+    await Promise.all([
+      _batch('clients',  clients,  c=>c.id),
+      _batch('notes',    notes,    n=>n.id),
+      _batch('timelogs', timeLogs, t=>t.id||t.date+'-'+t.clientId),
+    ]);
+  }
+  async function pushClients()  { await _batch('clients',  clients,  c=>c.id); }
+  async function pushNotes()    { await _batch('notes',    notes,    n=>n.id); }
+  async function pushReferrals(){ await _batch('referrals',referrals,r=>r.id||uid()); }
+  async function pushWorkers()  { if(db) col('workersList').doc('list').set({list:workersList}).catch(()=>{}); }
+  async function pushTasks()    { if(db) col('workflowTasks').doc('list').set({list:workflowTasks}).catch(()=>{}); }
+
+  async function deleteDoc(colName, id) {
+    if (db && id) col(colName).doc(id).delete().catch(()=>{});
+  }
+
+  function _showSyncBadge(ok, err) {
+    let badge = document.getElementById('sync-badge');
+    if (!badge) {
+      badge = document.createElement('div');
+      badge.id = 'sync-badge';
+      badge.style.cssText = 'position:fixed;bottom:16px;right:16px;padding:6px 14px;border-radius:20px;font-size:12px;font-weight:700;z-index:9999;box-shadow:0 2px 8px rgba(0,0,0,0.15);cursor:default;transition:opacity 0.5s';
+      document.body.appendChild(badge);
+    }
+    if (ok) {
+      badge.style.background='#d1fae5'; badge.style.color='#065f46';
+      badge.textContent='☁️ Cloud sync active';
+      setTimeout(()=>{badge.style.opacity='0';setTimeout(()=>badge.remove(),600);},3000);
+    } else {
+      badge.style.background='#fee2e2'; badge.style.color='#991b1b';
+      badge.title = err||'';
+      badge.textContent='☁️ Sync offline';
+    }
+  }
+
+  function showSetupModal() {
+    const cfg = getCfg()||{};
+    showModal('☁️ Firebase Cloud Sync Setup', `
+      <div class="alert alert-info" style="margin-bottom:16px">
+        <div><strong>Enable real-time sync so Jon, Jade &amp; Brett can all access the same data from any device.</strong><br>
+        Takes ~5 minutes. Uses Google Firebase (free tier — no credit card needed).</div>
+      </div>
+      <div style="background:#f9fafb;border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:16px;font-size:13px;line-height:1.8">
+        <strong>Steps to get your Firebase config:</strong><br>
+        1. Go to <strong>console.firebase.google.com</strong> → Create a project (e.g. "WornGundidj")<br>
+        2. In the project: click <strong>⚙️ Project Settings</strong> → scroll to <em>Your apps</em> → click <strong>&lt;/&gt; Web</strong><br>
+        3. Register the app → copy the <strong>firebaseConfig</strong> object<br>
+        4. Back in Project Settings → click <strong>Firestore Database</strong> → Create database → Start in <strong>test mode</strong><br>
+        5. Also enable <strong>Authentication → Anonymous</strong> sign-in<br>
+        6. Paste your config values below and click Save.
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="form-group"><label>API Key *</label><input id="fb-apiKey" value="${cfg.apiKey||''}" placeholder="AIzaSy…"></div>
+        <div class="form-group"><label>Auth Domain *</label><input id="fb-authDomain" value="${cfg.authDomain||''}" placeholder="yourapp.firebaseapp.com"></div>
+        <div class="form-group"><label>Project ID *</label><input id="fb-projectId" value="${cfg.projectId||''}" placeholder="your-project-id"></div>
+        <div class="form-group"><label>Storage Bucket</label><input id="fb-storageBucket" value="${cfg.storageBucket||''}" placeholder="yourapp.appspot.com"></div>
+        <div class="form-group"><label>Messaging Sender ID</label><input id="fb-messagingSenderId" value="${cfg.messagingSenderId||''}"></div>
+        <div class="form-group"><label>App ID</label><input id="fb-appId" value="${cfg.appId||''}"></div>
+      </div>
+      <div class="form-group"><label>Team ID (shared across all staff — any short word)</label><input id="fb-teamId" value="${cfg.teamId||'worngundidj'}" placeholder="worngundidj"></div>
+      ${cfg.apiKey?`<div style="display:flex;gap:10px;margin-top:4px"><button class="btn btn-sm btn-danger" onclick="FSYNC.clearConfig();closeModal()">🗑️ Disconnect Sync</button></div>`:''}
+    `, () => {
+      const g = id => document.getElementById(id)?.value?.trim()||'';
+      const apiKey = g('fb-apiKey');
+      if (!apiKey) { alert('API Key is required'); return false; }
+      const cfg = {
+        apiKey, authDomain: g('fb-authDomain'), projectId: g('fb-projectId'),
+        storageBucket: g('fb-storageBucket'), messagingSenderId: g('fb-messagingSenderId'),
+        appId: g('fb-appId'), teamId: g('fb-teamId')||'worngundidj',
+      };
+      saveCfg(cfg);
+      showToast('Config saved — connecting…');
+      FSYNC.init().then(ok => {
+        if (ok) { showToast('☁️ Cloud sync connected! Share your Team ID with your colleagues.'); showPage('settings'); }
+        else showToast('⚠️ Could not connect — check your config and try again.');
+      });
+      return true;
+    });
+  }
+
+  function clearConfig() {
+    localStorage.removeItem('fb_cfg');
+    db = null; _listeners.forEach(u=>u()); _listeners=[];
+    showToast('Cloud sync disconnected');
+  }
+
+  return { init, isReady, pushAll, pushClients, pushNotes, pushReferrals, pushWorkers, pushTasks, deleteDoc, getCfg, saveCfg, showSetupModal, clearConfig };
+})();
 
 let clients = DB.load('clients', []);
 let notes = DB.load('notes', []);
@@ -301,9 +474,9 @@ let workersList = DB.load('workersList', []);
 // Seed default workers if list is empty
 if(workersList.length === 0) { workersList = [...DEFAULT_WORKERS]; DB.save('workersList', workersList); }
 else { DEFAULT_WORKERS.forEach(w=>{ if(!workersList.includes(w)) { workersList.push(w); DB.save('workersList', workersList); } }); }
-function saveWorkersList() { DB.save('workersList', workersList); }
+function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWorkers(); }
 let referrals = DB.load('referrals', []);
-function saveReferrals() { DB.save('referrals', referrals); }
+function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let currentClientId = null;
 let activeTimer = null;
@@ -361,6 +534,7 @@ function saveAll() {
   DB.save('clients', clients);
   DB.save('notes', notes);
   DB.save('timelogs', timeLogs);
+  FSYNC.pushAll();
 }
 
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2); }
@@ -5460,13 +5634,31 @@ function renderSettings() {
       <button class="btn btn-danger" onclick="clearData()">🗑️ Clear All Data</button>
     </div>
   </div>
+  <!-- CLOUD SYNC CARD -->
+  <div class="card" style="border-left:4px solid ${FSYNC.isReady()?'#16a34a':'#d97706'}">
+    <div class="card-header">
+      <div class="card-title">☁️ Cloud Sync ${FSYNC.isReady()?'<span style="font-size:12px;background:#d1fae5;color:#065f46;padding:2px 10px;border-radius:12px;font-weight:700">● Connected</span>':'<span style="font-size:12px;background:#fef3c7;color:#92400e;padding:2px 10px;border-radius:12px;font-weight:700">○ Not connected</span>'}</div>
+      <button class="btn btn-primary btn-sm" onclick="FSYNC.showSetupModal()">⚙️ ${FSYNC.getCfg()?.apiKey?'Edit Config':'Set Up Sync'}</button>
+    </div>
+    ${FSYNC.isReady()?`
+      <p style="font-size:13px;color:var(--muted);margin-bottom:8px">Real-time sync is active. All changes are saved to the cloud instantly and shared across all devices.</p>
+      <div style="background:#f0f7f3;border-radius:8px;padding:12px;font-size:13px">
+        <strong>Team ID:</strong> <code style="background:#e0f0e8;padding:2px 8px;border-radius:4px">${FSYNC.getCfg()?.teamId||'worngundidj'}</code>
+        &nbsp;— share this with Jon, Jade &amp; Brett so they connect to the same data.
+      </div>
+    `:`
+      <p style="font-size:13px;color:var(--muted)">Set up Firebase to sync data across all devices and let Jon, Jade &amp; Brett access the same client records in real time. Free — takes ~5 minutes.</p>
+      <button class="btn btn-accent" style="margin-top:8px" onclick="FSYNC.showSetupModal()">☁️ Set Up Cloud Sync</button>
+    `}
+  </div>
+
   <div class="card">
     <div class="card-title" style="margin-bottom:12px">ℹ️ About</div>
     <p style="font-size:13px;line-height:1.8;color:var(--muted)">
       <strong>SEWB AOD Justice Client Management System</strong><br>
       Built for Aboriginal and Torres Strait Islander health and wellbeing services.<br>
       Supports best-practice holistic care across SEWB, AOD, Justice, and Cultural Strengthening programs.<br><br>
-      Data is stored locally in your browser and is not transmitted anywhere.
+      Data is stored locally in your browser. Enable Cloud Sync above to share across devices.
     </p>
   </div>`;
 }
@@ -5779,6 +5971,7 @@ function initApp() {
     <button onclick="logout()" style="background:none;border:none;color:rgba(255,255,255,0.5);cursor:pointer;font-size:11px;flex-shrink:0" title="Sign out">⏻</button>`;
   sidebar?.appendChild(badge);
 
+  FSYNC.init(); // non-blocking — loads cloud data and starts listeners
   showPage('dashboard');
 }
 
