@@ -261,6 +261,9 @@
     <div class="nav-item" onclick="showPage('reports')">
       <span class="icon">📊</span><span>Reports</span>
     </div>
+    <div class="nav-item" onclick="showPage('auditlog')">
+      <span class="icon">🔍</span><span>Audit Log</span>
+    </div>
     <div class="nav-item" onclick="showPage('settings')">
       <span class="icon">⚙️</span><span>Settings</span>
     </div>
@@ -287,12 +290,186 @@
 <!-- MODAL CONTAINER -->
 <div id="modal-container"></div>
 
+<!-- Firebase SDK (compat build — loads before app script) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script>
 // ===== DATA LAYER =====
 const DB = {
   load(k, def) { try { return JSON.parse(localStorage.getItem('sewb_cms_'+k)) ?? def; } catch { return def; } },
   save(k, v) { localStorage.setItem('sewb_cms_'+k, JSON.stringify(v)); }
 };
+
+// ===== FIREBASE CLOUD SYNC =====
+const FSYNC = (() => {
+  let db = null, teamId = null, _listeners = [];
+
+  function getCfg()     { try { return JSON.parse(localStorage.getItem('fb_cfg')||'null'); } catch { return null; } }
+  function saveCfg(c)   { localStorage.setItem('fb_cfg', JSON.stringify(c)); }
+  function isReady()    { return !!db; }
+
+  function col(name) { return db.collection('teams').doc(teamId).collection(name); }
+
+  async function init() {
+    const cfg = getCfg();
+    if (!cfg?.apiKey) return false;
+    try {
+      if (!window.firebase) return false;
+      if (!firebase.apps.length) firebase.initializeApp(cfg);
+      db = firebase.firestore();
+      teamId = cfg.teamId || 'wg_default';
+      await firebase.auth().signInAnonymously();
+      await _loadAll();
+      _startListeners();
+      _showSyncBadge(true);
+      return true;
+    } catch(e) {
+      console.warn('Firebase sync failed:', e.message);
+      _showSyncBadge(false, e.message);
+      return false;
+    }
+  }
+
+  async function _loadAll() {
+    const [cs,ns,ts,rs,ws,wks] = await Promise.all([
+      col('clients').get(), col('notes').get(), col('timelogs').get(),
+      col('referrals').get(), col('workersList').get(), col('workflowTasks').get(),
+    ]);
+    if (!cs.empty) { clients = cs.docs.map(d=>d.data()); DB.save('clients', clients); }
+    if (!ns.empty) { notes   = ns.docs.map(d=>d.data()); DB.save('notes', notes); }
+    if (!ts.empty) { timeLogs = ts.docs.map(d=>d.data()); DB.save('timelogs', timeLogs); }
+    if (!rs.empty) { referrals = rs.docs.map(d=>d.data()); DB.save('referrals', referrals); }
+    if (!ws.empty) { const w=ws.docs[0]?.data()?.list; if(w){workersList=w;DB.save('workersList',workersList);} }
+    if (!wks.empty) { const t=wks.docs[0]?.data()?.list; if(t){workflowTasks=t;DB.save('workflowTasks',workflowTasks);} }
+  }
+
+  function _startListeners() {
+    _listeners.forEach(u=>u()); _listeners=[];
+    const refresh = () => {
+      if (['clients','dashboard','sewb','aod','justice','cultural','disability','reports','sessions'].includes(currentPage))
+        setTimeout(()=>showPage(currentPage), 50);
+    };
+    _listeners.push(col('clients').onSnapshot(snap=>{
+      if (snap.metadata.hasPendingWrites) return;
+      clients = snap.docs.map(d=>d.data()); DB.save('clients',clients); refresh();
+    }));
+    _listeners.push(col('notes').onSnapshot(snap=>{
+      if (snap.metadata.hasPendingWrites) return;
+      notes = snap.docs.map(d=>d.data()); DB.save('notes',notes);
+    }));
+    _listeners.push(col('timelogs').onSnapshot(snap=>{
+      if (snap.metadata.hasPendingWrites) return;
+      timeLogs = snap.docs.map(d=>d.data()); DB.save('timelogs',timeLogs);
+    }));
+    _listeners.push(col('referrals').onSnapshot(snap=>{
+      if (snap.metadata.hasPendingWrites) return;
+      referrals = snap.docs.map(d=>d.data()); DB.save('referrals',referrals);
+      if (currentPage==='referrals') setTimeout(()=>showPage('referrals'),50);
+    }));
+  }
+
+  async function _batch(colName, items, idFn) {
+    if (!db || !items.length) return;
+    // Firestore batch limit = 500 writes
+    for (let i=0; i<items.length; i+=400) {
+      const batch = db.batch();
+      items.slice(i,i+400).forEach(item => batch.set(col(colName).doc(idFn(item)), item));
+      await batch.commit().catch(e=>console.warn('Sync write error:', e.message));
+    }
+  }
+
+  async function pushAll() {
+    if (!db) return;
+    await Promise.all([
+      _batch('clients',  clients,  c=>c.id),
+      _batch('notes',    notes,    n=>n.id),
+      _batch('timelogs', timeLogs, t=>t.id||t.date+'-'+t.clientId),
+    ]);
+  }
+  async function pushClients()  { await _batch('clients',  clients,  c=>c.id); }
+  async function pushNotes()    { await _batch('notes',    notes,    n=>n.id); }
+  async function pushReferrals(){ await _batch('referrals',referrals,r=>r.id||uid()); }
+  async function pushWorkers()  { if(db) col('workersList').doc('list').set({list:workersList}).catch(()=>{}); }
+  async function pushTasks()    { if(db) col('workflowTasks').doc('list').set({list:workflowTasks}).catch(()=>{}); }
+  async function pushAudit()    { await _batch('auditlog', auditLog, a=>a.id); }
+
+  async function deleteDoc(colName, id) {
+    if (db && id) col(colName).doc(id).delete().catch(()=>{});
+  }
+
+  function _showSyncBadge(ok, err) {
+    let badge = document.getElementById('sync-badge');
+    if (!badge) {
+      badge = document.createElement('div');
+      badge.id = 'sync-badge';
+      badge.style.cssText = 'position:fixed;bottom:16px;right:16px;padding:6px 14px;border-radius:20px;font-size:12px;font-weight:700;z-index:9999;box-shadow:0 2px 8px rgba(0,0,0,0.15);cursor:default;transition:opacity 0.5s';
+      document.body.appendChild(badge);
+    }
+    if (ok) {
+      badge.style.background='#d1fae5'; badge.style.color='#065f46';
+      badge.textContent='☁️ Cloud sync active';
+      setTimeout(()=>{badge.style.opacity='0';setTimeout(()=>badge.remove(),600);},3000);
+    } else {
+      badge.style.background='#fee2e2'; badge.style.color='#991b1b';
+      badge.title = err||'';
+      badge.textContent='☁️ Sync offline';
+    }
+  }
+
+  function showSetupModal() {
+    const cfg = getCfg()||{};
+    showModal('☁️ Firebase Cloud Sync Setup', `
+      <div class="alert alert-info" style="margin-bottom:16px">
+        <div><strong>Enable real-time sync so Jon, Jade &amp; Brett can all access the same data from any device.</strong><br>
+        Takes ~5 minutes. Uses Google Firebase (free tier — no credit card needed).</div>
+      </div>
+      <div style="background:#f9fafb;border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:16px;font-size:13px;line-height:1.8">
+        <strong>Steps to get your Firebase config:</strong><br>
+        1. Go to <strong>console.firebase.google.com</strong> → Create a project (e.g. "WornGundidj")<br>
+        2. In the project: click <strong>⚙️ Project Settings</strong> → scroll to <em>Your apps</em> → click <strong>&lt;/&gt; Web</strong><br>
+        3. Register the app → copy the <strong>firebaseConfig</strong> object<br>
+        4. Back in Project Settings → click <strong>Firestore Database</strong> → Create database → Start in <strong>test mode</strong><br>
+        5. Also enable <strong>Authentication → Anonymous</strong> sign-in<br>
+        6. Paste your config values below and click Save.
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="form-group"><label>API Key *</label><input id="fb-apiKey" value="${cfg.apiKey||''}" placeholder="AIzaSy…"></div>
+        <div class="form-group"><label>Auth Domain *</label><input id="fb-authDomain" value="${cfg.authDomain||''}" placeholder="yourapp.firebaseapp.com"></div>
+        <div class="form-group"><label>Project ID *</label><input id="fb-projectId" value="${cfg.projectId||''}" placeholder="your-project-id"></div>
+        <div class="form-group"><label>Storage Bucket</label><input id="fb-storageBucket" value="${cfg.storageBucket||''}" placeholder="yourapp.appspot.com"></div>
+        <div class="form-group"><label>Messaging Sender ID</label><input id="fb-messagingSenderId" value="${cfg.messagingSenderId||''}"></div>
+        <div class="form-group"><label>App ID</label><input id="fb-appId" value="${cfg.appId||''}"></div>
+      </div>
+      <div class="form-group"><label>Team ID (shared across all staff — any short word)</label><input id="fb-teamId" value="${cfg.teamId||'worngundidj'}" placeholder="worngundidj"></div>
+      ${cfg.apiKey?`<div style="display:flex;gap:10px;margin-top:4px"><button class="btn btn-sm btn-danger" onclick="FSYNC.clearConfig();closeModal()">🗑️ Disconnect Sync</button></div>`:''}
+    `, () => {
+      const g = id => document.getElementById(id)?.value?.trim()||'';
+      const apiKey = g('fb-apiKey');
+      if (!apiKey) { alert('API Key is required'); return false; }
+      const cfg = {
+        apiKey, authDomain: g('fb-authDomain'), projectId: g('fb-projectId'),
+        storageBucket: g('fb-storageBucket'), messagingSenderId: g('fb-messagingSenderId'),
+        appId: g('fb-appId'), teamId: g('fb-teamId')||'worngundidj',
+      };
+      saveCfg(cfg);
+      showToast('Config saved — connecting…');
+      FSYNC.init().then(ok => {
+        if (ok) { showToast('☁️ Cloud sync connected! Share your Team ID with your colleagues.'); showPage('settings'); }
+        else showToast('⚠️ Could not connect — check your config and try again.');
+      });
+      return true;
+    });
+  }
+
+  function clearConfig() {
+    localStorage.removeItem('fb_cfg');
+    db = null; _listeners.forEach(u=>u()); _listeners=[];
+    showToast('Cloud sync disconnected');
+  }
+
+  return { init, isReady, pushAll, pushClients, pushNotes, pushReferrals, pushWorkers, pushTasks, pushAudit, deleteDoc, getCfg, saveCfg, showSetupModal, clearConfig };
+})();
 
 let clients = DB.load('clients', []);
 let notes = DB.load('notes', []);
@@ -301,10 +478,35 @@ let workersList = DB.load('workersList', []);
 // Seed default workers if list is empty
 if(workersList.length === 0) { workersList = [...DEFAULT_WORKERS]; DB.save('workersList', workersList); }
 else { DEFAULT_WORKERS.forEach(w=>{ if(!workersList.includes(w)) { workersList.push(w); DB.save('workersList', workersList); } }); }
-function saveWorkersList() { DB.save('workersList', workersList); }
+function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWorkers(); }
 let referrals = DB.load('referrals', []);
-function saveReferrals() { DB.save('referrals', referrals); }
+function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
+
+// ===== AUDIT LOG =====
+let auditLog = DB.load('auditlog', []);
+function saveAuditLog() {
+  // Keep last 2000 entries
+  if (auditLog.length > 2000) auditLog = auditLog.slice(-2000);
+  DB.save('auditlog', auditLog);
+  if (FSYNC.isReady()) FSYNC.pushAudit();
+}
+
+function audit(action, detail, clientId) {
+  const entry = {
+    id: uid(),
+    ts: now(),
+    worker: currentUser?.name || 'Unknown',
+    role: currentUser?.role || '',
+    action,
+    detail: detail || '',
+    clientId: clientId || '',
+    clientName: clientId ? (clients.find(c=>c.id===clientId)?.fullName || '') : '',
+    page: currentPage || '',
+  };
+  auditLog.push(entry);
+  saveAuditLog();
+}
 let currentClientId = null;
 let activeTimer = null;
 
@@ -361,6 +563,7 @@ function saveAll() {
   DB.save('clients', clients);
   DB.save('notes', notes);
   DB.save('timelogs', timeLogs);
+  FSYNC.pushAll();
 }
 
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2); }
@@ -383,9 +586,10 @@ function showPage(page) {
   currentPage = page;
   document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
   const items = document.querySelectorAll('.nav-item');
-  const titles = { dashboard:'Dashboard', referrals:'Referral Holding Bay', clients:'Clients', sessions:'Session Log', walkins:'Walk-in Register', sewb:'SEWB Program', aod:'AOD Program', justice:'Justice Program', cultural:'Cultural Strengthening', disability:'Disability Program', reports:'Reports', calendar:'Calendar', settings:'Settings' };
+  const titles = { dashboard:'Dashboard', referrals:'Referral Holding Bay', clients:'Clients', sessions:'Session Log', walkins:'Walk-in Register', sewb:'SEWB Program', aod:'AOD Program', justice:'Justice Program', cultural:'Cultural Strengthening', disability:'Disability Program', reports:'Reports', calendar:'Calendar', auditlog:'Audit Log', settings:'Settings' };
   document.getElementById('page-title').textContent = titles[page] || page;
   items.forEach(el => { if(el.getAttribute('onclick')?.includes(`'${page}'`)) el.classList.add('active'); });
+  if (page !== 'auditlog' && page !== currentPage) audit('Page view', titles[page] || page);
 
   const search = document.getElementById('global-search-wrap');
   const btn = document.getElementById('top-action-btn');
@@ -419,7 +623,7 @@ function showPage(page) {
     btn.onclick = openNewClientModal;
   }
 
-  const pages = { dashboard: renderDashboard, referrals: renderReferrals, clients: renderClients, sessions: renderSessions, walkins: renderWalkins, sewb: renderSEWB, aod: renderAOD, justice: renderJustice, cultural: renderCultural, disability: renderDisability, reports: renderReportsPage, calendar: renderCalendarPage, settings: renderSettings };
+  const pages = { dashboard: renderDashboard, referrals: renderReferrals, clients: renderClients, sessions: renderSessions, walkins: renderWalkins, sewb: renderSEWB, aod: renderAOD, justice: renderJustice, cultural: renderCultural, disability: renderDisability, reports: renderReportsPage, calendar: renderCalendarPage, auditlog: renderAuditLog, settings: renderSettings };
   const fn = pages[page];
   document.getElementById('content').innerHTML = fn ? fn() : '<p>Coming soon</p>';
   attachPageEvents(page);
@@ -544,6 +748,7 @@ function filterClients() { document.getElementById('content').innerHTML = render
 function openClientProfile(id) {
   const c = clients.find(cl=>cl.id===id);
   if(!c) return;
+  audit('Viewed client', c.fullName, id);
   currentClientId = id;
   const clientNotes = notes.filter(n=>n.clientId===id).sort((a,b)=>b.created?.localeCompare(a.created));
   const clientTime = timeLogs.filter(t=>t.clientId===id);
@@ -1628,7 +1833,9 @@ function saveWF(id) {
   caItems.forEach(k=>{ wf[k]=r('wf-'+k); });
   ['wfConsentPrograms','wfConsentAudit','wfConsentDatabase','wfConsentExternal','wfConsentPack'].forEach(k=>{ wf[k]=gb(k); });
   wf.coordinator = getWorkerValue('wf-coordinator','wf-coordinator-new');
-  c.wf = wf; saveAll(); showToast('Work Foundations saved ✓');
+  c.wf = wf;
+  audit('Updated Work Foundations', c.fullName, id);
+  saveAll(); showToast('Work Foundations saved ✓');
 }
 
 // ===== SAVE FEEDBACK =====
@@ -1657,7 +1864,9 @@ function saveFeedback(id) {
   // Archive current feedback to history if it has a date
   if(!c.feedbackHistory) c.feedbackHistory=[];
   if(c.feedback?.date) c.feedbackHistory.push(c.feedback);
-  c.feedback = fb; saveAll(); showToast('Feedback saved and recorded ✓');
+  c.feedback = fb;
+  audit('Saved feedback form', c.fullName, id);
+  saveAll(); showToast('Feedback saved and recorded ✓');
 }
 
 function loadFeedbackHistory(id, idx) {
@@ -1902,6 +2111,7 @@ function saveIntake(id) {
   c.ifServices = {};
   svcKeys.forEach(k => { c.ifServices[k] = document.getElementById(`if-svc-${k}`)?.checked||false; });
 
+  audit('Saved intake form', clients.find(cl=>cl.id===id)?.fullName||'', id);
   saveAll(); showToast('Intake form saved ✓');
 }
 
@@ -2096,6 +2306,7 @@ function saveAOD(id) {
   c.aodTriggers = document.getElementById('aod-triggers')?.value||'';
   c.aodHarm = document.getElementById('aod-harm')?.value||'';
   c.aodRelapse = document.getElementById('aod-relapse')?.value||'';
+  audit('Updated AOD assessment', clients.find(cl=>cl.id===id)?.fullName||'', id);
   saveAll(); showToast('AOD details saved');
 }
 function saveJustice(id) {
@@ -2110,6 +2321,7 @@ function saveJustice(id) {
   c.jusHistory = document.getElementById('jus-history')?.value||'';
   c.jusGoals = document.getElementById('jus-goals')?.value||'';
   c.jusBarriers = document.getElementById('jus-barriers')?.value||'';
+  audit('Updated Justice assessment', clients.find(cl=>cl.id===id)?.fullName||'', id);
   saveAll(); showToast('Justice details saved');
 }
 function saveCultural(id) {
@@ -2124,6 +2336,7 @@ function saveCultural(id) {
   c.cultActivities = document.getElementById('cult-activities')?.value||'';
   c.cultElders = document.getElementById('cult-elders')?.value||'';
   c.cultSafety = document.getElementById('cult-safety')?.value||'';
+  audit('Updated Cultural assessment', clients.find(cl=>cl.id===id)?.fullName||'', id);
   saveAll(); showToast('Cultural details saved');
 }
 function saveSafety(id) {
@@ -2151,6 +2364,7 @@ function openNewClientModal() {
     if(!c.fullName) { alert('Full name is required'); return false; }
     c.id = uid(); c.created = now(); c.status = 'active';
     clients.push(c); saveAll();
+    audit('Created client', c.fullName, c.id);
     showToast('Client created'); return true;
   });
 }
@@ -2161,6 +2375,7 @@ function openEditClientModal(id) {
   showModal('✏️ Edit Client', html, () => {
     const updated = collectClientForm();
     Object.assign(c, updated); saveAll();
+    audit('Edited client', c.fullName, c.id);
     showToast('Client updated'); return true;
   });
 }
@@ -2361,6 +2576,7 @@ function openNoteModal(clientId, defaultType) {
       });
       saveCalEvents();
     }
+    audit('Added note', `${(n.type||'general').toUpperCase()} note — ${n.contactType||''}`, n.clientId);
     saveAll(); showToast('Note saved' + (document.getElementById('nm-addtocal')?.checked?' + added to calendar':'')); return true;
   });
 }
@@ -4707,6 +4923,7 @@ function openReferralModal(id) {
     };
     if(isEdit) { Object.assign(r, data); }
     else { referrals.push({ ...data, id:uid(), created:today(), status:'new', actions:[] }); }
+    audit(isEdit?'Updated referral':'Created referral', data.name||'');
     saveReferrals(); showToast(isEdit?'Referral updated':'Referral added'); return true;
   }, '820px');
 }
@@ -5053,6 +5270,7 @@ function openSessionModal(clientId, defaultType) {
       saveReminders();
     }
 
+    audit('Logged session', `${(n.type||'general').toUpperCase()} — ${n.contactType||''} ${mins>0?'('+mins+' min)':''}`, clientId);
     saveAll(); showToast(`Session logged${mins>0?' + '+mins+' min time':''}`); return true;
   }, '720px');
 }
@@ -5166,6 +5384,7 @@ function openWalkinModal() {
         created:w.date+'T'+(w.time||'00:00')+':00', worker:w.worker, text:`Walk-in: ${w.reason}\n${w.notes}` });
       saveAll();
     }
+    audit('Logged walk-in', w.name||'Unknown');
     showToast('Walk-in logged'); return true;
   });
 }
@@ -5180,6 +5399,7 @@ function convertWalkin(id) {
     justice:w.programs?.includes('Justice'), cultural:w.programs?.includes('Cultural'),
     disability:w.programs?.includes('Disability'), clientId:'WI-'+id.slice(-6).toUpperCase() };
   clients.push(nc); w.converted=true; w.convertedClientId=nc.id;
+  audit('Converted walk-in to client', nc.fullName, nc.id);
   saveAll(); saveWalkins(); showToast('Client record created');
   openClientProfile(nc.id);
 }
@@ -5191,8 +5411,10 @@ function logSessionFromWalkin(id) {
 }
 
 function deleteWalkin(id) {
+  const w=walkins.find(wi=>wi.id===id);
   if(!confirm('Delete this walk-in record?')) return;
-  walkins=walkins.filter(w=>w.id!==id); saveWalkins(); showPage('walkins');
+  audit('Deleted walk-in', w?.name||id);
+  walkins=walkins.filter(wi=>wi.id!==id); saveWalkins(); showPage('walkins');
 }
 
 // ============================================================
@@ -5388,6 +5610,170 @@ function workerSelectHTML(selectId, inputId, selectedVal) {
   </div>`;
 }
 
+// ===== AUDIT LOG PAGE =====
+function renderAuditLog() {
+  const isAdmin = currentUser?.role === 'admin';
+  const log = [...auditLog].reverse(); // newest first
+
+  // Filter state
+  const fWorker = document.getElementById('al-filter-worker')?.value || '';
+  const fAction = document.getElementById('al-filter-action')?.value || '';
+  const fFrom   = document.getElementById('al-filter-from')?.value || '';
+  const fTo     = document.getElementById('al-filter-to')?.value || '';
+  const fSearch = document.getElementById('al-filter-search')?.value?.toLowerCase() || '';
+
+  const filtered = log.filter(e => {
+    if (fWorker && e.worker !== fWorker) return false;
+    if (fAction && !e.action.toLowerCase().includes(fAction.toLowerCase())) return false;
+    if (fFrom && e.ts < fFrom) return false;
+    if (fTo   && e.ts > fTo + 'T23:59:59') return false;
+    if (fSearch && ![e.worker,e.action,e.detail,e.clientName,e.page].join(' ').toLowerCase().includes(fSearch)) return false;
+    return true;
+  });
+
+  const workers = [...new Set(auditLog.map(e=>e.worker).filter(Boolean))].sort();
+  const actions = [...new Set(auditLog.map(e=>e.action).filter(Boolean))].sort();
+
+  const actionColour = a => {
+    if (!a) return '#6b7280';
+    if (a.includes('Deleted') || a.includes('Cleared') || a.includes('Removed')) return '#dc2626';
+    if (a.includes('Created') || a.includes('Added') || a.includes('Converted') || a.includes('Imported')) return '#16a34a';
+    if (a.includes('Edited') || a.includes('Updated') || a.includes('Saved')) return '#d97706';
+    if (a.includes('Viewed') || a.includes('Page') || a.includes('Exported')) return '#0369a1';
+    if (a.includes('Logged')) return '#7c3aed';
+    return '#6b7280';
+  };
+
+  return `
+  <style>
+    .al-row { display:grid; grid-template-columns:140px 120px 160px 1fr 1fr; gap:0; border-bottom:1px solid var(--border); font-size:12px; }
+    .al-row:hover { background:rgba(45,106,79,0.03); }
+    .al-cell { padding:10px 12px; display:flex; align-items:center; }
+    @media(max-width:900px){ .al-row{grid-template-columns:1fr 1fr;} .al-cell:nth-child(n+3){display:none;} }
+  </style>
+
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-header">
+      <div class="card-title">🔍 Audit Log <span style="font-size:12px;font-weight:400;color:var(--muted)">${auditLog.length} total entries</span></div>
+      <div style="display:flex;gap:8px">
+        ${isAdmin ? `<button class="btn btn-sm btn-danger" onclick="clearAuditLog()">🗑️ Clear Log</button>` : ''}
+        <button class="btn btn-sm btn-outline" onclick="exportAuditLog()">📤 Export CSV</button>
+      </div>
+    </div>
+
+    <!-- FILTERS -->
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">
+      <div class="search-bar" style="flex:1;min-width:180px">
+        <span class="search-icon">🔍</span>
+        <input id="al-filter-search" placeholder="Search…" value="${fSearch}" oninput="showPage('auditlog')" style="width:100%;padding-left:32px">
+      </div>
+      <select id="al-filter-worker" onchange="showPage('auditlog')" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;min-width:150px">
+        <option value="">All workers</option>
+        ${workers.map(w=>`<option value="${w}" ${fWorker===w?'selected':''}>${w}</option>`).join('')}
+      </select>
+      <select id="al-filter-action" onchange="showPage('auditlog')" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;min-width:150px">
+        <option value="">All actions</option>
+        ${actions.map(a=>`<option value="${a}" ${fAction===a?'selected':''}>${a}</option>`).join('')}
+      </select>
+      <input type="date" id="al-filter-from" value="${fFrom}" onchange="showPage('auditlog')" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px" title="From date">
+      <input type="date" id="al-filter-to" value="${fTo}" onchange="showPage('auditlog')" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px" title="To date">
+      ${(fWorker||fAction||fFrom||fTo||fSearch)?`<button class="btn btn-sm btn-outline" onclick="clearAuditFilters()">✕ Clear filters</button>`:''}
+    </div>
+
+    <div style="font-size:12px;color:var(--muted);margin-bottom:8px">Showing ${filtered.length} of ${auditLog.length} entries</div>
+
+    <!-- TABLE HEADER -->
+    <div class="al-row" style="background:var(--bg);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:var(--muted)">
+      <div class="al-cell">Date / Time</div>
+      <div class="al-cell">Worker</div>
+      <div class="al-cell">Action</div>
+      <div class="al-cell">Detail</div>
+      <div class="al-cell">Client</div>
+    </div>
+
+    <!-- ROWS -->
+    <div style="max-height:600px;overflow-y:auto">
+      ${filtered.length === 0
+        ? `<div class="empty-state"><div class="icon">🔍</div><p>No log entries match your filters</p></div>`
+        : filtered.slice(0, 500).map(e => `
+          <div class="al-row">
+            <div class="al-cell" style="color:var(--muted);white-space:nowrap">${fmtdt(e.ts)}</div>
+            <div class="al-cell">
+              <div style="display:flex;align-items:center;gap:6px">
+                <div style="width:26px;height:26px;border-radius:50%;background:var(--primary-light);color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">${initials(e.worker||'?')}</div>
+                <span style="font-weight:600;font-size:12px">${e.worker||'—'}</span>
+              </div>
+            </div>
+            <div class="al-cell">
+              <span style="display:inline-flex;align-items:center;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;background:${actionColour(e.action)}18;color:${actionColour(e.action)}">${e.action||'—'}</span>
+            </div>
+            <div class="al-cell" style="color:var(--text)">${e.detail||'—'}</div>
+            <div class="al-cell">
+              ${e.clientId
+                ? `<button class="btn-ghost" style="font-size:12px;padding:2px 6px" onclick="openClientProfile('${e.clientId}')">${e.clientName||e.clientId}</button>`
+                : `<span style="color:var(--muted)">—</span>`}
+            </div>
+          </div>`).join('')
+      }
+      ${filtered.length > 500 ? `<div style="padding:12px;text-align:center;color:var(--muted);font-size:12px">Showing first 500 results — use filters to narrow down</div>` : ''}
+    </div>
+  </div>
+
+  <!-- SUMMARY STATS -->
+  <div class="grid-3" style="margin-bottom:16px">
+    <div class="stat-card">
+      <div class="label">Total Actions Today</div>
+      <div class="value" style="color:var(--primary-light)">${auditLog.filter(e=>e.ts?.startsWith(today())).length}</div>
+      <div class="sub">across all workers</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Most Active Worker</div>
+      <div class="value" style="font-size:18px;color:var(--accent)">
+        ${(() => {
+          const counts = {};
+          auditLog.forEach(e=>{ if(e.worker) counts[e.worker]=(counts[e.worker]||0)+1; });
+          const top = Object.entries(counts).sort((a,b)=>b[1]-a[1])[0];
+          return top ? top[0].split(' ')[0] : '—';
+        })()}
+      </div>
+      <div class="sub">by total actions</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Client Records Viewed</div>
+      <div class="value" style="color:var(--info)">${auditLog.filter(e=>e.action==='Viewed client').length}</div>
+      <div class="sub">all time</div>
+    </div>
+  </div>`;
+}
+
+function clearAuditFilters() {
+  ['al-filter-search','al-filter-worker','al-filter-action','al-filter-from','al-filter-to'].forEach(id=>{
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  showPage('auditlog');
+}
+
+function clearAuditLog() {
+  if (!confirm('Clear the entire audit log? This cannot be undone.')) return;
+  audit('Cleared audit log', `Removed ${auditLog.length} entries`);
+  auditLog = auditLog.slice(-1); // keep the clear-log entry itself
+  saveAuditLog();
+  showPage('auditlog');
+}
+
+function exportAuditLog() {
+  const rows = [['Date/Time','Worker','Role','Action','Detail','Client','Page']];
+  [...auditLog].reverse().forEach(e => rows.push([
+    e.ts, e.worker, e.role, e.action, e.detail, e.clientName, e.page
+  ]));
+  const csv = rows.map(r => r.map(v => `"${(v||'').toString().replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob = new Blob([csv], {type:'text/csv'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = `audit-log-${today()}.csv`; a.click();
+  audit('Exported audit log', `${auditLog.length} entries`);
+}
+
 function renderSettings() {
   const isAdmin = currentUser?.role==='admin';
   return `
@@ -5460,13 +5846,31 @@ function renderSettings() {
       <button class="btn btn-danger" onclick="clearData()">🗑️ Clear All Data</button>
     </div>
   </div>
+  <!-- CLOUD SYNC CARD -->
+  <div class="card" style="border-left:4px solid ${FSYNC.isReady()?'#16a34a':'#d97706'}">
+    <div class="card-header">
+      <div class="card-title">☁️ Cloud Sync ${FSYNC.isReady()?'<span style="font-size:12px;background:#d1fae5;color:#065f46;padding:2px 10px;border-radius:12px;font-weight:700">● Connected</span>':'<span style="font-size:12px;background:#fef3c7;color:#92400e;padding:2px 10px;border-radius:12px;font-weight:700">○ Not connected</span>'}</div>
+      <button class="btn btn-primary btn-sm" onclick="FSYNC.showSetupModal()">⚙️ ${FSYNC.getCfg()?.apiKey?'Edit Config':'Set Up Sync'}</button>
+    </div>
+    ${FSYNC.isReady()?`
+      <p style="font-size:13px;color:var(--muted);margin-bottom:8px">Real-time sync is active. All changes are saved to the cloud instantly and shared across all devices.</p>
+      <div style="background:#f0f7f3;border-radius:8px;padding:12px;font-size:13px">
+        <strong>Team ID:</strong> <code style="background:#e0f0e8;padding:2px 8px;border-radius:4px">${FSYNC.getCfg()?.teamId||'worngundidj'}</code>
+        &nbsp;— share this with Jon, Jade &amp; Brett so they connect to the same data.
+      </div>
+    `:`
+      <p style="font-size:13px;color:var(--muted)">Set up Firebase to sync data across all devices and let Jon, Jade &amp; Brett access the same client records in real time. Free — takes ~5 minutes.</p>
+      <button class="btn btn-accent" style="margin-top:8px" onclick="FSYNC.showSetupModal()">☁️ Set Up Cloud Sync</button>
+    `}
+  </div>
+
   <div class="card">
     <div class="card-title" style="margin-bottom:12px">ℹ️ About</div>
     <p style="font-size:13px;line-height:1.8;color:var(--muted)">
       <strong>SEWB AOD Justice Client Management System</strong><br>
       Built for Aboriginal and Torres Strait Islander health and wellbeing services.<br>
       Supports best-practice holistic care across SEWB, AOD, Justice, and Cultural Strengthening programs.<br><br>
-      Data is stored locally in your browser and is not transmitted anywhere.
+      Data is stored locally in your browser. Enable Cloud Sync above to share across devices.
     </p>
   </div>`;
 }
@@ -5512,7 +5916,9 @@ function openEditUserModal(idx) {
 }
 
 function removeUser(idx) {
-  if(!confirm(`Remove ${userProfiles[idx]?.name}?`)) return;
+  const u = userProfiles[idx];
+  if(!confirm(`Remove ${u?.name}?`)) return;
+  audit('Removed user account', u?.name||'');
   userProfiles.splice(idx,1); saveUserProfiles(); showPage('settings');
 }
 
@@ -5579,6 +5985,7 @@ function removeWorkerName(idx) {
 }
 
 function exportData() {
+  audit('Exported data', `${clients.length} clients, ${notes.length} notes`);
   const data = { clients, notes, timeLogs, exportDate: now() };
   const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
@@ -5594,6 +6001,7 @@ function importData(e) {
       if(data.clients) clients = data.clients;
       if(data.notes) notes = data.notes;
       if(data.timeLogs) timeLogs = data.timeLogs;
+      audit('Imported data', `${clients.length} clients from file`);
       saveAll(); showToast('Data imported'); showPage('dashboard');
     } catch { alert('Invalid file'); }
   };
@@ -5603,6 +6011,7 @@ function importData(e) {
 function clearData() {
   if(!confirm('This will permanently delete ALL client data. Are you sure?')) return;
   if(!confirm('This cannot be undone. Delete everything?')) return;
+  audit('Cleared all data', `Deleted ${clients.length} clients, ${notes.length} notes`);
   clients=[]; notes=[]; timeLogs=[]; saveAll(); showToast('Data cleared'); showPage('dashboard');
 }
 
@@ -5779,6 +6188,7 @@ function initApp() {
     <button onclick="logout()" style="background:none;border:none;color:rgba(255,255,255,0.5);cursor:pointer;font-size:11px;flex-shrink:0" title="Sign out">⏻</button>`;
   sidebar?.appendChild(badge);
 
+  FSYNC.init(); // non-blocking — loads cloud data and starts listeners
   showPage('dashboard');
 }
 
