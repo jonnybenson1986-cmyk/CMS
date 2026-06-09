@@ -261,6 +261,9 @@
     <div class="nav-item" onclick="showPage('reports')">
       <span class="icon">📊</span><span>Reports</span>
     </div>
+    <div class="nav-item" onclick="showPage('auditlog')">
+      <span class="icon">🔍</span><span>Audit Log</span>
+    </div>
     <div class="nav-item" onclick="showPage('settings')">
       <span class="icon">⚙️</span><span>Settings</span>
     </div>
@@ -389,6 +392,7 @@ const FSYNC = (() => {
   async function pushReferrals(){ await _batch('referrals',referrals,r=>r.id||uid()); }
   async function pushWorkers()  { if(db) col('workersList').doc('list').set({list:workersList}).catch(()=>{}); }
   async function pushTasks()    { if(db) col('workflowTasks').doc('list').set({list:workflowTasks}).catch(()=>{}); }
+  async function pushAudit()    { await _batch('auditlog', auditLog, a=>a.id); }
 
   async function deleteDoc(colName, id) {
     if (db && id) col(colName).doc(id).delete().catch(()=>{});
@@ -464,7 +468,7 @@ const FSYNC = (() => {
     showToast('Cloud sync disconnected');
   }
 
-  return { init, isReady, pushAll, pushClients, pushNotes, pushReferrals, pushWorkers, pushTasks, deleteDoc, getCfg, saveCfg, showSetupModal, clearConfig };
+  return { init, isReady, pushAll, pushClients, pushNotes, pushReferrals, pushWorkers, pushTasks, pushAudit, deleteDoc, getCfg, saveCfg, showSetupModal, clearConfig };
 })();
 
 let clients = DB.load('clients', []);
@@ -478,6 +482,31 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
+
+// ===== AUDIT LOG =====
+let auditLog = DB.load('auditlog', []);
+function saveAuditLog() {
+  // Keep last 2000 entries
+  if (auditLog.length > 2000) auditLog = auditLog.slice(-2000);
+  DB.save('auditlog', auditLog);
+  if (FSYNC.isReady()) FSYNC.pushAudit();
+}
+
+function audit(action, detail, clientId) {
+  const entry = {
+    id: uid(),
+    ts: now(),
+    worker: currentUser?.name || 'Unknown',
+    role: currentUser?.role || '',
+    action,
+    detail: detail || '',
+    clientId: clientId || '',
+    clientName: clientId ? (clients.find(c=>c.id===clientId)?.fullName || '') : '',
+    page: currentPage || '',
+  };
+  auditLog.push(entry);
+  saveAuditLog();
+}
 let currentClientId = null;
 let activeTimer = null;
 
@@ -557,9 +586,10 @@ function showPage(page) {
   currentPage = page;
   document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
   const items = document.querySelectorAll('.nav-item');
-  const titles = { dashboard:'Dashboard', referrals:'Referral Holding Bay', clients:'Clients', sessions:'Session Log', walkins:'Walk-in Register', sewb:'SEWB Program', aod:'AOD Program', justice:'Justice Program', cultural:'Cultural Strengthening', disability:'Disability Program', reports:'Reports', calendar:'Calendar', settings:'Settings' };
+  const titles = { dashboard:'Dashboard', referrals:'Referral Holding Bay', clients:'Clients', sessions:'Session Log', walkins:'Walk-in Register', sewb:'SEWB Program', aod:'AOD Program', justice:'Justice Program', cultural:'Cultural Strengthening', disability:'Disability Program', reports:'Reports', calendar:'Calendar', auditlog:'Audit Log', settings:'Settings' };
   document.getElementById('page-title').textContent = titles[page] || page;
   items.forEach(el => { if(el.getAttribute('onclick')?.includes(`'${page}'`)) el.classList.add('active'); });
+  if (page !== 'auditlog' && page !== currentPage) audit('Page view', titles[page] || page);
 
   const search = document.getElementById('global-search-wrap');
   const btn = document.getElementById('top-action-btn');
@@ -593,7 +623,7 @@ function showPage(page) {
     btn.onclick = openNewClientModal;
   }
 
-  const pages = { dashboard: renderDashboard, referrals: renderReferrals, clients: renderClients, sessions: renderSessions, walkins: renderWalkins, sewb: renderSEWB, aod: renderAOD, justice: renderJustice, cultural: renderCultural, disability: renderDisability, reports: renderReportsPage, calendar: renderCalendarPage, settings: renderSettings };
+  const pages = { dashboard: renderDashboard, referrals: renderReferrals, clients: renderClients, sessions: renderSessions, walkins: renderWalkins, sewb: renderSEWB, aod: renderAOD, justice: renderJustice, cultural: renderCultural, disability: renderDisability, reports: renderReportsPage, calendar: renderCalendarPage, auditlog: renderAuditLog, settings: renderSettings };
   const fn = pages[page];
   document.getElementById('content').innerHTML = fn ? fn() : '<p>Coming soon</p>';
   attachPageEvents(page);
@@ -718,6 +748,7 @@ function filterClients() { document.getElementById('content').innerHTML = render
 function openClientProfile(id) {
   const c = clients.find(cl=>cl.id===id);
   if(!c) return;
+  audit('Viewed client', c.fullName, id);
   currentClientId = id;
   const clientNotes = notes.filter(n=>n.clientId===id).sort((a,b)=>b.created?.localeCompare(a.created));
   const clientTime = timeLogs.filter(t=>t.clientId===id);
@@ -1802,7 +1833,9 @@ function saveWF(id) {
   caItems.forEach(k=>{ wf[k]=r('wf-'+k); });
   ['wfConsentPrograms','wfConsentAudit','wfConsentDatabase','wfConsentExternal','wfConsentPack'].forEach(k=>{ wf[k]=gb(k); });
   wf.coordinator = getWorkerValue('wf-coordinator','wf-coordinator-new');
-  c.wf = wf; saveAll(); showToast('Work Foundations saved ✓');
+  c.wf = wf;
+  audit('Updated Work Foundations', c.fullName, id);
+  saveAll(); showToast('Work Foundations saved ✓');
 }
 
 // ===== SAVE FEEDBACK =====
@@ -1831,7 +1864,9 @@ function saveFeedback(id) {
   // Archive current feedback to history if it has a date
   if(!c.feedbackHistory) c.feedbackHistory=[];
   if(c.feedback?.date) c.feedbackHistory.push(c.feedback);
-  c.feedback = fb; saveAll(); showToast('Feedback saved and recorded ✓');
+  c.feedback = fb;
+  audit('Saved feedback form', c.fullName, id);
+  saveAll(); showToast('Feedback saved and recorded ✓');
 }
 
 function loadFeedbackHistory(id, idx) {
@@ -2076,6 +2111,7 @@ function saveIntake(id) {
   c.ifServices = {};
   svcKeys.forEach(k => { c.ifServices[k] = document.getElementById(`if-svc-${k}`)?.checked||false; });
 
+  audit('Saved intake form', clients.find(cl=>cl.id===id)?.fullName||'', id);
   saveAll(); showToast('Intake form saved ✓');
 }
 
@@ -2270,6 +2306,7 @@ function saveAOD(id) {
   c.aodTriggers = document.getElementById('aod-triggers')?.value||'';
   c.aodHarm = document.getElementById('aod-harm')?.value||'';
   c.aodRelapse = document.getElementById('aod-relapse')?.value||'';
+  audit('Updated AOD assessment', clients.find(cl=>cl.id===id)?.fullName||'', id);
   saveAll(); showToast('AOD details saved');
 }
 function saveJustice(id) {
@@ -2284,6 +2321,7 @@ function saveJustice(id) {
   c.jusHistory = document.getElementById('jus-history')?.value||'';
   c.jusGoals = document.getElementById('jus-goals')?.value||'';
   c.jusBarriers = document.getElementById('jus-barriers')?.value||'';
+  audit('Updated Justice assessment', clients.find(cl=>cl.id===id)?.fullName||'', id);
   saveAll(); showToast('Justice details saved');
 }
 function saveCultural(id) {
@@ -2298,6 +2336,7 @@ function saveCultural(id) {
   c.cultActivities = document.getElementById('cult-activities')?.value||'';
   c.cultElders = document.getElementById('cult-elders')?.value||'';
   c.cultSafety = document.getElementById('cult-safety')?.value||'';
+  audit('Updated Cultural assessment', clients.find(cl=>cl.id===id)?.fullName||'', id);
   saveAll(); showToast('Cultural details saved');
 }
 function saveSafety(id) {
@@ -2325,6 +2364,7 @@ function openNewClientModal() {
     if(!c.fullName) { alert('Full name is required'); return false; }
     c.id = uid(); c.created = now(); c.status = 'active';
     clients.push(c); saveAll();
+    audit('Created client', c.fullName, c.id);
     showToast('Client created'); return true;
   });
 }
@@ -2335,6 +2375,7 @@ function openEditClientModal(id) {
   showModal('✏️ Edit Client', html, () => {
     const updated = collectClientForm();
     Object.assign(c, updated); saveAll();
+    audit('Edited client', c.fullName, c.id);
     showToast('Client updated'); return true;
   });
 }
@@ -2535,6 +2576,7 @@ function openNoteModal(clientId, defaultType) {
       });
       saveCalEvents();
     }
+    audit('Added note', `${(n.type||'general').toUpperCase()} note — ${n.contactType||''}`, n.clientId);
     saveAll(); showToast('Note saved' + (document.getElementById('nm-addtocal')?.checked?' + added to calendar':'')); return true;
   });
 }
@@ -4881,6 +4923,7 @@ function openReferralModal(id) {
     };
     if(isEdit) { Object.assign(r, data); }
     else { referrals.push({ ...data, id:uid(), created:today(), status:'new', actions:[] }); }
+    audit(isEdit?'Updated referral':'Created referral', data.name||'');
     saveReferrals(); showToast(isEdit?'Referral updated':'Referral added'); return true;
   }, '820px');
 }
@@ -5227,6 +5270,7 @@ function openSessionModal(clientId, defaultType) {
       saveReminders();
     }
 
+    audit('Logged session', `${(n.type||'general').toUpperCase()} — ${n.contactType||''} ${mins>0?'('+mins+' min)':''}`, clientId);
     saveAll(); showToast(`Session logged${mins>0?' + '+mins+' min time':''}`); return true;
   }, '720px');
 }
@@ -5340,6 +5384,7 @@ function openWalkinModal() {
         created:w.date+'T'+(w.time||'00:00')+':00', worker:w.worker, text:`Walk-in: ${w.reason}\n${w.notes}` });
       saveAll();
     }
+    audit('Logged walk-in', w.name||'Unknown');
     showToast('Walk-in logged'); return true;
   });
 }
@@ -5354,6 +5399,7 @@ function convertWalkin(id) {
     justice:w.programs?.includes('Justice'), cultural:w.programs?.includes('Cultural'),
     disability:w.programs?.includes('Disability'), clientId:'WI-'+id.slice(-6).toUpperCase() };
   clients.push(nc); w.converted=true; w.convertedClientId=nc.id;
+  audit('Converted walk-in to client', nc.fullName, nc.id);
   saveAll(); saveWalkins(); showToast('Client record created');
   openClientProfile(nc.id);
 }
@@ -5365,8 +5411,10 @@ function logSessionFromWalkin(id) {
 }
 
 function deleteWalkin(id) {
+  const w=walkins.find(wi=>wi.id===id);
   if(!confirm('Delete this walk-in record?')) return;
-  walkins=walkins.filter(w=>w.id!==id); saveWalkins(); showPage('walkins');
+  audit('Deleted walk-in', w?.name||id);
+  walkins=walkins.filter(wi=>wi.id!==id); saveWalkins(); showPage('walkins');
 }
 
 // ============================================================
@@ -5562,6 +5610,170 @@ function workerSelectHTML(selectId, inputId, selectedVal) {
   </div>`;
 }
 
+// ===== AUDIT LOG PAGE =====
+function renderAuditLog() {
+  const isAdmin = currentUser?.role === 'admin';
+  const log = [...auditLog].reverse(); // newest first
+
+  // Filter state
+  const fWorker = document.getElementById('al-filter-worker')?.value || '';
+  const fAction = document.getElementById('al-filter-action')?.value || '';
+  const fFrom   = document.getElementById('al-filter-from')?.value || '';
+  const fTo     = document.getElementById('al-filter-to')?.value || '';
+  const fSearch = document.getElementById('al-filter-search')?.value?.toLowerCase() || '';
+
+  const filtered = log.filter(e => {
+    if (fWorker && e.worker !== fWorker) return false;
+    if (fAction && !e.action.toLowerCase().includes(fAction.toLowerCase())) return false;
+    if (fFrom && e.ts < fFrom) return false;
+    if (fTo   && e.ts > fTo + 'T23:59:59') return false;
+    if (fSearch && ![e.worker,e.action,e.detail,e.clientName,e.page].join(' ').toLowerCase().includes(fSearch)) return false;
+    return true;
+  });
+
+  const workers = [...new Set(auditLog.map(e=>e.worker).filter(Boolean))].sort();
+  const actions = [...new Set(auditLog.map(e=>e.action).filter(Boolean))].sort();
+
+  const actionColour = a => {
+    if (!a) return '#6b7280';
+    if (a.includes('Deleted') || a.includes('Cleared') || a.includes('Removed')) return '#dc2626';
+    if (a.includes('Created') || a.includes('Added') || a.includes('Converted') || a.includes('Imported')) return '#16a34a';
+    if (a.includes('Edited') || a.includes('Updated') || a.includes('Saved')) return '#d97706';
+    if (a.includes('Viewed') || a.includes('Page') || a.includes('Exported')) return '#0369a1';
+    if (a.includes('Logged')) return '#7c3aed';
+    return '#6b7280';
+  };
+
+  return `
+  <style>
+    .al-row { display:grid; grid-template-columns:140px 120px 160px 1fr 1fr; gap:0; border-bottom:1px solid var(--border); font-size:12px; }
+    .al-row:hover { background:rgba(45,106,79,0.03); }
+    .al-cell { padding:10px 12px; display:flex; align-items:center; }
+    @media(max-width:900px){ .al-row{grid-template-columns:1fr 1fr;} .al-cell:nth-child(n+3){display:none;} }
+  </style>
+
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-header">
+      <div class="card-title">🔍 Audit Log <span style="font-size:12px;font-weight:400;color:var(--muted)">${auditLog.length} total entries</span></div>
+      <div style="display:flex;gap:8px">
+        ${isAdmin ? `<button class="btn btn-sm btn-danger" onclick="clearAuditLog()">🗑️ Clear Log</button>` : ''}
+        <button class="btn btn-sm btn-outline" onclick="exportAuditLog()">📤 Export CSV</button>
+      </div>
+    </div>
+
+    <!-- FILTERS -->
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">
+      <div class="search-bar" style="flex:1;min-width:180px">
+        <span class="search-icon">🔍</span>
+        <input id="al-filter-search" placeholder="Search…" value="${fSearch}" oninput="showPage('auditlog')" style="width:100%;padding-left:32px">
+      </div>
+      <select id="al-filter-worker" onchange="showPage('auditlog')" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;min-width:150px">
+        <option value="">All workers</option>
+        ${workers.map(w=>`<option value="${w}" ${fWorker===w?'selected':''}>${w}</option>`).join('')}
+      </select>
+      <select id="al-filter-action" onchange="showPage('auditlog')" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;min-width:150px">
+        <option value="">All actions</option>
+        ${actions.map(a=>`<option value="${a}" ${fAction===a?'selected':''}>${a}</option>`).join('')}
+      </select>
+      <input type="date" id="al-filter-from" value="${fFrom}" onchange="showPage('auditlog')" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px" title="From date">
+      <input type="date" id="al-filter-to" value="${fTo}" onchange="showPage('auditlog')" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px" title="To date">
+      ${(fWorker||fAction||fFrom||fTo||fSearch)?`<button class="btn btn-sm btn-outline" onclick="clearAuditFilters()">✕ Clear filters</button>`:''}
+    </div>
+
+    <div style="font-size:12px;color:var(--muted);margin-bottom:8px">Showing ${filtered.length} of ${auditLog.length} entries</div>
+
+    <!-- TABLE HEADER -->
+    <div class="al-row" style="background:var(--bg);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:var(--muted)">
+      <div class="al-cell">Date / Time</div>
+      <div class="al-cell">Worker</div>
+      <div class="al-cell">Action</div>
+      <div class="al-cell">Detail</div>
+      <div class="al-cell">Client</div>
+    </div>
+
+    <!-- ROWS -->
+    <div style="max-height:600px;overflow-y:auto">
+      ${filtered.length === 0
+        ? `<div class="empty-state"><div class="icon">🔍</div><p>No log entries match your filters</p></div>`
+        : filtered.slice(0, 500).map(e => `
+          <div class="al-row">
+            <div class="al-cell" style="color:var(--muted);white-space:nowrap">${fmtdt(e.ts)}</div>
+            <div class="al-cell">
+              <div style="display:flex;align-items:center;gap:6px">
+                <div style="width:26px;height:26px;border-radius:50%;background:var(--primary-light);color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">${initials(e.worker||'?')}</div>
+                <span style="font-weight:600;font-size:12px">${e.worker||'—'}</span>
+              </div>
+            </div>
+            <div class="al-cell">
+              <span style="display:inline-flex;align-items:center;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;background:${actionColour(e.action)}18;color:${actionColour(e.action)}">${e.action||'—'}</span>
+            </div>
+            <div class="al-cell" style="color:var(--text)">${e.detail||'—'}</div>
+            <div class="al-cell">
+              ${e.clientId
+                ? `<button class="btn-ghost" style="font-size:12px;padding:2px 6px" onclick="openClientProfile('${e.clientId}')">${e.clientName||e.clientId}</button>`
+                : `<span style="color:var(--muted)">—</span>`}
+            </div>
+          </div>`).join('')
+      }
+      ${filtered.length > 500 ? `<div style="padding:12px;text-align:center;color:var(--muted);font-size:12px">Showing first 500 results — use filters to narrow down</div>` : ''}
+    </div>
+  </div>
+
+  <!-- SUMMARY STATS -->
+  <div class="grid-3" style="margin-bottom:16px">
+    <div class="stat-card">
+      <div class="label">Total Actions Today</div>
+      <div class="value" style="color:var(--primary-light)">${auditLog.filter(e=>e.ts?.startsWith(today())).length}</div>
+      <div class="sub">across all workers</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Most Active Worker</div>
+      <div class="value" style="font-size:18px;color:var(--accent)">
+        ${(() => {
+          const counts = {};
+          auditLog.forEach(e=>{ if(e.worker) counts[e.worker]=(counts[e.worker]||0)+1; });
+          const top = Object.entries(counts).sort((a,b)=>b[1]-a[1])[0];
+          return top ? top[0].split(' ')[0] : '—';
+        })()}
+      </div>
+      <div class="sub">by total actions</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Client Records Viewed</div>
+      <div class="value" style="color:var(--info)">${auditLog.filter(e=>e.action==='Viewed client').length}</div>
+      <div class="sub">all time</div>
+    </div>
+  </div>`;
+}
+
+function clearAuditFilters() {
+  ['al-filter-search','al-filter-worker','al-filter-action','al-filter-from','al-filter-to'].forEach(id=>{
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  showPage('auditlog');
+}
+
+function clearAuditLog() {
+  if (!confirm('Clear the entire audit log? This cannot be undone.')) return;
+  audit('Cleared audit log', `Removed ${auditLog.length} entries`);
+  auditLog = auditLog.slice(-1); // keep the clear-log entry itself
+  saveAuditLog();
+  showPage('auditlog');
+}
+
+function exportAuditLog() {
+  const rows = [['Date/Time','Worker','Role','Action','Detail','Client','Page']];
+  [...auditLog].reverse().forEach(e => rows.push([
+    e.ts, e.worker, e.role, e.action, e.detail, e.clientName, e.page
+  ]));
+  const csv = rows.map(r => r.map(v => `"${(v||'').toString().replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob = new Blob([csv], {type:'text/csv'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = `audit-log-${today()}.csv`; a.click();
+  audit('Exported audit log', `${auditLog.length} entries`);
+}
+
 function renderSettings() {
   const isAdmin = currentUser?.role==='admin';
   return `
@@ -5704,7 +5916,9 @@ function openEditUserModal(idx) {
 }
 
 function removeUser(idx) {
-  if(!confirm(`Remove ${userProfiles[idx]?.name}?`)) return;
+  const u = userProfiles[idx];
+  if(!confirm(`Remove ${u?.name}?`)) return;
+  audit('Removed user account', u?.name||'');
   userProfiles.splice(idx,1); saveUserProfiles(); showPage('settings');
 }
 
@@ -5771,6 +5985,7 @@ function removeWorkerName(idx) {
 }
 
 function exportData() {
+  audit('Exported data', `${clients.length} clients, ${notes.length} notes`);
   const data = { clients, notes, timeLogs, exportDate: now() };
   const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
@@ -5786,6 +6001,7 @@ function importData(e) {
       if(data.clients) clients = data.clients;
       if(data.notes) notes = data.notes;
       if(data.timeLogs) timeLogs = data.timeLogs;
+      audit('Imported data', `${clients.length} clients from file`);
       saveAll(); showToast('Data imported'); showPage('dashboard');
     } catch { alert('Invalid file'); }
   };
@@ -5795,6 +6011,7 @@ function importData(e) {
 function clearData() {
   if(!confirm('This will permanently delete ALL client data. Are you sure?')) return;
   if(!confirm('This cannot be undone. Delete everything?')) return;
+  audit('Cleared all data', `Deleted ${clients.length} clients, ${notes.length} notes`);
   clients=[]; notes=[]; timeLogs=[]; saveAll(); showToast('Data cleared'); showPage('dashboard');
 }
 
