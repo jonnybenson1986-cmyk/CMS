@@ -5820,8 +5820,8 @@ function renderSettings() {
           ${isAdmin&&u.id!==currentUser?.id?`
           <button class="btn btn-sm btn-outline" onclick="openEditUserModal(${i})">✏️ Edit</button>
           <button class="btn btn-sm btn-danger" onclick="removeUser(${i})">✕</button>`
-          :isAdmin?`<button class="btn btn-sm btn-outline" onclick="openChangePinModal()">🔑 Change PIN</button>`:''}
-          ${!isAdmin&&u.id===currentUser?.id?`<button class="btn btn-sm btn-outline" onclick="openChangePinModal()">🔑 Change PIN</button>`:''}
+          :isAdmin?`<button class="btn btn-sm btn-outline" onclick="openChangePinModal()">🔑 Change Password</button>`:''}
+          ${!isAdmin&&u.id===currentUser?.id?`<button class="btn btn-sm btn-outline" onclick="openChangePinModal()">🔑 Change Password</button>`:''}
         </div>`).join('')}
       </div>`
     }
@@ -5892,15 +5892,15 @@ function openAddUserModal() {
     <div class="form-group"><label>Full Name *</label><input id="au-name" placeholder="e.g. Sarah Johnson"></div>
     <div class="form-group"><label>Role *</label>
       <select id="au-role">${Object.entries(ROLES).map(([k,v])=>`<option value="${k}">${v.icon} ${v.label} — ${v.desc.slice(0,50)}…</option>`).join('')}</select></div>
-    <div class="form-group"><label>PIN (4–6 digits) *</label><input type="password" id="au-pin" maxlength="6" inputmode="numeric" placeholder="e.g. 1234"></div>
-    <div class="form-group"><label>Confirm PIN *</label><input type="password" id="au-pin2" maxlength="6" inputmode="numeric" placeholder="Repeat PIN"></div>`,
+    <div class="form-group"><label>Password *</label><input type="password" id="au-pin" placeholder="Enter password"></div>
+    <div class="form-group"><label>Confirm Password *</label><input type="password" id="au-pin2" placeholder="Repeat password"></div>`,
     () => {
       const name=document.getElementById('au-name')?.value?.trim();
       const pin=document.getElementById('au-pin')?.value;
       const pin2=document.getElementById('au-pin2')?.value;
       if(!name){alert('Name required');return false;}
-      if(!pin||pin.length<4){alert('PIN must be 4–6 digits');return false;}
-      if(pin!==pin2){alert('PINs do not match');return false;}
+      if(!pin||pin.length<3){alert('Password required');return false;}
+      if(pin!==pin2){alert('Passwords do not match');return false;}
       userProfiles.push({id:uid(),name,role:document.getElementById('au-role')?.value,pin});
       saveUserProfiles(); showToast('User added'); return true;
     }
@@ -5913,14 +5913,14 @@ function openEditUserModal(idx) {
     <div class="form-group"><label>Full Name *</label><input id="eu-name" value="${u.name}"></div>
     <div class="form-group"><label>Role</label>
       <select id="eu-role">${Object.entries(ROLES).map(([k,v])=>`<option value="${k}" ${u.role===k?'selected':''}>${v.icon} ${v.label}</option>`).join('')}</select></div>
-    <div class="form-group"><label>New PIN (leave blank to keep current)</label><input type="password" id="eu-pin" maxlength="6" inputmode="numeric" placeholder="Leave blank to keep current"></div>`,
+    <div class="form-group"><label>New Password (leave blank to keep current)</label><input type="password" id="eu-pin" placeholder="Leave blank to keep current"></div>`,
     () => {
       const name=document.getElementById('eu-name')?.value?.trim();
       if(!name){alert('Name required');return false;}
       const newPin=document.getElementById('eu-pin')?.value;
       userProfiles[idx].name=name;
       userProfiles[idx].role=document.getElementById('eu-role')?.value;
-      if(newPin&&newPin.length>=4) userProfiles[idx].pin=newPin;
+      if(newPin&&newPin.length>=3) userProfiles[idx].pin=newPin;
       saveUserProfiles(); showToast('User updated'); return true;
     }
   );
@@ -5934,17 +5934,17 @@ function removeUser(idx) {
 }
 
 function openChangePinModal() {
-  showModal('🔑 Change My PIN', `
-    <div class="form-group"><label>Current PIN *</label><input type="password" id="cp-current" maxlength="6" inputmode="numeric"></div>
-    <div class="form-group"><label>New PIN *</label><input type="password" id="cp-new" maxlength="6" inputmode="numeric"></div>
-    <div class="form-group"><label>Confirm New PIN *</label><input type="password" id="cp-new2" maxlength="6" inputmode="numeric"></div>`,
+  showModal('🔑 Change My Password', `
+    <div class="form-group"><label>Current Password *</label><input type="password" id="cp-current"></div>
+    <div class="form-group"><label>New Password *</label><input type="password" id="cp-new"></div>
+    <div class="form-group"><label>Confirm New Password *</label><input type="password" id="cp-new2"></div>`,
     () => {
       const cur=document.getElementById('cp-current')?.value;
       const nw=document.getElementById('cp-new')?.value;
       const nw2=document.getElementById('cp-new2')?.value;
-      if(cur!==currentUser?.pin){alert('Current PIN incorrect');return false;}
-      if(!nw||nw.length<4){alert('New PIN must be 4–6 digits');return false;}
-      if(nw!==nw2){alert('PINs do not match');return false;}
+      if(cur!==currentUser?.pin){alert('Current password incorrect');return false;}
+      if(!nw||nw.length<3){alert('New password required');return false;}
+      if(nw!==nw2){alert('Passwords do not match');return false;}
       const u=userProfiles.find(p=>p.id===currentUser.id);
       if(u){u.pin=nw;currentUser.pin=nw;saveUserProfiles();saveCurrentUser(currentUser);}
       showToast('PIN changed ✓'); return true;
@@ -6076,7 +6076,32 @@ const ROLES = {
 let currentUser = DB.load('currentUser', null);
 let userProfiles = DB.load('userProfiles', []);
 function saveUserProfiles() { DB.save('userProfiles', userProfiles); }
-function saveCurrentUser(u) { currentUser=u; DB.save('currentUser',u); }
+
+// Pre-seed all staff accounts on first load
+const DEFAULT_USERS = [
+  { name:'Jon Benson',    role:'sysmanager', pin:'Warrnambool1!' },
+  { name:'Chris Shepperd',role:'admin',      pin:'Warrnambool1!' },
+  { name:'Taf Chitava',   role:'admin',      pin:'Warrnambool1!' },
+  { name:'Jade Atkinson', role:'supervisor', pin:'Warrnambool1!' },
+  { name:'Brett Clarke',  role:'worker',     pin:'Warrnambool1!' },
+  { name:'Brett Nuske',   role:'worker',     pin:'Warrnambool1!' },
+  { name:'Simon Dart',    role:'worker',     pin:'Warrnambool1!' },
+  { name:'Taylem Wason',  role:'worker',     pin:'Warrnambool1!' },
+  { name:'Nic Nitcher',   role:'worker',     pin:'Warrnambool1!' },
+  { name:'Sean Bloom',    role:'worker',     pin:'Warrnambool1!' },
+];
+if(userProfiles.length === 0) {
+  userProfiles = DEFAULT_USERS.map(u => ({ ...u, id: uid() }));
+  saveUserProfiles();
+} else {
+  // Add any missing staff without overwriting existing
+  DEFAULT_USERS.forEach(du => {
+    if(!userProfiles.find(u => u.name === du.name)) {
+      userProfiles.push({ ...du, id: uid() });
+    }
+  });
+  saveUserProfiles();
+}
 
 function checkLogin() {
   // If no users set up yet, go straight to setup
@@ -6116,8 +6141,8 @@ function showLoginScreen(setup) {
         </div>
         <div class="form-group"><label>Role</label>
           <select id="login-role">${Object.entries(ROLES).map(([k,v])=>`<option value="${k}">${v.icon} ${v.label}</option>`).join('')}</select></div>
-        <div class="form-group"><label>Create PIN (4–6 digits) *</label><input type="password" id="login-pin" maxlength="6" placeholder="e.g. 1234" inputmode="numeric"></div>
-        <div class="form-group"><label>Confirm PIN *</label><input type="password" id="login-pin2" maxlength="6" placeholder="Repeat PIN" inputmode="numeric"></div>
+        <div class="form-group"><label>Create Password *</label><input type="password" id="login-pin" placeholder="e.g. Warrnambool1!"></div>
+        <div class="form-group"><label>Confirm Password *</label><input type="password" id="login-pin2" placeholder="Repeat password"></div>
         <button class="btn btn-primary" style="width:100%;padding:12px;font-size:15px" onclick="createFirstUser()">Create Account &amp; Sign In</button>
       ` : `
         <div class="form-group"><label>Select Worker</label>
@@ -6125,7 +6150,7 @@ function showLoginScreen(setup) {
             <option value="">— Select your name —</option>
             ${userProfiles.map(u=>`<option value="${u.id}">${ROLES[u.role]?.icon||'👤'} ${u.name} (${ROLES[u.role]?.label||u.role})</option>`).join('')}
           </select></div>
-        <div class="form-group"><label>PIN</label><input type="password" id="login-pin" maxlength="6" placeholder="Enter your PIN" inputmode="numeric"
+        <div class="form-group"><label>Password</label><input type="password" id="login-pin" placeholder="Enter your password"
           onkeydown="if(event.key==='Enter')doLogin()"></div>
         <button class="btn btn-primary" style="width:100%;padding:12px;font-size:15px;margin-bottom:10px" onclick="doLogin()">Sign In →</button>
         <p id="login-error" style="color:#dc2626;font-size:13px;text-align:center;min-height:18px"></p>
@@ -6165,8 +6190,11 @@ function createFirstUser() {
   const pin2=document.getElementById('login-pin2')?.value;
   const role=document.getElementById('login-role')?.value;
   if(!name){alert('Please select or enter your name');return;}
-  if(!pin||pin.length<4){alert('PIN must be 4–6 digits');return;}
-  if(pin!==pin2){alert('PINs do not match');return;}
+  if(!pin||pin.length<3){alert('Password required');return;}
+  if(pin!==pin2){alert('Passwords do not match');return;}
+  // Check if this staff member already has an account — just update their password
+  const existing = userProfiles.find(u=>u.name===name);
+  if(existing){existing.pin=pin;saveUserProfiles();saveCurrentUser(existing);initApp();return;}
   const u={id:uid(),name,role,pin};
   userProfiles.push(u); saveUserProfiles();
   saveCurrentUser(u); initApp();
