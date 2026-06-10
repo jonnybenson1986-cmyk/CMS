@@ -3153,6 +3153,32 @@ function renderReportsPage() {
     </div>
   </div>
 
+  <!-- BULK CLIENT IMPORT -->
+  <div class="card no-print" style="margin-bottom:20px" id="bulk-import-card">
+    <div class="card-header">
+      <div class="card-title">📥 Bulk Client Import</div>
+      <button class="btn btn-sm btn-outline" onclick="toggleBulkImport()">Show / Hide</button>
+    </div>
+    <div id="bulk-import-body" style="display:none">
+      <p style="font-size:13px;color:var(--muted);margin-bottom:14px">
+        Paste a list of client data below — copied from Excel, a spreadsheet, or typed freehand. The system will detect columns automatically and preview records before importing. Each row becomes a client file.
+      </p>
+      <div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:12px;font-size:12px;margin-bottom:14px">
+        <strong>Accepted formats:</strong> CSV (comma or tab-separated), Excel copy-paste, or one client per line.<br>
+        <strong>Recognised columns (any order, partial match ok):</strong> name / full name, dob / date of birth, gender, phone, email, address, mob / community, atsi / indigenous, program (sewb/aod/justice/cultural/disability), referral source, key worker.
+      </div>
+      <div class="form-group">
+        <label>Paste data here</label>
+        <textarea id="bulk-paste" style="min-height:180px;font-family:monospace;font-size:12px" placeholder="Paste CSV, Excel rows, or free text here…" oninput="bulkImportPreview()"></textarea>
+      </div>
+      <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+        <button class="btn btn-primary" onclick="bulkImportPreview()">🔍 Preview</button>
+        <button class="btn btn-outline" onclick="document.getElementById('bulk-paste').value='';document.getElementById('bulk-preview').innerHTML=''">🗑 Clear</button>
+      </div>
+      <div id="bulk-preview"></div>
+    </div>
+  </div>
+
   <!-- FUNDER COMPLIANCE REPORTS -->
   <div class="card no-print" style="margin-bottom:16px">
     <div class="card-header"><div class="card-title">🏛️ Funder &amp; Grant Compliance Reports</div></div>
@@ -3398,6 +3424,233 @@ function openReport(html) {
   const w = window.open('','_blank');
   w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Worn Gundidj Report</title>${reportStyles()}</head><body><div class="page">${html}${reportFooter()}</div><script>window.onload=()=>window.print()<\/script></body></html>`);
   w.document.close();
+}
+
+// ===== BULK CLIENT IMPORT =====
+function toggleBulkImport() {
+  const b = document.getElementById('bulk-import-body');
+  if(b) b.style.display = b.style.display === 'none' ? 'block' : 'none';
+}
+
+function _bulkParseRows(raw) {
+  // Detect delimiter: tab (Excel paste) beats comma
+  const lines = raw.replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('\n').filter(l=>l.trim());
+  if(!lines.length) return [];
+  const sample = lines[0];
+  const delim = (sample.split('\t').length > sample.split(',').length) ? '\t' : ',';
+
+  const splitLine = line => {
+    if(delim === '\t') return line.split('\t').map(c=>c.trim());
+    // CSV-aware comma split
+    const cols=[]; let cur='', inQ=false;
+    for(let i=0;i<line.length;i++){
+      const ch=line[i];
+      if(ch==='"'){inQ=!inQ;}
+      else if(ch===','&&!inQ){cols.push(cur.trim());cur='';}
+      else cur+=ch;
+    }
+    cols.push(cur.trim()); return cols;
+  };
+
+  // Try to detect header row
+  const KNOWN = ['name','fullname','full name','dob','date of birth','dateofbirth','gender','phone','mobile',
+    'email','address','mob','community','atsi','indigenous','program','referral','source','worker','keyworker'];
+  const firstCols = splitLine(lines[0]).map(c=>c.toLowerCase().replace(/[^a-z0-9]/g,''));
+  const looksLikeHeader = firstCols.filter(c=>KNOWN.some(k=>k.replace(/[^a-z0-9]/g,'').includes(c)||c.includes(k.replace(/[^a-z0-9]/g,'')))).length >= 2;
+
+  const headers = looksLikeHeader ? firstCols : null;
+  const dataLines = looksLikeHeader ? lines.slice(1) : lines;
+
+  // Column name → field map
+  const colMap = h => {
+    const c = h.toLowerCase().replace(/[^a-z0-9]/g,'');
+    if(c.includes('fullname')||c==='name'||c.includes('clientname')) return 'fullName';
+    if(c.includes('preferred')) return 'preferredName';
+    if(c.includes('dob')||c.includes('dateofbirth')||c.includes('birthdate')) return 'dob';
+    if(c.includes('gender')) return 'gender';
+    if(c==='phone'||c==='mobile'||c.includes('phonenumber')) return 'phone';
+    if(c.includes('email')) return 'email';
+    if(c.includes('address')) return 'address';
+    if(c==='mob'||c.includes('community')||c.includes('country')) return 'mob';
+    if(c.includes('atsi')||c.includes('indigenous')||c.includes('aboriginal')) return 'atsi';
+    if(c.includes('program')) return 'program';
+    if(c.includes('referral')&&c.includes('source')) return 'referralSource';
+    if(c.includes('referral')&&(c.includes('date')||c.includes('when'))) return 'referralDate';
+    if(c.includes('worker')||c.includes('caseworker')||c.includes('keyworker')) return 'keyWorker';
+    if(c.includes('risk')) return 'riskLevel';
+    if(c.includes('note')||c.includes('reason')||c.includes('referral')) return 'referralReason';
+    return null;
+  };
+
+  // Normalise DOB: accepts DD/MM/YYYY, YYYY-MM-DD, D Month YYYY
+  const normDob = v => {
+    if(!v) return '';
+    const iso = v.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if(iso) return v;
+    const dmy = v.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$/);
+    if(dmy) { let y=dmy[3]; if(y.length===2) y=(parseInt(y)>30?'19':'20')+y; return `${y}-${dmy[2].padStart(2,'0')}-${dmy[1].padStart(2,'0')}`; }
+    // "15 Jan 1990"
+    const months={jan:'01',feb:'02',mar:'03',apr:'04',may:'05',jun:'06',jul:'07',aug:'08',sep:'09',oct:'10',nov:'11',dec:'12'};
+    const mdy = v.match(/^(\d{1,2})\s+([a-z]+)\s+(\d{4})$/i);
+    if(mdy) { const m=months[mdy[2].toLowerCase().slice(0,3)]; if(m) return `${mdy[3]}-${m}-${mdy[1].padStart(2,'0')}`; }
+    return v;
+  };
+
+  // Normalise ATSI
+  const normAtsi = v => {
+    const l=v.toLowerCase();
+    if(l.includes('torres')) return 'Torres Strait Islander';
+    if(l.includes('both')) return 'Both';
+    if(l.includes('no')||l==='n') return 'No';
+    if(l.includes('prefer')) return 'Prefer not to say';
+    if(l.includes('abor')||l==='y'||l==='yes') return 'Aboriginal';
+    return v;
+  };
+
+  // Normalise gender
+  const normGender = v => {
+    const l=v.toLowerCase();
+    if(l==='m'||l.includes('male')&&!l.includes('fe')) return 'Male';
+    if(l==='f'||l.includes('female')) return 'Female';
+    if(l.includes('non')||l.includes('nonbin')) return 'Non-Binary';
+    return v||'Not disclosed';
+  };
+
+  // Normalise program flags
+  const normPrograms = v => {
+    const l=v.toLowerCase();
+    return {
+      sewb:     l.includes('sewb')||l.includes('social')||l.includes('wellbeing'),
+      aod:      l.includes('aod')||l.includes('alcohol')||l.includes('drug'),
+      justice:  l.includes('justice')||l.includes('legal'),
+      cultural: l.includes('cultur'),
+      disability:l.includes('disab'),
+    };
+  };
+
+  return dataLines.map(line => {
+    const cols = splitLine(line);
+    if(cols.every(c=>!c)) return null;
+
+    let obj = {};
+    if(headers) {
+      headers.forEach((h,i) => { const f=colMap(h); if(f&&cols[i]) obj[f]=cols[i]; });
+    } else {
+      // No header: heuristic positional parse — try to detect name, dob, phone etc by content
+      cols.forEach(v => {
+        const vt = v.trim();
+        if(!vt) return;
+        if(!obj.fullName && /^[A-Za-z]/.test(vt) && vt.split(' ').length >= 2 && !vt.match(/\d{4}/) && !vt.includes('@')) {
+          obj.fullName = vt;
+        } else if(!obj.dob && vt.match(/\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}/)) {
+          obj.dob = vt;
+        } else if(!obj.phone && vt.match(/^[\d\s\+\(\)]{7,}$/) && !obj.dob) {
+          obj.phone = vt;
+        } else if(!obj.email && vt.includes('@')) {
+          obj.email = vt;
+        } else if(!obj.address && /\d+\s+\w+/.test(vt) && vt.length > 8) {
+          obj.address = vt;
+        }
+      });
+    }
+
+    if(!obj.fullName) obj.fullName = cols[0] || '(Unknown)';
+    if(obj.dob) obj.dob = normDob(obj.dob);
+    if(obj.atsi) obj.atsi = normAtsi(obj.atsi);
+    if(obj.gender) obj.gender = normGender(obj.gender);
+    if(obj.program) { const p=normPrograms(obj.program); Object.assign(obj,{sewb:p.sewb,aod:p.aod,justice:p.justice,cultural:p.cultural,disability:p.disability}); delete obj.program; }
+    return obj;
+  }).filter(Boolean);
+}
+
+function bulkImportPreview() {
+  const raw = document.getElementById('bulk-paste')?.value?.trim();
+  const el = document.getElementById('bulk-preview');
+  if(!el) return;
+  if(!raw) { el.innerHTML=''; return; }
+
+  const rows = _bulkParseRows(raw);
+  if(!rows.length) { el.innerHTML='<p style="color:var(--muted);font-size:13px">No data detected. Make sure each client is on a separate line.</p>'; return; }
+
+  const already = rows.map(r => clients.find(c=>c.fullName?.toLowerCase()===r.fullName?.toLowerCase()));
+
+  el.innerHTML = `
+    <div style="font-weight:700;font-size:13px;margin-bottom:10px">
+      Found <strong>${rows.length}</strong> record${rows.length!==1?'s':''} — review below, then click Import.
+    </div>
+    <div style="overflow-x:auto">
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead>
+        <tr style="background:var(--bg-secondary)">
+          <th style="padding:8px;text-align:left;border:1px solid var(--border)">#</th>
+          <th style="padding:8px;text-align:left;border:1px solid var(--border)">Name</th>
+          <th style="padding:8px;text-align:left;border:1px solid var(--border)">DOB</th>
+          <th style="padding:8px;text-align:left;border:1px solid var(--border)">Gender</th>
+          <th style="padding:8px;text-align:left;border:1px solid var(--border)">Phone</th>
+          <th style="padding:8px;text-align:left;border:1px solid var(--border)">Email</th>
+          <th style="padding:8px;text-align:left;border:1px solid var(--border)">Programs</th>
+          <th style="padding:8px;text-align:left;border:1px solid var(--border)">Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map((r,i)=>{
+          const dup = already[i];
+          const progs = [r.sewb&&'SEWB',r.aod&&'AOD',r.justice&&'Justice',r.cultural&&'Cultural',r.disability&&'Disability'].filter(Boolean).join(', ')||'—';
+          return `<tr style="background:${dup?'#fef9c3':''}">
+            <td style="padding:6px 8px;border:1px solid var(--border);color:var(--muted)">${i+1}</td>
+            <td style="padding:6px 8px;border:1px solid var(--border);font-weight:600">${r.fullName}</td>
+            <td style="padding:6px 8px;border:1px solid var(--border)">${r.dob||'—'}</td>
+            <td style="padding:6px 8px;border:1px solid var(--border)">${r.gender||'—'}</td>
+            <td style="padding:6px 8px;border:1px solid var(--border)">${r.phone||'—'}</td>
+            <td style="padding:6px 8px;border:1px solid var(--border)">${r.email||'—'}</td>
+            <td style="padding:6px 8px;border:1px solid var(--border)">${progs}</td>
+            <td style="padding:6px 8px;border:1px solid var(--border)">${dup?`<span style="color:#92400e;font-weight:700">⚠ Exists</span>`:`<span style="color:#065f46;font-weight:700">✓ New</span>`}</td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+    </div>
+    <div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <button class="btn btn-primary" onclick="bulkImportConfirm()">
+        ✅ Import ${rows.filter((_,i)=>!already[i]).length} New Client${rows.filter((_,i)=>!already[i]).length!==1?'s':''}
+      </button>
+      ${already.some(Boolean)?`<span style="font-size:12px;color:#92400e">⚠ ${already.filter(Boolean).length} highlighted row${already.filter(Boolean).length!==1?'s are':' is'} already in the system and will be skipped.</span>`:''}
+    </div>`;
+}
+
+function bulkImportConfirm() {
+  const raw = document.getElementById('bulk-paste')?.value?.trim();
+  if(!raw) return;
+  const rows = _bulkParseRows(raw);
+  let added = 0, skipped = 0;
+  rows.forEach(r => {
+    if(clients.find(c=>c.fullName?.toLowerCase()===r.fullName?.toLowerCase())) { skipped++; return; }
+    const newClient = {
+      id: uid(), created: today(), status: 'active', riskLevel: 'medium',
+      fullName: r.fullName || '', preferredName: r.preferredName || '',
+      dob: r.dob || '', gender: r.gender || '', phone: r.phone || '',
+      email: r.email || '', address: r.address || '', mob: r.mob || '',
+      atsi: r.atsi || '', keyWorker: r.keyWorker || currentUser?.name || '',
+      referralSource: r.referralSource || 'Bulk Import',
+      referralDate: r.referralDate || today(),
+      referralReason: r.referralReason || '',
+      sewb: r.sewb || false, aod: r.aod || false, justice: r.justice || false,
+      cultural: r.cultural || false, disability: r.disability || false,
+      attachments: [], goalPlan: [], caseNotes: [],
+    };
+    clients.push(newClient);
+    audit('Bulk imported client', newClient.fullName, newClient.id);
+    added++;
+  });
+  if(added) {
+    saveClients();
+    showToast(`✅ Imported ${added} client${added!==1?'s':''}${skipped?` (${skipped} skipped — already exist)`:''}`);
+    document.getElementById('bulk-paste').value = '';
+    document.getElementById('bulk-preview').innerHTML = '';
+    showPage('clients');
+  } else {
+    showToast('No new clients to import — all already exist.', 'warn');
+  }
 }
 
 // ===== INDIVIDUAL CLIENT REPORTS =====
