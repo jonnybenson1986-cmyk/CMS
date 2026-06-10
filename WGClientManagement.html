@@ -6330,31 +6330,6 @@ let currentUser = DB.load('currentUser', null);
 let userProfiles = DB.load('userProfiles', []);
 function saveUserProfiles() { DB.save('userProfiles', userProfiles); }
 
-// Pre-seed all staff accounts on first load
-const DEFAULT_USERS = [
-  { name:'Jon Benson',    role:'sysmanager', pin:'Warrnambool1!' },
-  { name:'Chris Shepperd',role:'admin',      pin:'Warrnambool1!' },
-  { name:'Taf Chitava',   role:'admin',      pin:'Warrnambool1!' },
-  { name:'Jade Atkinson', role:'supervisor', pin:'Warrnambool1!' },
-  { name:'Brett Clarke',  role:'worker',     pin:'Warrnambool1!' },
-  { name:'Brett Nuske',   role:'worker',     pin:'Warrnambool1!' },
-  { name:'Simon Dart',    role:'worker',     pin:'Warrnambool1!' },
-  { name:'Taylem Wason',  role:'worker',     pin:'Warrnambool1!' },
-  { name:'Nic Nitcher',   role:'worker',     pin:'Warrnambool1!' },
-  { name:'Sean Bloom',    role:'worker',     pin:'Warrnambool1!' },
-];
-if(userProfiles.length === 0) {
-  userProfiles = DEFAULT_USERS.map(u => ({ ...u, id: uid() }));
-  saveUserProfiles();
-} else {
-  // Add any missing staff without overwriting existing
-  DEFAULT_USERS.forEach(du => {
-    if(!userProfiles.find(u => u.name === du.name)) {
-      userProfiles.push({ ...du, id: uid() });
-    }
-  });
-  saveUserProfiles();
-}
 
 function checkLogin() {
   // If no users set up yet, go straight to setup
