@@ -252,6 +252,9 @@
     <div class="nav-item" onclick="showPage('disability')">
       <span class="icon">♿</span><span>Disability</span>
     </div>
+    <div class="nav-item" onclick="showPage('homeownership')">
+      <span class="icon">🏠</span><span>Home Ownership</span>
+    </div>
   </div>
   <div class="nav-section">
     <div class="nav-section-label">Admin</div>
@@ -493,6 +496,8 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
+let fphoApplications = DB.load('fphoApplications', []);
+function saveFPHO() { DB.save('fphoApplications', fphoApplications); }
 
 // ===== AUDIT LOG =====
 let auditLog = DB.load('auditlog', []);
@@ -634,7 +639,7 @@ function showPage(page) {
     btn.onclick = openNewClientModal;
   }
 
-  const pages = { dashboard: renderDashboard, referrals: renderReferrals, clients: renderClients, sessions: renderSessions, walkins: renderWalkins, sewb: renderSEWB, aod: renderAOD, justice: renderJustice, cultural: renderCultural, disability: renderDisability, reports: renderReportsPage, calendar: renderCalendarPage, auditlog: renderAuditLog, settings: renderSettings };
+  const pages = { dashboard: renderDashboard, referrals: renderReferrals, clients: renderClients, sessions: renderSessions, walkins: renderWalkins, sewb: renderSEWB, aod: renderAOD, justice: renderJustice, cultural: renderCultural, disability: renderDisability, homeownership: renderHomeOwnership, reports: renderReportsPage, calendar: renderCalendarPage, auditlog: renderAuditLog, settings: renderSettings };
   const fn = pages[page];
   document.getElementById('content').innerHTML = fn ? fn() : '<p>Coming soon</p>';
   attachPageEvents(page);
@@ -5804,6 +5809,418 @@ function saveDisability(id) {
   c.ndis = g('dis-ndisNum')||c.ndis;
   c.disability = true;
   saveAll(); showToast('Disability details saved ✓');
+}
+
+// ============================================================
+// FIRST PEOPLES HOME OWNERSHIP PROGRAM
+// ============================================================
+function renderHomeOwnership() {
+  const apps = [...fphoApplications].sort((a,b)=>(b.created||'').localeCompare(a.created||''));
+  const statusStyle = { draft:'background:#fef3c7;color:#92400e', submitted:'background:#dbeafe;color:#1e40af', approved:'background:#d1fae5;color:#065f46', ineligible:'background:#fee2e2;color:#991b1b' };
+  return `
+  <style>
+    .fpho-card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:12px}
+    .fpho-section-title{font-size:13px;font-weight:700;color:var(--primary);text-transform:uppercase;letter-spacing:.5px;margin:20px 0 12px;padding-bottom:6px;border-bottom:2px solid var(--primary-light)}
+    .fpho-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
+    .fpho-field label{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;display:block;margin-bottom:4px}
+    .fpho-field input,.fpho-field select,.fpho-field textarea{width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg);color:var(--text)}
+    .fpho-radio-group,.fpho-check-group{display:flex;flex-direction:column;gap:6px;padding:4px 0}
+    .fpho-radio-group label,.fpho-check-group label{display:flex;align-items:flex-start;gap:8px;font-size:13px;font-weight:400;cursor:pointer;line-height:1.4}
+    .fpho-radio-group input,.fpho-check-group input{margin-top:2px;flex-shrink:0}
+    .fpho-info-box{background:#e0f2fe;border:1px solid #7dd3fc;border-radius:8px;padding:14px;font-size:13px;line-height:1.6;margin-bottom:16px}
+    .fpho-warn-box{background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:12px;font-size:12px;margin-bottom:12px}
+    .fpho-grant-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;margin-bottom:16px}
+    .fpho-grant-card{border:1px solid var(--border);border-radius:8px;padding:14px;background:var(--bg)}
+    .fpho-grant-card .gc-amt{font-size:20px;font-weight:800;color:var(--primary)}
+    .fpho-grant-card .gc-name{font-size:12px;font-weight:700;margin-bottom:4px}
+    .fpho-grant-card .gc-desc{font-size:11px;color:var(--muted);line-height:1.4}
+    .fpho-tab{display:inline-block;padding:7px 16px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;border:2px solid transparent}
+    .fpho-tab.active{background:var(--primary);color:#fff;border-color:var(--primary)}
+    .fpho-tab:not(.active){background:var(--bg);color:var(--text);border-color:var(--border)}
+    .fpho-tab:not(.active):hover{border-color:var(--primary-light)}
+    .coapplicant-block{border:1px solid var(--border);border-radius:10px;padding:16px;margin-top:12px}
+  </style>
+
+  <div class="card" style="margin-bottom:16px;background:linear-gradient(135deg,#1a3a2a,#2d6a4f);color:#fff">
+    <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+      <div style="font-size:36px">🏠</div>
+      <div style="flex:1">
+        <div style="font-size:18px;font-weight:800;margin-bottom:4px">First Peoples Home Ownership Program</div>
+        <div style="font-size:13px;opacity:.85">Homes Victoria — Supporting First Peoples on the path to home ownership in Victoria</div>
+      </div>
+      <button class="btn" style="background:#fff;color:#1a3a2a;font-weight:700" onclick="openFPHOForm()">➕ New Application</button>
+    </div>
+  </div>
+
+  <div class="fpho-grant-grid no-print">
+    <div class="fpho-grant-card"><div class="gc-name">Home Buyer Booster</div><div class="gc-amt">$2,500</div><div class="gc-desc">Legal and administrative costs</div></div>
+    <div class="fpho-grant-card"><div class="gc-name">Stamp Duty Helper</div><div class="gc-amt">up to $10,000</div><div class="gc-desc">Matched grant on land transfer duty</div></div>
+    <div class="fpho-grant-card"><div class="gc-name">Deposit Contribution</div><div class="gc-amt">up to $20,000</div><div class="gc-desc">Dollar-for-dollar deposit match</div></div>
+    <div class="fpho-grant-card"><div class="gc-name">New Build Bonus</div><div class="gc-amt">+ $5,000</div><div class="gc-desc">Extra on top of deposit contribution for new builds</div></div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">📋 Applications</div>
+      <span style="font-size:12px;color:var(--muted)">${apps.length} total</span>
+    </div>
+    ${apps.length === 0 ? `<div class="empty-state"><div class="icon">🏠</div><p>No applications yet. Click <strong>New Application</strong> to start one.</p></div>` :
+    `<div style="display:grid;gap:8px">
+      ${apps.map(a=>`
+        <div style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--bg);border-radius:8px;border:1px solid var(--border);flex-wrap:wrap">
+          <div class="avatar" style="background:var(--primary);width:38px;height:38px;font-size:14px">${initials(a.primaryFirstName+' '+a.primaryLastName)}</div>
+          <div style="flex:1;min-width:160px">
+            <div style="font-weight:700;font-size:14px">${a.primaryFirstName||''} ${a.primaryLastName||''}</div>
+            <div style="font-size:12px;color:var(--muted)">${a.purchaseSuburb||'Suburb not specified'} &bull; ${a.coApplicantCount||0} co-applicant(s) &bull; Created ${fmt(a.created)}</div>
+          </div>
+          <span style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:12px;${statusStyle[a.status]||statusStyle.draft}">${(a.status||'draft').toUpperCase()}</span>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-sm btn-outline" onclick="openFPHOForm('${a.id}')">✏️ Edit</button>
+            <button class="btn btn-sm btn-primary" onclick="printFPHO('${a.id}')">🖨️ Print</button>
+            <button class="btn btn-sm btn-danger" onclick="deleteFPHO('${a.id}')">✕</button>
+          </div>
+        </div>`).join('')}
+    </div>`}
+  </div>`;
+}
+
+function deleteFPHO(id) {
+  if(!confirm('Delete this application?')) return;
+  fphoApplications = fphoApplications.filter(a=>a.id!==id);
+  saveFPHO(); showPage('homeownership');
+}
+
+function openFPHOForm(id) {
+  const existing = id ? fphoApplications.find(a=>a.id===id) : null;
+  const a = existing || {};
+  const coCount = a.coApplicantCount || 0;
+
+  const applicantBlock = (prefix, label, required=true, showAtsi=true) => `
+    <div class="coapplicant-block">
+      <div style="font-size:13px;font-weight:700;color:var(--primary);margin-bottom:12px">${label}</div>
+      <div class="fpho-grid">
+        <div class="fpho-field"><label>Title</label><select id="${prefix}-title"><option value="">—</option>${['Mr','Mrs','Ms','Miss','Mx','Dr','Prof'].map(t=>`<option value="${t}" ${a[prefix+'Title']===t?'selected':''}>${t}</option>`).join('')}</select></div>
+        <div class="fpho-field"><label>First Name${required?' *':''}</label><input id="${prefix}-firstName" value="${a[prefix+'FirstName']||''}" placeholder="First name"></div>
+        <div class="fpho-field"><label>Last Name${required?' *':''}</label><input id="${prefix}-lastName" value="${a[prefix+'LastName']||''}" placeholder="Last name"></div>
+      </div>
+      <div class="fpho-field" style="margin-top:10px"><label>Residential Address${required?' *':''}</label><input id="${prefix}-addr" value="${a[prefix+'Addr']||''}" placeholder="Street address, Suburb, State, Postcode"></div>
+      <div class="fpho-field" style="margin-top:8px"><label>Postal Address (if different)</label><input id="${prefix}-postal" value="${a[prefix+'Postal']||''}" placeholder="Postal address"></div>
+      <div class="fpho-grid" style="margin-top:8px">
+        <div class="fpho-field"><label>Email${required?' *':''}</label><input type="email" id="${prefix}-email" value="${a[prefix+'Email']||''}" placeholder="email@example.com"></div>
+        <div class="fpho-field"><label>Phone${required?' *':''}</label><input type="tel" id="${prefix}-phone" value="${a[prefix+'Phone']||''}" placeholder="Australian phone number"></div>
+        ${prefix==='primary'?`<div class="fpho-field"><label>Preferred Contact *</label><select id="${prefix}-contact"><option value="">—</option>${['Phone','Email','Post'].map(m=>`<option value="${m}" ${a[prefix+'Contact']===m?'selected':''}>${m}</option>`).join('')}</select></div>`:''}
+        <div class="fpho-field"><label>Annual Taxable Income${required?' *':''}</label><input id="${prefix}-income" value="${a[prefix+'Income']||''}" placeholder="e.g. 65000"></div>
+      </div>
+      ${showAtsi?`<div class="fpho-field" style="margin-top:10px"><label>I identify as *</label>
+        <div class="fpho-radio-group">
+          ${prefix==='primary'?
+            ['Aboriginal descent','Torres Strait Islander descent','Both Aboriginal and Torres Strait Islander descent'].map(v=>`<label><input type="radio" name="${prefix}-atsi" value="${v}" ${a[prefix+'Atsi']===v?'checked':''}> ${v}</label>`).join('') :
+            ['Aboriginal descent','Torres Strait Islander descent','Both Aboriginal and Torres Strait Islander descent','Neither'].map(v=>`<label><input type="checkbox" class="${prefix}-atsi-cb" value="${v}" ${(a[prefix+'Atsi']||[]).includes(v)?'checked':''}> ${v}</label>`).join('')
+          }
+        </div></div>`:''}
+    </div>`;
+
+  const coBlocks = [1,2,3].map(n=>`
+    <div id="co${n}-block" style="display:${coCount>=n?'block':'none'}">
+      ${applicantBlock('co'+n, `Co-applicant ${n}`, true, true)}
+    </div>`).join('');
+
+  const html = `
+  <div style="max-height:70vh;overflow-y:auto;padding-right:4px">
+
+    <!-- PROGRAM INFO -->
+    <div class="fpho-info-box">
+      <strong>First Peoples Home Ownership Program</strong> — Homes Victoria<br>
+      Grants available: Home Buyer Booster ($2,500) · Stamp Duty Helper (up to $10,000) · Deposit Contribution (up to $20,000) · New Build Bonus (+$5,000)
+    </div>
+
+    <!-- ELIGIBILITY CONFIRMATION -->
+    <div class="fpho-section-title">Eligibility Confirmation</div>
+    <div class="fpho-warn-box">
+      To be eligible you must: be of Aboriginal and/or Torres Strait Islander descent · not currently own a home · reside and intend to purchase in Victoria · household income ≤ $245,000 p.a. · have documented pre-approval from a financial provider.
+    </div>
+    <div class="fpho-field"><label>I confirm that I meet the eligibility criteria *</label>
+      <div class="fpho-radio-group">
+        <label><input type="radio" name="fpho-eligible" value="Yes" ${a.eligible==='Yes'?'checked':''}> Yes — I confirm I meet all eligibility criteria</label>
+        <label><input type="radio" name="fpho-eligible" value="No" ${a.eligible==='No'?'checked':''}> No</label>
+      </div>
+    </div>
+
+    <!-- APPLICATION STATUS -->
+    <div class="fpho-field" style="margin-top:12px"><label>Application Status</label>
+      <select id="fpho-status">
+        ${['draft','submitted','approved','ineligible'].map(s=>`<option value="${s}" ${(a.status||'draft')===s?'selected':''}>${s.charAt(0).toUpperCase()+s.slice(1)}</option>`).join('')}
+      </select>
+    </div>
+
+    <!-- LINK TO CLIENT -->
+    <div class="fpho-field" style="margin-top:8px"><label>Link to Client File</label>
+      <select id="fpho-clientId">
+        <option value="">— Not linked —</option>
+        ${[...clients].sort((x,y)=>x.fullName.localeCompare(y.fullName)).map(c=>`<option value="${c.id}" ${a.clientId===c.id?'selected':''}>${c.fullName}</option>`).join('')}
+      </select>
+    </div>
+
+    <!-- PRIMARY APPLICANT -->
+    <div class="fpho-section-title">Primary Applicant Details</div>
+    <div class="fpho-warn-box">The primary applicant must be an Aboriginal or Torres Strait Islander person and hold a Confirmation of Aboriginality (CoA). The primary applicant must own at least 25% of the property.</div>
+    ${applicantBlock('primary','Primary Applicant',true,true)}
+
+    <!-- PURCHASE DETAILS -->
+    <div class="fpho-section-title">Purchase Details</div>
+    <div class="fpho-grid">
+      <div class="fpho-field"><label>Victorian Suburb/Town/City to Purchase In *</label><input id="fpho-suburb" value="${a.purchaseSuburb||''}" placeholder="e.g. Warrnambool"></div>
+      <div class="fpho-field"><label>Amount of Deposit Saved *</label><input id="fpho-deposit" value="${a.depositSaved||''}" placeholder="e.g. 20000"></div>
+      <div class="fpho-field"><label>New Build? (extra $5,000 bonus)</label>
+        <select id="fpho-newbuild"><option value="">—</option><option value="Yes" ${a.newBuild==='Yes'?'selected':''}>Yes — building or buying newly constructed</option><option value="No" ${a.newBuild==='No'?'selected':''}>No — existing home</option></select>
+      </div>
+    </div>
+
+    <!-- CO-APPLICANTS -->
+    <div class="fpho-section-title">Co-applicants</div>
+    <div class="fpho-field">
+      <label>How many co-applicants? *</label>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:4px">
+        ${[0,1,2,3].map(n=>`<label style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:400;cursor:pointer"><input type="radio" name="fpho-cocount" value="${n}" ${(a.coApplicantCount||0)===n?'checked':n===0&&!a.coApplicantCount?'checked':''} onchange="fphoToggleCo(${n})"> ${n}</label>`).join('')}
+      </div>
+    </div>
+    ${coBlocks}
+
+    <!-- DOCUMENTATION CHECKLIST -->
+    <div class="fpho-section-title">Documentation Checklist — Primary Applicant</div>
+    <div class="fpho-warn-box">Proof of address and identification must be certified by an approved certifier. Taxable income must be below $245,000 (individual or household).</div>
+
+    <div style="margin-bottom:12px">
+      <div style="font-weight:700;font-size:13px;margin-bottom:8px">Proof of Income</div>
+      <div class="fpho-check-group">
+        <label><input type="checkbox" id="doc-taxreturn" ${a.docTaxReturn?'checked':''}> Latest tax return</label>
+        <label><input type="checkbox" id="doc-centrelink" ${a.docCentrelink?'checked':''}> Centrelink Annual statement or latest fortnightly statement (if applicable)</label>
+      </div>
+    </div>
+
+    <div style="margin-bottom:12px">
+      <div style="font-weight:700;font-size:13px;margin-bottom:8px">Proof of Address &amp; Identification (must be certified)</div>
+      <div class="fpho-radio-group">
+        ${['A copy of your Victorian Drivers Licence','A copy of your Proof of Identification card (ID)','A copy of your Residential Rental Tenancy Agreement'].map(v=>`<label><input type="radio" name="fpho-proofid" value="${v}" ${a.proofIdType===v?'checked':''}> ${v}</label>`).join('')}
+      </div>
+      <div class="fpho-field" style="margin-top:8px"><label>Is your proof of address and identification certified? *</label>
+        <div class="fpho-radio-group" style="flex-direction:row;gap:20px">
+          <label><input type="radio" name="fpho-certified" value="Yes" ${a.proofCertified==='Yes'?'checked':''}> Yes</label>
+          <label><input type="radio" name="fpho-certified" value="No" ${a.proofCertified==='No'?'checked':''}> No</label>
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-bottom:12px">
+      <div style="font-weight:700;font-size:13px;margin-bottom:8px">Proof of Pre-Approval</div>
+      <div class="fpho-radio-group">
+        <label><input type="radio" name="fpho-preapproval" value="Pre-approval document from a financial provider" ${a.preApprovalType?'checked':''}> Pre-approval document from a financial provider</label>
+      </div>
+    </div>
+
+    <div style="margin-bottom:12px">
+      <div style="font-weight:700;font-size:13px;margin-bottom:8px">Confirmation of Aboriginality</div>
+      <div class="fpho-radio-group">
+        ${['A formal certified letter from an Aboriginal Community Controlled Organisation','A formal certified letter from a Local Aboriginal Land Council','Still obtaining Confirmation of Aboriginality'].map(v=>`<label><input type="radio" name="fpho-coa" value="${v}" ${a.coaType===v?'checked':''}> ${v}</label>`).join('')}
+      </div>
+    </div>
+
+    <!-- APPLICATION SUPPORT -->
+    <div class="fpho-section-title">Application Support</div>
+    <div class="fpho-field">
+      <label>Have you received support or guidance regarding this program? *</label>
+      <div class="fpho-radio-group" style="flex-direction:row;gap:20px">
+        <label><input type="radio" name="fpho-support" value="Yes" ${a.receivedSupport==='Yes'?'checked':''}> Yes</label>
+        <label><input type="radio" name="fpho-support" value="No" ${a.receivedSupport==='No'?'checked':''}> No</label>
+      </div>
+    </div>
+    <div class="fpho-field" style="margin-top:10px"><label>Support received from (select all that apply)</label>
+      <div class="fpho-check-group">
+        ${['ACCO Home Ownership Officer from Worn Gundidj','ACCO Home Ownership Officer from Aboriginal Housing Victoria','Indigenous Business Australia (IBA)'].map(v=>`<label><input type="checkbox" class="fpho-support-cb" value="${v}" ${(a.supportSources||[]).includes(v)?'checked':''}> ${v}</label>`).join('')}
+        <label><input type="checkbox" class="fpho-support-cb" value="Other"> Other: <input id="fpho-support-other" value="${a.supportOther||''}" style="border:none;border-bottom:1px solid var(--border);padding:2px;font-size:13px;width:140px"></label>
+      </div>
+    </div>
+
+    <!-- WORKER NOTES -->
+    <div class="fpho-section-title">Worker Notes</div>
+    <div class="fpho-field"><label>Internal notes (not printed on application)</label>
+      <textarea id="fpho-notes" style="min-height:80px;width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:13px">${a.workerNotes||''}</textarea>
+    </div>
+
+    <!-- DECLARATIONS -->
+    <div class="fpho-section-title">Declaration</div>
+    <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:14px;font-size:13px">
+      <strong>Primary Applicant Declaration</strong>
+      <div class="fpho-check-group" style="margin-top:8px">
+        <label><input type="checkbox" id="decl-1" ${a.decl1?'checked':''}> I declare that the information provided in the application is true, correct and complete to the best of my knowledge.</label>
+        <label><input type="checkbox" id="decl-2" ${a.decl2?'checked':''}> I understand that providing false or misleading information may result in this application being deemed ineligible or any funding being withdrawn.</label>
+        <label><input type="checkbox" id="decl-3" ${a.decl3?'checked':''}> I consent for Homes Victoria to use of my/our personal information for the purpose of this application.</label>
+      </div>
+    </div>
+
+  </div>`;
+
+  showModal(id ? '✏️ Edit Application' : '🏠 New FPHO Application', html, () => {
+    const getRadio = name => document.querySelector(`input[name="${name}"]:checked`)?.value||'';
+    const getCBs = cls => [...document.querySelectorAll(`.${cls}:checked`)].map(el=>el.value);
+    const getCoAtsi = prefix => [...document.querySelectorAll(`.${prefix}-atsi-cb:checked`)].map(el=>el.value);
+    const coCountVal = parseInt(getRadio('fpho-cocount'))||0;
+
+    const updated = {
+      id: id || uid(), created: a.created || today(),
+      status: document.getElementById('fpho-status')?.value || 'draft',
+      clientId: document.getElementById('fpho-clientId')?.value || '',
+      eligible: getRadio('fpho-eligible'),
+      // Primary
+      primaryTitle: document.getElementById('primary-title')?.value||'',
+      primaryFirstName: document.getElementById('primary-firstName')?.value||'',
+      primaryLastName: document.getElementById('primary-lastName')?.value||'',
+      primaryAddr: document.getElementById('primary-addr')?.value||'',
+      primaryPostal: document.getElementById('primary-postal')?.value||'',
+      primaryEmail: document.getElementById('primary-email')?.value||'',
+      primaryPhone: document.getElementById('primary-phone')?.value||'',
+      primaryContact: document.getElementById('primary-contact')?.value||'',
+      primaryIncome: document.getElementById('primary-income')?.value||'',
+      primaryAtsi: getRadio('primary-atsi'),
+      // Purchase
+      purchaseSuburb: document.getElementById('fpho-suburb')?.value||'',
+      depositSaved: document.getElementById('fpho-deposit')?.value||'',
+      newBuild: document.getElementById('fpho-newbuild')?.value||'',
+      coApplicantCount: coCountVal,
+      // Co-applicants
+      ...[1,2,3].reduce((acc,n)=>({...acc,
+        [`co${n}Title`]: document.getElementById(`co${n}-title`)?.value||'',
+        [`co${n}FirstName`]: document.getElementById(`co${n}-firstName`)?.value||'',
+        [`co${n}LastName`]: document.getElementById(`co${n}-lastName`)?.value||'',
+        [`co${n}Addr`]: document.getElementById(`co${n}-addr`)?.value||'',
+        [`co${n}Postal`]: document.getElementById(`co${n}-postal`)?.value||'',
+        [`co${n}Email`]: document.getElementById(`co${n}-email`)?.value||'',
+        [`co${n}Phone`]: document.getElementById(`co${n}-phone`)?.value||'',
+        [`co${n}Income`]: document.getElementById(`co${n}-income`)?.value||'',
+        [`co${n}Atsi`]: getCoAtsi('co'+n),
+      }),{}),
+      // Docs
+      docTaxReturn: document.getElementById('doc-taxreturn')?.checked||false,
+      docCentrelink: document.getElementById('doc-centrelink')?.checked||false,
+      proofIdType: getRadio('fpho-proofid'),
+      proofCertified: getRadio('fpho-certified'),
+      preApprovalType: getRadio('fpho-preapproval'),
+      coaType: getRadio('fpho-coa'),
+      // Support
+      receivedSupport: getRadio('fpho-support'),
+      supportSources: getCBs('fpho-support-cb').filter(v=>v!=='Other'),
+      supportOther: document.getElementById('fpho-support-other')?.value||'',
+      // Declarations
+      decl1: document.getElementById('decl-1')?.checked||false,
+      decl2: document.getElementById('decl-2')?.checked||false,
+      decl3: document.getElementById('decl-3')?.checked||false,
+      workerNotes: document.getElementById('fpho-notes')?.value||'',
+      updatedBy: currentUser?.name||'', updatedAt: now(),
+    };
+
+    if(id) {
+      const idx = fphoApplications.findIndex(a=>a.id===id);
+      if(idx>=0) fphoApplications[idx]=updated; else fphoApplications.push(updated);
+    } else {
+      fphoApplications.push(updated);
+    }
+    saveFPHO();
+    audit('FPHO application saved', `${updated.primaryFirstName} ${updated.primaryLastName}`);
+    showToast('Application saved ✓');
+    showPage('homeownership');
+    return true;
+  }, { wide: true });
+}
+
+function fphoToggleCo(count) {
+  [1,2,3].forEach(n => {
+    const el = document.getElementById(`co${n}-block`);
+    if(el) el.style.display = n <= count ? 'block' : 'none';
+  });
+}
+
+function printFPHO(id) {
+  const a = fphoApplications.find(x=>x.id===id); if(!a) return;
+  const row = (label, val) => val ? `<tr><td style="padding:6px 10px;font-weight:600;color:#555;width:220px;vertical-align:top;font-size:13px">${label}</td><td style="padding:6px 10px;font-size:13px">${val}</td></tr>` : '';
+  const section = (title, rows) => `<div style="margin-bottom:24px"><div style="background:#1a3a2a;color:#fff;padding:8px 14px;font-weight:700;font-size:13px;border-radius:4px 4px 0 0">${title}</div><table style="width:100%;border-collapse:collapse;border:1px solid #ddd;border-top:none">${rows}</table></div>`;
+
+  const atsiLabel = v => Array.isArray(v) ? v.join(', ') : v||'—';
+  const coBlock = n => {
+    if(a.coApplicantCount < n) return '';
+    return section(`Co-applicant ${n}`, [
+      row('Name', [a[`co${n}Title`], a[`co${n}FirstName`], a[`co${n}LastName`]].filter(Boolean).join(' ')||'—'),
+      row('Address', a[`co${n}Addr`]||'—'),
+      row('Postal Address', a[`co${n}Postal`]),
+      row('Email', a[`co${n}Email`]||'—'),
+      row('Phone', a[`co${n}Phone`]||'—'),
+      row('Annual Taxable Income', a[`co${n}Income`] ? '$'+Number(a[`co${n}Income`]).toLocaleString() : '—'),
+      row('Identifies as', atsiLabel(a[`co${n}Atsi`])||'—'),
+    ].join(''));
+  };
+
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>FPHO Application — ${a.primaryFirstName} ${a.primaryLastName}</title>
+  <style>body{font-family:Arial,sans-serif;margin:0;padding:20px;color:#222}@page{margin:20mm}tr:nth-child(even){background:#f9f9f9}.badge{display:inline-block;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700}</style>
+  </head><body>
+  <div style="text-align:center;margin-bottom:24px;padding:20px;background:linear-gradient(135deg,#1a3a2a,#2d6a4f);color:#fff;border-radius:8px">
+    <div style="font-size:22px;font-weight:800">First Peoples Home Ownership Program</div>
+    <div style="font-size:14px;margin-top:4px">Application Form — Homes Victoria</div>
+    <div style="font-size:12px;margin-top:8px;opacity:.8">Application ID: ${a.id} &bull; Created: ${fmt(a.created)} &bull; Status: ${(a.status||'draft').toUpperCase()}</div>
+  </div>
+
+  ${section('Eligibility & Application Details', [
+    row('Eligibility Confirmed', a.eligible||'—'),
+    row('Application Status', (a.status||'draft').toUpperCase()),
+    row('Intended Purchase Location', a.purchaseSuburb||'—'),
+    row('Deposit Saved', a.depositSaved ? '$'+Number(a.depositSaved).toLocaleString() : '—'),
+    row('New Build?', a.newBuild||'—'),
+    row('Number of Co-applicants', String(a.coApplicantCount||0)),
+  ].join(''))}
+
+  ${section('Primary Applicant', [
+    row('Name', [a.primaryTitle, a.primaryFirstName, a.primaryLastName].filter(Boolean).join(' ')||'—'),
+    row('Residential Address', a.primaryAddr||'—'),
+    row('Postal Address', a.primaryPostal),
+    row('Email', a.primaryEmail||'—'),
+    row('Phone', a.primaryPhone||'—'),
+    row('Preferred Contact', a.primaryContact||'—'),
+    row('Annual Taxable Income', a.primaryIncome ? '$'+Number(a.primaryIncome).toLocaleString() : '—'),
+    row('Identifies as', a.primaryAtsi||'—'),
+  ].join(''))}
+
+  ${coBlock(1)}${coBlock(2)}${coBlock(3)}
+
+  ${section('Documentation', [
+    row('Proof of Income', [a.docTaxReturn?'Latest tax return':null, a.docCentrelink?'Centrelink statement':null].filter(Boolean).join(', ')||'—'),
+    row('Proof of ID / Address', a.proofIdType||'—'),
+    row('Proof Certified', a.proofCertified||'—'),
+    row('Pre-Approval', a.preApprovalType||'—'),
+    row('Confirmation of Aboriginality', a.coaType||'—'),
+  ].join(''))}
+
+  ${section('Application Support', [
+    row('Received Support/Guidance?', a.receivedSupport||'—'),
+    row('Support From', [...(a.supportSources||[]), a.supportOther].filter(Boolean).join(', ')||'—'),
+  ].join(''))}
+
+  ${section('Declaration', [
+    row('Declaration 1 — True & correct', a.decl1?'✓ Confirmed':'Not confirmed'),
+    row('Declaration 2 — False info warning', a.decl2?'✓ Confirmed':'Not confirmed'),
+    row('Declaration 3 — Privacy consent', a.decl3?'✓ Confirmed':'Not confirmed'),
+  ].join(''))}
+
+  <div style="margin-top:32px;display:grid;grid-template-columns:1fr 1fr;gap:24px">
+    <div style="border-top:1px solid #999;padding-top:8px;font-size:12px">Primary Applicant Signature &amp; Date</div>
+    <div style="border-top:1px solid #999;padding-top:8px;font-size:12px">Worker Name: ${a.updatedBy||'__________________'}</div>
+  </div>
+  <div style="margin-top:24px;font-size:11px;color:#888;text-align:center">
+    Worn Gundidj Aboriginal Co-Operative &bull; First Peoples Home Ownership Program &bull; firstpeopleshomeownership@homes.vic.gov.au
+  </div>
+  <script>window.onload=()=>window.print()<\/script>
+  </body></html>`;
+
+  const w = window.open('', '_blank');
+  w.document.write(html);
+  w.document.close();
 }
 
 // ============================================================
