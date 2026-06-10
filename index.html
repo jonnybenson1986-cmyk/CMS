@@ -5612,7 +5612,7 @@ function workerSelectHTML(selectId, inputId, selectedVal) {
 
 // ===== AUDIT LOG PAGE =====
 function renderAuditLog() {
-  const isAdmin = currentUser?.role === 'admin';
+  const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'sysmanager';
   const log = [...auditLog].reverse(); // newest first
 
   // Filter state
@@ -6055,10 +6055,11 @@ function showToast(msg) {
 // ROLE-BASED ACCESS CONTROL
 // ============================================================
 const ROLES = {
-  admin:      { label:'Administrator', color:'#7c2d12', bg:'#fef3c7', icon:'🛡️', desc:'Full access — all clients, reports, settings, and data management' },
-  worker:     { label:'Case Worker',   color:'#1a3a2a', bg:'#d1fae5', icon:'👤', desc:'Access to assigned clients, case notes, calendar, and time tracking' },
-  reception:  { label:'Reception',     color:'#1e40af', bg:'#dbeafe', icon:'🎫', desc:'Referral holding bay, calendar, and client search — no case notes' },
-  supervisor: { label:'Supervisor',    color:'#7e22ce', bg:'#f3e8ff', icon:'👁️', desc:'All worker access plus reports, risk register, and team overview' },
+  sysmanager: { label:'System Manager', color:'#7c2d12', bg:'#fef3c7', icon:'⭐', desc:'Full system access — all functions, settings, user management, data, and audit log' },
+  admin:      { label:'Administrator',  color:'#1a3a2a', bg:'#d1fae5', icon:'🛡️', desc:'Full access — all clients, reports, settings, and data management' },
+  supervisor: { label:'Supervisor',     color:'#7e22ce', bg:'#f3e8ff', icon:'👁️', desc:'All worker access plus reports, risk register, and team overview' },
+  worker:     { label:'Case Worker',    color:'#1a3a2a', bg:'#d1fae5', icon:'👤', desc:'Access to assigned clients, case notes, calendar, and time tracking' },
+  reception:  { label:'Reception',      color:'#1e40af', bg:'#dbeafe', icon:'🎫', desc:'Referral holding bay, calendar, and client search — no case notes' },
 };
 
 let currentUser = DB.load('currentUser', null);
@@ -6085,7 +6086,16 @@ function showLoginScreen(setup) {
         <p style="font-size:13px;color:var(--muted);margin-top:4px">${setup?'First time setup — create your admin account':'Sign in to continue'}</p>
       </div>
       ${setup ? `
-        <div class="form-group"><label>Your Name *</label><input id="login-name" placeholder="Full name"></div>
+        <div class="form-group"><label>Your Name *</label>
+          <select id="login-name" onchange="autoSetRole()" style="font-size:14px;padding:10px">
+            <option value="">— Select your name —</option>
+            <option value="Jon Benson">Jon Benson</option>
+            <option value="Jade Atkinson">Jade Atkinson</option>
+            <option value="Brett Clarke">Brett Clarke</option>
+            <option value="__other__">Other (type below)</option>
+          </select>
+          <input id="login-name-other" placeholder="Enter full name" style="display:none;margin-top:8px;width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:6px;font-size:13px">
+        </div>
         <div class="form-group"><label>Role</label>
           <select id="login-role">${Object.entries(ROLES).map(([k,v])=>`<option value="${k}">${v.icon} ${v.label}</option>`).join('')}</select></div>
         <div class="form-group"><label>Create PIN (4–6 digits) *</label><input type="password" id="login-pin" maxlength="6" placeholder="e.g. 1234" inputmode="numeric"></div>
@@ -6106,12 +6116,26 @@ function showLoginScreen(setup) {
   </div>`;
 }
 
+function autoSetRole() {
+  const sel = document.getElementById('login-name')?.value;
+  const roleEl = document.getElementById('login-role');
+  const otherEl = document.getElementById('login-name-other');
+  if(otherEl) otherEl.style.display = sel === '__other__' ? 'block' : 'none';
+  if(!roleEl) return;
+  // Auto-assign roles by name
+  const roleMap = { 'Jon Benson':'sysmanager', 'Jade Atkinson':'worker', 'Brett Clarke':'worker' };
+  if(roleMap[sel]) roleEl.value = roleMap[sel];
+}
+
 function createFirstUser() {
-  const name=document.getElementById('login-name')?.value?.trim();
+  const sel = document.getElementById('login-name')?.value;
+  const name = sel === '__other__'
+    ? (document.getElementById('login-name-other')?.value?.trim())
+    : sel;
   const pin=document.getElementById('login-pin')?.value;
   const pin2=document.getElementById('login-pin2')?.value;
   const role=document.getElementById('login-role')?.value;
-  if(!name){alert('Name required');return;}
+  if(!name){alert('Please select or enter your name');return;}
   if(!pin||pin.length<4){alert('PIN must be 4–6 digits');return;}
   if(pin!==pin2){alert('PINs do not match');return;}
   const u={id:uid(),name,role,pin};
@@ -6137,10 +6161,11 @@ function logout() {
 function canAccess(feature) {
   if(!currentUser) return false;
   const role = currentUser.role;
+  if(role === 'sysmanager') return true; // System Manager has full access to everything
   const restricted = {
-    settings: ['admin'],
-    reports:  ['admin','supervisor'],
-    cleardata:['admin'],
+    settings:  ['admin'],
+    reports:   ['admin','supervisor'],
+    cleardata: ['admin'],
     allclients:['admin','supervisor','worker'],
     reception: ['admin','supervisor','reception','worker'],
   };
