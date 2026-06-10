@@ -6039,7 +6039,6 @@ function exportAuditLog() {
 }
 
 function renderSettings() {
-  const isAdmin = currentUser?.role==='admin';
   return `
   <div class="card">
     <div class="card-title" style="margin-bottom:16px">⚙️ System Settings</div>
@@ -6048,58 +6047,6 @@ function renderSettings() {
     <button class="btn btn-primary" onclick="saveSettings()">Save Settings</button>
   </div>
 
-  <!-- ROLE-BASED ACCESS — USER ACCOUNTS -->
-  <div class="card">
-    <div class="card-header">
-      <div class="card-title">🛡️ User Accounts &amp; Role-Based Access</div>
-      ${isAdmin?`<button class="btn btn-primary btn-sm" onclick="openAddUserModal()">➕ Add User</button>`:''}
-    </div>
-    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:16px">
-      ${Object.entries(ROLES).map(([k,v])=>`<div style="border:1px solid var(--border);border-radius:8px;padding:12px;background:${v.bg}20">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><span style="font-size:18px">${v.icon}</span><strong style="color:${v.color}">${v.label}</strong></div>
-        <div style="font-size:12px;color:var(--muted)">${v.desc}</div>
-      </div>`).join('')}
-    </div>
-    <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:10px">Current Users</div>
-    ${userProfiles.length===0
-      ?`<p style="color:var(--muted);font-size:13px">No users set up yet</p>`
-      :`<div style="display:grid;gap:8px">
-        ${userProfiles.map((u,i)=>`<div style="display:flex;align-items:center;gap:12px;padding:10px 14px;background:var(--bg);border-radius:8px;border:1px solid var(--border);${u.id===currentUser?.id?'border-color:var(--primary-light)':''}">
-          <div class="avatar" style="width:34px;height:34px;font-size:14px;background:${ROLES[u.role]?.color||'#4b5563'}">${initials(u.name)}</div>
-          <div style="flex:1">
-            <div style="font-size:14px;font-weight:600">${u.name} ${u.id===currentUser?.id?'<span style="font-size:11px;color:var(--primary-light)">(You)</span>':''}</div>
-            <div style="font-size:12px;color:var(--muted)">${ROLES[u.role]?.icon||''} ${ROLES[u.role]?.label||u.role}</div>
-          </div>
-          ${isAdmin&&u.id!==currentUser?.id?`
-          <button class="btn btn-sm btn-outline" onclick="openEditUserModal(${i})">✏️ Edit</button>
-          <button class="btn btn-sm btn-danger" onclick="removeUser(${i})">✕</button>`
-          :isAdmin?`<button class="btn btn-sm btn-outline" onclick="openChangePinModal()">🔑 Change Password</button>`:''}
-          ${!isAdmin&&u.id===currentUser?.id?`<button class="btn btn-sm btn-outline" onclick="openChangePinModal()">🔑 Change Password</button>`:''}
-        </div>`).join('')}
-      </div>`
-    }
-  </div>
-
-  <!-- WORKERS LIST -->
-  <div class="card">
-    <div class="card-header">
-      <div class="card-title">👷 Workers / Staff List</div>
-      <button class="btn btn-primary btn-sm" onclick="openAddWorkerNameModal()">➕ Add Worker</button>
-    </div>
-    <p style="font-size:13px;color:var(--muted);margin-bottom:14px">Workers added here appear in dropdowns across the system — case notes, time entries, appointments, and allocations.</p>
-    ${workersList.length===0
-      ? `<div class="empty-state"><div class="icon">👷</div><p>No workers added yet</p></div>`
-      : `<div style="display:grid;gap:8px">
-          ${workersList.map((w,i)=>`
-          <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;background:var(--bg);border-radius:8px;border:1px solid var(--border)">
-            <div class="avatar" style="width:32px;height:32px;font-size:13px;background:var(--primary-light)">${initials(w)}</div>
-            <span style="flex:1;font-size:14px;font-weight:600">${w}</span>
-            <button class="btn btn-sm btn-outline" onclick="editWorkerName(${i})">✏️ Edit</button>
-            <button class="btn btn-sm btn-danger"  onclick="removeWorkerName(${i})">✕ Remove</button>
-          </div>`).join('')}
-        </div>`
-    }
-  </div>
   <div class="card">
     <div class="card-title" style="margin-bottom:16px">💾 Data Management</div>
     <p style="font-size:13px;color:var(--muted);margin-bottom:16px">All data is stored locally in your browser. Export regularly to back up client records.</p>
@@ -6139,113 +6086,10 @@ function renderSettings() {
   </div>`;
 }
 
-// ===== USER MANAGEMENT =====
-function openAddUserModal() {
-  showModal('➕ Add User Account', `
-    <div class="form-group"><label>Full Name *</label><input id="au-name" placeholder="e.g. Sarah Johnson"></div>
-    <div class="form-group"><label>Role *</label>
-      <select id="au-role">${Object.entries(ROLES).map(([k,v])=>`<option value="${k}">${v.icon} ${v.label} — ${v.desc.slice(0,50)}…</option>`).join('')}</select></div>
-    <div class="form-group"><label>Password *</label><input type="password" id="au-pin" placeholder="Enter password"></div>
-    <div class="form-group"><label>Confirm Password *</label><input type="password" id="au-pin2" placeholder="Repeat password"></div>`,
-    () => {
-      const name=document.getElementById('au-name')?.value?.trim();
-      const pin=document.getElementById('au-pin')?.value;
-      const pin2=document.getElementById('au-pin2')?.value;
-      if(!name){alert('Name required');return false;}
-      if(!pin||pin.length<3){alert('Password required');return false;}
-      if(pin!==pin2){alert('Passwords do not match');return false;}
-      userProfiles.push({id:uid(),name,role:document.getElementById('au-role')?.value,pin});
-      saveUserProfiles(); showToast('User added'); return true;
-    }
-  );
-}
-
-function openEditUserModal(idx) {
-  const u=userProfiles[idx]; if(!u) return;
-  showModal('✏️ Edit User', `
-    <div class="form-group"><label>Full Name *</label><input id="eu-name" value="${u.name}"></div>
-    <div class="form-group"><label>Role</label>
-      <select id="eu-role">${Object.entries(ROLES).map(([k,v])=>`<option value="${k}" ${u.role===k?'selected':''}>${v.icon} ${v.label}</option>`).join('')}</select></div>
-    <div class="form-group"><label>New Password (leave blank to keep current)</label><input type="password" id="eu-pin" placeholder="Leave blank to keep current"></div>`,
-    () => {
-      const name=document.getElementById('eu-name')?.value?.trim();
-      if(!name){alert('Name required');return false;}
-      const newPin=document.getElementById('eu-pin')?.value;
-      userProfiles[idx].name=name;
-      userProfiles[idx].role=document.getElementById('eu-role')?.value;
-      if(newPin&&newPin.length>=3) userProfiles[idx].pin=newPin;
-      saveUserProfiles(); showToast('User updated'); return true;
-    }
-  );
-}
-
-function removeUser(idx) {
-  const u = userProfiles[idx];
-  if(!confirm(`Remove ${u?.name}?`)) return;
-  audit('Removed user account', u?.name||'');
-  userProfiles.splice(idx,1); saveUserProfiles(); showPage('settings');
-}
-
-function openChangePinModal() {
-  showModal('🔑 Change My Password', `
-    <div class="form-group"><label>Current Password *</label><input type="password" id="cp-current"></div>
-    <div class="form-group"><label>New Password *</label><input type="password" id="cp-new"></div>
-    <div class="form-group"><label>Confirm New Password *</label><input type="password" id="cp-new2"></div>`,
-    () => {
-      const cur=document.getElementById('cp-current')?.value;
-      const nw=document.getElementById('cp-new')?.value;
-      const nw2=document.getElementById('cp-new2')?.value;
-      if(cur!==currentUser?.pin){alert('Current password incorrect');return false;}
-      if(!nw||nw.length<3){alert('New password required');return false;}
-      if(nw!==nw2){alert('Passwords do not match');return false;}
-      const u=userProfiles.find(p=>p.id===currentUser.id);
-      if(u){u.pin=nw;currentUser.pin=nw;saveUserProfiles();saveCurrentUser(currentUser);}
-      showToast('PIN changed ✓'); return true;
-    }
-  );
-}
-
 function saveSettings() {
   DB.save('orgName', document.getElementById('set-org')?.value||'');
   DB.save('workerName', document.getElementById('set-worker')?.value||'');
   showToast('Settings saved');
-}
-
-function openAddWorkerNameModal() {
-  showModal('➕ Add Worker', `
-    <div class="form-group"><label>Worker Full Name *</label><input id="awn-name" placeholder="e.g. Sarah Johnson"></div>
-    <div class="form-group"><label>Role / Title (optional)</label><input id="awn-role" placeholder="e.g. SEWB Worker, Case Manager"></div>`,
-    () => {
-      const name = document.getElementById('awn-name')?.value?.trim();
-      if(!name) { alert('Name is required'); return false; }
-      const display = document.getElementById('awn-role')?.value?.trim()
-        ? `${name} — ${document.getElementById('awn-role').value.trim()}`
-        : name;
-      if(workersList.includes(display)) { showToast('Worker already exists'); return false; }
-      workersList.push(display); saveWorkersList(); showToast('Worker added'); return true;
-    }
-  );
-}
-
-function editWorkerName(idx) {
-  const current = workersList[idx]||'';
-  const parts = current.split(' — ');
-  showModal('✏️ Edit Worker', `
-    <div class="form-group"><label>Worker Name *</label><input id="ewn-name" value="${parts[0]||''}"></div>
-    <div class="form-group"><label>Role / Title</label><input id="ewn-role" value="${parts[1]||''}"></div>`,
-    () => {
-      const name = document.getElementById('ewn-name')?.value?.trim();
-      if(!name) { alert('Name required'); return false; }
-      const role = document.getElementById('ewn-role')?.value?.trim();
-      workersList[idx] = role ? `${name} — ${role}` : name;
-      saveWorkersList(); showToast('Worker updated'); return true;
-    }
-  );
-}
-
-function removeWorkerName(idx) {
-  if(!confirm(`Remove "${workersList[idx]}" from the workers list?`)) return;
-  workersList.splice(idx,1); saveWorkersList(); showPage('settings');
 }
 
 function exportData() {
