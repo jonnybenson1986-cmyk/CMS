@@ -5914,8 +5914,8 @@ function openFPHOForm(id) {
       ${showAtsi?`<div class="fpho-field" style="margin-top:10px"><label>I identify as *</label>
         <div class="fpho-radio-group">
           ${prefix==='primary'?
-            ['Aboriginal descent','Torres Strait Islander descent','Both Aboriginal and Torres Strait Islander descent'].map(v=>`<label><input type="radio" name="${prefix}-atsi" value="${v}" ${a[prefix+'Atsi']===v?'checked':''}> ${v}</label>`).join('') :
-            ['Aboriginal descent','Torres Strait Islander descent','Both Aboriginal and Torres Strait Islander descent','Neither'].map(v=>`<label><input type="checkbox" class="${prefix}-atsi-cb" value="${v}" ${(a[prefix+'Atsi']||[]).includes(v)?'checked':''}> ${v}</label>`).join('')
+            ['Aboriginal descent','Torres Strait Islander descent','Both Aboriginal and Torres Strait Islander descent'].map(v=>`<label><input type="radio" name="${prefix}-atsi" value="${v}" ${a[prefix+'Atsi']===v?'checked':''}><span>${v}</span></label>`).join('') :
+            ['Aboriginal descent','Torres Strait Islander descent','Both Aboriginal and Torres Strait Islander descent','Neither'].map(v=>`<label><input type="checkbox" class="${prefix}-atsi-cb" value="${v}" ${(a[prefix+'Atsi']||[]).includes(v)?'checked':''}><span>${v}</span></label>`).join('')
           }
         </div></div>`:''}
     </div>`;
@@ -5941,8 +5941,8 @@ function openFPHOForm(id) {
     </div>
     <div class="fpho-field"><label>I confirm that I meet the eligibility criteria *</label>
       <div class="fpho-radio-group">
-        <label><input type="radio" name="fpho-eligible" value="Yes" ${a.eligible==='Yes'?'checked':''}> Yes — I confirm I meet all eligibility criteria</label>
-        <label><input type="radio" name="fpho-eligible" value="No" ${a.eligible==='No'?'checked':''}> No</label>
+        <label><input type="radio" name="fpho-eligible" value="Yes" ${a.eligible==='Yes'?'checked':''}><span>Yes — I confirm I meet all eligibility criteria</span></label>
+        <label><input type="radio" name="fpho-eligible" value="No" ${a.eligible==='No'?'checked':''}><span>No</span></label>
       </div>
     </div>
 
@@ -6001,12 +6001,12 @@ function openFPHOForm(id) {
     <div style="margin-bottom:12px">
       <div style="font-weight:700;font-size:13px;margin-bottom:8px">Proof of Address &amp; Identification (must be certified)</div>
       <div class="fpho-radio-group">
-        ${['A copy of your Victorian Drivers Licence','A copy of your Proof of Identification card (ID)','A copy of your Residential Rental Tenancy Agreement'].map(v=>`<label><input type="radio" name="fpho-proofid" value="${v}" ${a.proofIdType===v?'checked':''}> ${v}</label>`).join('')}
+        ${['A copy of your Victorian Drivers Licence','A copy of your Proof of Identification card (ID)','A copy of your Residential Rental Tenancy Agreement'].map(v=>`<label><input type="radio" name="fpho-proofid" value="${v}" ${a.proofIdType===v?'checked':''}><span>${v}</span></label>`).join('')}
       </div>
       <div class="fpho-field" style="margin-top:8px"><label>Is your proof of address and identification certified? *</label>
         <div class="fpho-radio-group" style="flex-direction:row;gap:20px">
-          <label><input type="radio" name="fpho-certified" value="Yes" ${a.proofCertified==='Yes'?'checked':''}> Yes</label>
-          <label><input type="radio" name="fpho-certified" value="No" ${a.proofCertified==='No'?'checked':''}> No</label>
+          <label><input type="radio" name="fpho-certified" value="Yes" ${a.proofCertified==='Yes'?'checked':''}><span>Yes</span></label>
+          <label><input type="radio" name="fpho-certified" value="No" ${a.proofCertified==='No'?'checked':''}><span>No</span></label>
         </div>
       </div>
     </div>
@@ -6014,14 +6014,14 @@ function openFPHOForm(id) {
     <div style="margin-bottom:12px">
       <div style="font-weight:700;font-size:13px;margin-bottom:8px">Proof of Pre-Approval</div>
       <div class="fpho-radio-group">
-        <label><input type="radio" name="fpho-preapproval" value="Pre-approval document from a financial provider" ${a.preApprovalType?'checked':''}> Pre-approval document from a financial provider</label>
+        <label><input type="radio" name="fpho-preapproval" value="Pre-approval document from a financial provider" ${a.preApprovalType?'checked':''}><span>Pre-approval document from a financial provider</span></label>
       </div>
     </div>
 
     <div style="margin-bottom:12px">
       <div style="font-weight:700;font-size:13px;margin-bottom:8px">Confirmation of Aboriginality</div>
       <div class="fpho-radio-group">
-        ${['A formal certified letter from an Aboriginal Community Controlled Organisation','A formal certified letter from a Local Aboriginal Land Council','Still obtaining Confirmation of Aboriginality'].map(v=>`<label><input type="radio" name="fpho-coa" value="${v}" ${a.coaType===v?'checked':''}> ${v}</label>`).join('')}
+        ${['A formal certified letter from an Aboriginal Community Controlled Organisation','A formal certified letter from a Local Aboriginal Land Council','Still obtaining Confirmation of Aboriginality'].map(v=>`<label><input type="radio" name="fpho-coa" value="${v}" ${a.coaType===v?'checked':''}><span>${v}</span></label>`).join('')}
       </div>
     </div>
 
@@ -6030,13 +6030,13 @@ function openFPHOForm(id) {
     <div class="fpho-field">
       <label>Have you received support or guidance regarding this program? *</label>
       <div class="fpho-radio-group" style="flex-direction:row;gap:20px">
-        <label><input type="radio" name="fpho-support" value="Yes" ${a.receivedSupport==='Yes'?'checked':''}> Yes</label>
-        <label><input type="radio" name="fpho-support" value="No" ${a.receivedSupport==='No'?'checked':''}> No</label>
+        <label><input type="radio" name="fpho-support" value="Yes" ${a.receivedSupport==='Yes'?'checked':''}><span>Yes</span></label>
+        <label><input type="radio" name="fpho-support" value="No" ${a.receivedSupport==='No'?'checked':''}><span>No</span></label>
       </div>
     </div>
     <div class="fpho-field" style="margin-top:10px"><label>Support received from (select all that apply)</label>
       <div class="fpho-check-group">
-        ${['ACCO Home Ownership Officer from Worn Gundidj','ACCO Home Ownership Officer from Aboriginal Housing Victoria','Indigenous Business Australia (IBA)'].map(v=>`<label><input type="checkbox" class="fpho-support-cb" value="${v}" ${(a.supportSources||[]).includes(v)?'checked':''}> ${v}</label>`).join('')}
+        ${['ACCO Home Ownership Officer from Worn Gundidj','ACCO Home Ownership Officer from Aboriginal Housing Victoria','Indigenous Business Australia (IBA)'].map(v=>`<label><input type="checkbox" class="fpho-support-cb" value="${v}" ${(a.supportSources||[]).includes(v)?'checked':''}><span>${v}</span></label>`).join('')}
         <label><input type="checkbox" class="fpho-support-cb" value="Other"> Other: <input id="fpho-support-other" value="${a.supportOther||''}" style="border:none;border-bottom:1px solid var(--border);padding:2px;font-size:13px;width:140px"></label>
       </div>
     </div>
