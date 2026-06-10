@@ -473,7 +473,18 @@ const FSYNC = (() => {
 
 let clients = DB.load('clients', []);
 let notes = DB.load('notes', []);
-const DEFAULT_WORKERS = ['Jon Benson', 'Jade Atkinson', 'Brett Clarke'];
+const DEFAULT_WORKERS = [
+  'Jon Benson',
+  'Jade Atkinson',
+  'Brett Clarke',
+  'Simon Dart',
+  'Taylem Wason',
+  'Taf Chitava',
+  'Chris Shepperd',
+  'Nic Nitcher',
+  'Brett Nuske',
+  'Sean Bloom',
+];
 let workersList = DB.load('workersList', []);
 // Seed default workers if list is empty
 if(workersList.length === 0) { workersList = [...DEFAULT_WORKERS]; DB.save('workersList', workersList); }
@@ -6089,9 +6100,16 @@ function showLoginScreen(setup) {
         <div class="form-group"><label>Your Name *</label>
           <select id="login-name" onchange="autoSetRole()" style="font-size:14px;padding:10px">
             <option value="">— Select your name —</option>
-            <option value="Jon Benson">Jon Benson</option>
+            <option value="Jon Benson">Jon Benson — SEWB Case Worker</option>
             <option value="Jade Atkinson">Jade Atkinson</option>
             <option value="Brett Clarke">Brett Clarke</option>
+            <option value="Simon Dart">Simon Dart — First Home Ownership Program</option>
+            <option value="Taylem Wason">Taylem Wason — Work Foundations Case Manager</option>
+            <option value="Taf Chitava">Taf Chitava — CFO WGAC</option>
+            <option value="Chris Shepperd">Chris Shepperd — CEO WGAC</option>
+            <option value="Nic Nitcher">Nic Nitcher — Reception &amp; Housing</option>
+            <option value="Brett Nuske">Brett Nuske — Housing Officer &amp; Program Manager</option>
+            <option value="Sean Bloom">Sean Bloom — Reception &amp; SEWB Assistance</option>
             <option value="__other__">Other (type below)</option>
           </select>
           <input id="login-name-other" placeholder="Enter full name" style="display:none;margin-top:8px;width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:6px;font-size:13px">
@@ -6123,7 +6141,18 @@ function autoSetRole() {
   if(otherEl) otherEl.style.display = sel === '__other__' ? 'block' : 'none';
   if(!roleEl) return;
   // Auto-assign roles by name
-  const roleMap = { 'Jon Benson':'sysmanager', 'Jade Atkinson':'worker', 'Brett Clarke':'worker' };
+  const roleMap = {
+    'Jon Benson':    'sysmanager',
+    'Chris Shepperd':'admin',
+    'Taf Chitava':   'admin',
+    'Brett Nuske':   'supervisor',
+    'Jade Atkinson': 'worker',
+    'Brett Clarke':  'worker',
+    'Simon Dart':    'worker',
+    'Taylem Wason':  'worker',
+    'Nic Nitcher':   'reception',
+    'Sean Bloom':    'reception',
+  };
   if(roleMap[sel]) roleEl.value = roleMap[sel];
 }
 
