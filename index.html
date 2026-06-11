@@ -253,7 +253,7 @@
       <span class="icon">♿</span><span>Disability</span>
     </div>
     <div class="nav-item" onclick="showPage('homeownership')">
-      <span class="icon">🏠</span><span>Home Ownership</span>
+      <span class="icon">🏠</span><span>First Peoples Home Ownership</span>
     </div>
   </div>
   <div class="nav-section">
@@ -6590,6 +6590,7 @@ const ROLES = {
 let currentUser = DB.load('currentUser', null);
 let userProfiles = DB.load('userProfiles', []);
 function saveUserProfiles() { DB.save('userProfiles', userProfiles); }
+function saveCurrentUser(u) { currentUser = u; DB.save('currentUser', u); }
 
 
 function checkLogin() {
