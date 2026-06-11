@@ -6639,8 +6639,6 @@ function showLoginScreen(setup) {
             <option value="">— Select your name —</option>
             ${userProfiles.map(u=>`<option value="${u.id}">${ROLES[u.role]?.icon||'👤'} ${u.name} (${ROLES[u.role]?.label||u.role})</option>`).join('')}
           </select></div>
-        <div class="form-group"><label>Password</label><input type="password" id="login-pin" placeholder="Enter your password"
-          onkeydown="if(event.key==='Enter')doLogin()"></div>
         <button class="btn btn-primary" style="width:100%;padding:12px;font-size:15px;margin-bottom:10px" onclick="doLogin()">Sign In →</button>
         <p id="login-error" style="color:#dc2626;font-size:13px;text-align:center;min-height:18px"></p>
       `}
@@ -6691,11 +6689,10 @@ function createFirstUser() {
 
 function doLogin() {
   const userId=document.getElementById('login-user')?.value;
-  const pin=document.getElementById('login-pin')?.value;
   const errEl=document.getElementById('login-error');
   if(!userId){errEl.textContent='Please select your name';return;}
   const u=userProfiles.find(p=>p.id===userId);
-  if(!u||u.pin!==pin){errEl.textContent='Incorrect PIN — please try again';return;}
+  if(!u){errEl.textContent='Worker not found';return;}
   saveCurrentUser(u); initApp();
 }
 
