@@ -5745,6 +5745,7 @@ function renderDisabilityTab(c) {
     <div class="card-header"><div class="card-title">♿ Disability Assessment &amp; Support Plan</div>
       <div style="display:flex;gap:8px">
         <button class="btn btn-sm btn-outline" onclick="openQuickReport('disability','${c.id}')">📊 Report</button>
+        <button class="btn btn-sm btn-outline" onclick="openNDISForm('${c.id}')">📋 NDIS Access Request</button>
         <button class="btn btn-sm btn-primary" onclick="saveDisability('${c.id}')">💾 Save</button>
       </div>
     </div>
@@ -5829,6 +5830,314 @@ function saveDisability(id) {
   c.ndis = g('dis-ndisNum')||c.ndis;
   c.disability = true;
   saveAll(); showToast('Disability details saved ✓');
+}
+
+// ============================================================
+// NDIS ACCESS REQUEST FORM
+// ============================================================
+function openNDISForm(clientId) {
+  const c = clients.find(cl=>cl.id===clientId); if(!c) return;
+  const nf = c.ndisForm || {};
+  const s1a = nf.s1a || {};
+  const s1b = nf.s1b || {};
+  const s1c = nf.s1c || {};
+  const s1d = nf.s1d || {};
+  const s1e = nf.s1e || {};
+  const s2a = nf.s2a || {};
+  const s2b = nf.s2b || {};
+  const s2c = nf.s2c || {};
+  const s2d = nf.s2d || {};
+  const s2e = nf.s2e || {};
+
+  const yesNo = (name,val) => `
+    <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="radio" name="${name}" value="Yes" ${val==='Yes'?'checked':''}> <span>Yes</span></label>
+    <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="radio" name="${name}" value="No" ${val==='No'?'checked':''}> <span>No</span></label>`;
+
+  const html = `
+  <style>
+    .ndis-section{background:var(--bg);border-radius:8px;padding:16px;margin-bottom:16px}
+    .ndis-section-title{font-weight:700;font-size:15px;color:var(--primary);border-bottom:2px solid var(--primary);padding-bottom:6px;margin-bottom:14px}
+    .ndis-part{margin-bottom:14px}
+    .ndis-part-title{font-weight:600;font-size:13px;color:var(--text);background:var(--border);border-radius:4px;padding:4px 8px;margin-bottom:10px}
+    .ndis-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .ndis-row-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+    .ndis-full{grid-column:1/-1}
+    .ndis-radio-row{display:flex;gap:16px;flex-wrap:wrap;padding:4px 0}
+    .ndis-print-btn{float:right;margin-bottom:8px}
+    @media print{.ndis-print-btn,.modal-footer{display:none}.modal-body{max-height:none!important;overflow:visible!important}}
+  </style>
+  <button class="btn btn-sm btn-outline ndis-print-btn" onclick="window.print()">🖨️ Print Form</button>
+
+  <!-- SECTION 1 -->
+  <div class="ndis-section">
+    <div class="ndis-section-title">SECTION 1 — APPLICANT INFORMATION</div>
+
+    <div class="ndis-part">
+      <div class="ndis-part-title">Part A — Personal Details</div>
+      <div class="ndis-row">
+        <div class="form-group"><label>Title</label>
+          <select id="nf-title">
+            ${['','Mr','Mrs','Ms','Miss','Mx','Dr','Prof'].map(t=>`<option ${s1a.title===t?'selected':''}>${t}</option>`).join('')}
+          </select></div>
+        <div class="form-group"><label>Given Names</label><input id="nf-givenNames" value="${s1a.givenNames||c.firstName||''}"></div>
+        <div class="form-group"><label>Preferred Name</label><input id="nf-preferredName" value="${s1a.preferredName||c.preferredName||''}"></div>
+        <div class="form-group"><label>Surname / Family Name</label><input id="nf-surname" value="${s1a.surname||c.lastName||''}"></div>
+        <div class="form-group"><label>Other Names (including maiden name)</label><input id="nf-otherNames" value="${s1a.otherNames||''}"></div>
+        <div class="form-group"><label>Date of Birth</label><input type="date" id="nf-dob" value="${s1a.dob||c.dob||''}"></div>
+      </div>
+      <div class="form-group"><label>Gender / Pronouns</label>
+        <div class="ndis-radio-row">
+          ${['Male','Female','Non-binary','Gender diverse','Prefer not to say','Prefer to self-describe'].map(g=>`<label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="radio" name="nf-gender" value="${g}" ${s1a.gender===g?'checked':''}> <span>${g}</span></label>`).join('')}
+        </div>
+        <input id="nf-genderSelfDesc" placeholder="Self-describe (if selected above)" value="${s1a.genderSelfDesc||''}" style="margin-top:6px"></div>
+      <div class="form-group"><label>Aboriginal and/or Torres Strait Islander Origin</label>
+        <div class="ndis-radio-row">
+          ${['Aboriginal','Torres Strait Islander','Both','Not Aboriginal or Torres Strait Islander','Prefer not to say'].map(g=>`<label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="radio" name="nf-atsi" value="${g}" ${s1a.atsi===g?'checked':''}> <span>${g}</span></label>`).join('')}
+        </div></div>
+      <div class="ndis-row">
+        <div class="form-group"><label>Country of Birth</label><input id="nf-countryBirth" value="${s1a.countryBirth||'Australia'}"></div>
+        <div class="form-group"><label>Australian Citizen or Permanent Resident?</label>
+          <div class="ndis-radio-row">${yesNo('nf-ausResident',s1a.ausResident)}</div></div>
+        <div class="form-group"><label>If No — Visa Type/Subclass</label><input id="nf-visaType" value="${s1a.visaType||''}"></div>
+        <div class="form-group"><label>Visa Expiry Date</label><input type="date" id="nf-visaExpiry" value="${s1a.visaExpiry||''}"></div>
+      </div>
+      <div class="ndis-row">
+        <div class="form-group ndis-full"><label>Home Address</label><input id="nf-homeAddress" value="${s1a.homeAddress||c.address||''}"></div>
+        <div class="form-group"><label>Suburb</label><input id="nf-homeSuburb" value="${s1a.homeSuburb||c.suburb||''}"></div>
+        <div class="form-group"><label>State</label>
+          <select id="nf-homeState">${['','VIC','NSW','QLD','SA','WA','TAS','NT','ACT'].map(s=>`<option ${s1a.homeState===s?'selected':''}>${s}</option>`).join('')}</select></div>
+        <div class="form-group"><label>Postcode</label><input id="nf-homePostcode" value="${s1a.homePostcode||c.postcode||''}"></div>
+      </div>
+      <div class="ndis-row">
+        <div class="form-group ndis-full"><label>Postal Address (if different)</label><input id="nf-postalAddress" value="${s1a.postalAddress||''}"></div>
+        <div class="form-group"><label>Postal Suburb</label><input id="nf-postalSuburb" value="${s1a.postalSuburb||''}"></div>
+        <div class="form-group"><label>Postal State</label>
+          <select id="nf-postalState">${['','VIC','NSW','QLD','SA','WA','TAS','NT','ACT'].map(s=>`<option ${s1a.postalState===s?'selected':''}>${s}</option>`).join('')}</select></div>
+        <div class="form-group"><label>Postal Postcode</label><input id="nf-postalPostcode" value="${s1a.postalPostcode||''}"></div>
+      </div>
+      <div class="form-group"><label>Does anyone else in your immediate family have NDIS funding?</label>
+        <div class="ndis-radio-row">${yesNo('nf-familyNdis',s1a.familyNdis)}</div>
+        <input id="nf-familyNdisDetails" placeholder="If Yes — provide their name(s) and NDIS number(s)" value="${s1a.familyNdisDetails||''}" style="margin-top:6px"></div>
+    </div>
+
+    <div class="ndis-part">
+      <div class="ndis-part-title">Part B — Privacy &amp; Consent</div>
+      <div class="form-group"><label>Do you consent to NDIA collecting information from third parties (e.g. treating professionals, government agencies)?</label>
+        <div class="ndis-radio-row">${yesNo('nf-consentThirdParty',s1b.consentThirdParty)}</div></div>
+      <div class="form-group"><label>Do you consent to NDIA accessing your Centrelink Customer Reference Number (CRN)?</label>
+        <div class="ndis-radio-row">${yesNo('nf-consentCRN',s1b.consentCRN)}</div>
+        <input id="nf-crn" placeholder="Centrelink CRN (if consenting)" value="${s1b.crn||''}" style="margin-top:6px"></div>
+    </div>
+
+    <div class="ndis-part">
+      <div class="ndis-part-title">Part C — Contact Details</div>
+      <div class="form-group"><label>Preferred Contact Method</label>
+        <div class="ndis-radio-row">
+          ${['Letter','Email','Phone'].map(m=>`<label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="radio" name="nf-contactMethod" value="${m}" ${s1c.contactMethod===m?'checked':''}> <span>${m}</span></label>`).join('')}
+        </div></div>
+      <div class="ndis-row">
+        <div class="form-group"><label>Home Phone</label><input id="nf-homePhone" value="${s1c.homePhone||c.phone||''}"></div>
+        <div class="form-group"><label>Mobile Phone</label><input id="nf-mobilePhone" value="${s1c.mobilePhone||c.mobile||''}"></div>
+        <div class="form-group"><label>Email Address</label><input type="email" id="nf-email" value="${s1c.email||c.email||''}"></div>
+        <div class="form-group"><label>TTY Number (hearing impaired)</label><input id="nf-tty" value="${s1c.tty||''}"></div>
+      </div>
+      <div class="form-group"><label>Do you consent to receive SMS messages from NDIA?</label>
+        <div class="ndis-radio-row">${yesNo('nf-smsCons',s1c.smsCons)}</div></div>
+      <div class="ndis-row">
+        <div class="form-group"><label>Language Spoken at Home</label><input id="nf-language" value="${s1c.language||c.language||'English'}"></div>
+        <div class="form-group"><label>Do you need an interpreter?</label>
+          <div class="ndis-radio-row">${yesNo('nf-interpreter',s1c.interpreter)}</div></div>
+      </div>
+      <div class="form-group"><label>Contact Person (if applicant cannot be contacted directly)</label><input id="nf-contactPerson" value="${s1c.contactPerson||c.emergencyContact||''}"></div>
+      <div class="ndis-row">
+        <div class="form-group"><label>Contact Person Phone</label><input id="nf-contactPersonPhone" value="${s1c.contactPersonPhone||c.emergencyPhone||''}"></div>
+        <div class="form-group"><label>Contact Person Relationship</label><input id="nf-contactPersonRel" value="${s1c.contactPersonRel||c.emergencyRelation||''}"></div>
+      </div>
+    </div>
+
+    <div class="ndis-part">
+      <div class="ndis-part-title">Part D — Representative Details (if applicable)</div>
+      <div class="form-group"><label>Does someone have parental responsibility or legal authority to act on behalf of the applicant?</label>
+        <div class="ndis-radio-row">${yesNo('nf-hasRep',s1d.hasRep)}</div></div>
+      <div class="ndis-row">
+        <div class="form-group"><label>Representative Name</label><input id="nf-repName" value="${s1d.repName||''}"></div>
+        <div class="form-group"><label>Relationship to Applicant</label><input id="nf-repRelation" value="${s1d.repRelation||''}"></div>
+        <div class="form-group"><label>Representative Phone</label><input id="nf-repPhone" value="${s1d.repPhone||''}"></div>
+        <div class="form-group"><label>Representative Email</label><input type="email" id="nf-repEmail" value="${s1d.repEmail||''}"></div>
+        <div class="form-group ndis-full"><label>Representative Address</label><input id="nf-repAddress" value="${s1d.repAddress||''}"></div>
+        <div class="form-group"><label>Type of Authority</label>
+          <select id="nf-repAuthType">
+            ${['','Parental Responsibility','Guardianship Order','Power of Attorney','Enduring Power of Attorney','Court Order','Other'].map(t=>`<option ${s1d.repAuthType===t?'selected':''}>${t}</option>`).join('')}
+          </select></div>
+        <div class="form-group"><label>Authority Document Reference/Number</label><input id="nf-repAuthRef" value="${s1d.repAuthRef||''}"></div>
+      </div>
+    </div>
+
+    <div class="ndis-part">
+      <div class="ndis-part-title">Part E — Overview of Disability</div>
+      <div class="form-group"><label>Main Disability / Condition (as diagnosed)</label><input id="nf-mainDisability" value="${s1e.mainDisability||c.dis?.disabilityType||''}"></div>
+      <div class="form-group"><label>Other Disabilities / Conditions</label><textarea id="nf-otherDisabilities" style="min-height:70px">${s1e.otherDisabilities||''}</textarea></div>
+      <div class="form-group"><label>Was your disability caused by an accident or incident that may be covered by another scheme (e.g. TAC, WorkCover)?</label>
+        <div class="ndis-radio-row">${yesNo('nf-accidentClaim',s1e.accidentClaim)}</div>
+        <input id="nf-accidentDetails" placeholder="If Yes — provide scheme name and claim number" value="${s1e.accidentDetails||''}" style="margin-top:6px"></div>
+    </div>
+
+    <div class="ndis-part">
+      <div class="ndis-part-title">Part F — Declaration &amp; Signature</div>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:10px">I declare that the information provided in this form is true and correct. I understand that providing false or misleading information may be a criminal offence.</p>
+      <div class="ndis-row">
+        <div class="form-group"><label>Signature (Full Name)</label><input id="nf-sig1Name" value="${nf.sig1Name||''}"></div>
+        <div class="form-group"><label>Date Signed</label><input type="date" id="nf-sig1Date" value="${nf.sig1Date||''}"></div>
+        <div class="form-group"><label>Capacity (e.g. Self, Parent, Guardian)</label><input id="nf-sig1Capacity" value="${nf.sig1Capacity||'Self'}"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SECTION 2 -->
+  <div class="ndis-section">
+    <div class="ndis-section-title">SECTION 2 — TREATING PROFESSIONAL EVIDENCE</div>
+
+    <div class="ndis-part">
+      <div class="ndis-part-title">Part A — Treating Professional Information</div>
+      <div class="ndis-row">
+        <div class="form-group"><label>Professional's Full Name</label><input id="nf-profName" value="${s2a.profName||''}"></div>
+        <div class="form-group"><label>Profession / Qualifications</label><input id="nf-profQuals" value="${s2a.profQuals||''}"></div>
+        <div class="form-group"><label>NDIS Provider Registration Number</label><input id="nf-profProvReg" value="${s2a.profProvReg||''}"></div>
+        <div class="form-group"><label>AHPRA / Professional Registration Number</label><input id="nf-profAhpra" value="${s2a.profAhpra||''}"></div>
+        <div class="form-group ndis-full"><label>Business / Practice Name</label><input id="nf-profBusiness" value="${s2a.profBusiness||''}"></div>
+        <div class="form-group ndis-full"><label>Business Address</label><input id="nf-profAddress" value="${s2a.profAddress||''}"></div>
+        <div class="form-group"><label>Phone</label><input id="nf-profPhone" value="${s2a.profPhone||''}"></div>
+        <div class="form-group"><label>Email</label><input type="email" id="nf-profEmail" value="${s2a.profEmail||''}"></div>
+      </div>
+    </div>
+
+    <div class="ndis-part">
+      <div class="ndis-part-title">Part B — Evidence of Disability</div>
+      <div class="form-group"><label>Main Disability / Condition (diagnosed name)</label><input id="nf-profMainDis" value="${s2b.profMainDis||''}"></div>
+      <div class="form-group"><label>ICD-10 / DSM-5 Code (if applicable)</label><input id="nf-diagCode" value="${s2b.diagCode||''}"></div>
+      <div class="form-group"><label>Date First Diagnosed</label><input type="date" id="nf-diagDate" value="${s2b.diagDate||''}"></div>
+      <div class="form-group"><label>Is the disability permanent (likely to be lifelong)?</label>
+        <div class="ndis-radio-row">${yesNo('nf-isPermanent',s2b.isPermanent)}</div></div>
+      <div class="form-group"><label>If not permanent — expected duration</label><input id="nf-disDuration" value="${s2b.disDuration||''}"></div>
+      <div class="form-group"><label>Other Disabilities / Conditions</label><textarea id="nf-profOtherDis" style="min-height:60px">${s2b.profOtherDis||''}</textarea></div>
+      <div class="form-group"><label>Current treatments, therapies and medications</label><textarea id="nf-treatments" style="min-height:80px">${s2b.treatments||''}</textarea></div>
+      <div class="form-group"><label>Prognosis — describe the likely course of the disability</label><textarea id="nf-prognosis" style="min-height:70px">${s2b.prognosis||''}</textarea></div>
+    </div>
+
+    <div class="ndis-part">
+      <div class="ndis-part-title">Part C — Early Intervention (if applicable)</div>
+      <div class="form-group"><label>Is this an early intervention request (child under 9, or developmental delay)?</label>
+        <div class="ndis-radio-row">${yesNo('nf-earlyIntervention',s2c.earlyIntervention)}</div></div>
+      <div class="form-group"><label>Describe how early intervention supports will reduce the person's future need for support</label>
+        <textarea id="nf-earlyInterventionDesc" style="min-height:80px">${s2c.earlyInterventionDesc||''}</textarea></div>
+    </div>
+
+    <div class="ndis-part">
+      <div class="ndis-part-title">Part D — Existing Assessments &amp; Reports</div>
+      <div class="form-group"><label>List any formal assessments already conducted (e.g. CANS, GMFCS, DSM-5, IQ, OT, speech)</label>
+        <textarea id="nf-existingAssessments" style="min-height:80px">${s2d.existingAssessments||''}</textarea></div>
+      <div class="form-group"><label>Are copies of these assessments attached / available?</label>
+        <div class="ndis-radio-row">${yesNo('nf-assessmentsAttached',s2d.assessmentsAttached)}</div></div>
+    </div>
+
+    <div class="ndis-part">
+      <div class="ndis-part-title">Part E — Functional Capacity</div>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:10px">For each domain, describe the person's functional capacity and the type of assistance required.</p>
+
+      ${[
+        ['Mobility','mobility','How does the disability affect movement, walking, transfers, and use of transport?'],
+        ['Communication','communication','How does the disability affect the person\'s ability to communicate (speaking, understanding, reading, writing)?'],
+        ['Socialising','socialising','How does the disability affect the person\'s ability to interact with others and participate in community activities?'],
+        ['Learning','learning','How does the disability affect the person\'s ability to learn, make decisions, and manage daily tasks?'],
+        ['Self-Care','selfCare','How does the disability affect the person\'s ability to manage personal care (bathing, dressing, eating, toileting)?'],
+        ['Self-Management','selfManagement','How does the disability affect the person\'s ability to manage tasks, finances, medications, and household responsibilities?']
+      ].map(([label,key,hint])=>`
+        <div style="border:1px solid var(--border);border-radius:6px;padding:12px;margin-bottom:10px">
+          <div style="font-weight:600;font-size:13px;margin-bottom:8px">${label}</div>
+          <div class="form-group"><label>Impact Description</label>
+            <textarea id="nf-fc-${key}-desc" style="min-height:60px" placeholder="${hint}">${(s2e[key]||{}).desc||''}</textarea></div>
+          <div class="ndis-row">
+            <div class="form-group"><label>Assistance Type Required</label>
+              <select id="nf-fc-${key}-assist">
+                ${['','No support needed','Supervision/prompting','Partial assistance','Full assistance'].map(a=>`<option ${(s2e[key]||{}).assist===a?'selected':''}>${a}</option>`).join('')}
+              </select></div>
+            <div class="form-group"><label>Frequency</label>
+              <select id="nf-fc-${key}-freq">
+                ${['','Not applicable','Occasionally','Daily','Multiple times daily','Continuously'].map(f=>`<option ${(s2e[key]||{}).freq===f?'selected':''}>${f}</option>`).join('')}
+              </select></div>
+          </div>
+        </div>`).join('')}
+    </div>
+
+    <div class="ndis-part">
+      <div class="ndis-part-title">Part F — Additional Notes</div>
+      <div class="form-group"><label>Any additional information relevant to this access request</label>
+        <textarea id="nf-additionalNotes" style="min-height:100px">${nf.additionalNotes||''}</textarea></div>
+    </div>
+
+    <div class="ndis-part">
+      <div class="ndis-part-title">Part G — Treating Professional Declaration</div>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:10px">I declare that the information I have provided is accurate and complete to the best of my knowledge and I am qualified to provide this evidence.</p>
+      <div class="ndis-row">
+        <div class="form-group"><label>Professional Signature (Full Name)</label><input id="nf-profSigName" value="${nf.profSigName||''}"></div>
+        <div class="form-group"><label>Date Signed</label><input type="date" id="nf-profSigDate" value="${nf.profSigDate||''}"></div>
+      </div>
+    </div>
+  </div>`;
+
+  showModal('📋 NDIS Access Request Form — ' + (c.firstName||'') + ' ' + (c.lastName||''), html, ()=>saveNDISForm(clientId), '1100px');
+}
+
+function saveNDISForm(clientId) {
+  const c = clients.find(cl=>cl.id===clientId); if(!c) return;
+  const g = id => document.getElementById(id)?.value||'';
+  const r = name => document.querySelector(`input[name="${name}"]:checked`)?.value||'';
+  const fcKeys = ['mobility','communication','socialising','learning','selfCare','selfManagement'];
+
+  c.ndisForm = {
+    sig1Name: g('nf-sig1Name'), sig1Date: g('nf-sig1Date'), sig1Capacity: g('nf-sig1Capacity'),
+    profSigName: g('nf-profSigName'), profSigDate: g('nf-profSigDate'),
+    additionalNotes: g('nf-additionalNotes'),
+    s1a: {
+      title: g('nf-title'), givenNames: g('nf-givenNames'), preferredName: g('nf-preferredName'),
+      surname: g('nf-surname'), otherNames: g('nf-otherNames'), dob: g('nf-dob'),
+      gender: r('nf-gender'), genderSelfDesc: g('nf-genderSelfDesc'),
+      atsi: r('nf-atsi'), countryBirth: g('nf-countryBirth'),
+      ausResident: r('nf-ausResident'), visaType: g('nf-visaType'), visaExpiry: g('nf-visaExpiry'),
+      homeAddress: g('nf-homeAddress'), homeSuburb: g('nf-homeSuburb'), homeState: g('nf-homeState'), homePostcode: g('nf-homePostcode'),
+      postalAddress: g('nf-postalAddress'), postalSuburb: g('nf-postalSuburb'), postalState: g('nf-postalState'), postalPostcode: g('nf-postalPostcode'),
+      familyNdis: r('nf-familyNdis'), familyNdisDetails: g('nf-familyNdisDetails')
+    },
+    s1b: { consentThirdParty: r('nf-consentThirdParty'), consentCRN: r('nf-consentCRN'), crn: g('nf-crn') },
+    s1c: {
+      contactMethod: r('nf-contactMethod'), homePhone: g('nf-homePhone'), mobilePhone: g('nf-mobilePhone'),
+      email: g('nf-email'), tty: g('nf-tty'), smsCons: r('nf-smsCons'),
+      language: g('nf-language'), interpreter: r('nf-interpreter'),
+      contactPerson: g('nf-contactPerson'), contactPersonPhone: g('nf-contactPersonPhone'), contactPersonRel: g('nf-contactPersonRel')
+    },
+    s1d: {
+      hasRep: r('nf-hasRep'), repName: g('nf-repName'), repRelation: g('nf-repRelation'),
+      repPhone: g('nf-repPhone'), repEmail: g('nf-repEmail'), repAddress: g('nf-repAddress'),
+      repAuthType: g('nf-repAuthType'), repAuthRef: g('nf-repAuthRef')
+    },
+    s1e: { mainDisability: g('nf-mainDisability'), otherDisabilities: g('nf-otherDisabilities'), accidentClaim: r('nf-accidentClaim'), accidentDetails: g('nf-accidentDetails') },
+    s2a: {
+      profName: g('nf-profName'), profQuals: g('nf-profQuals'), profProvReg: g('nf-profProvReg'),
+      profAhpra: g('nf-profAhpra'), profBusiness: g('nf-profBusiness'), profAddress: g('nf-profAddress'),
+      profPhone: g('nf-profPhone'), profEmail: g('nf-profEmail')
+    },
+    s2b: {
+      profMainDis: g('nf-profMainDis'), diagCode: g('nf-diagCode'), diagDate: g('nf-diagDate'),
+      isPermanent: r('nf-isPermanent'), disDuration: g('nf-disDuration'),
+      profOtherDis: g('nf-profOtherDis'), treatments: g('nf-treatments'), prognosis: g('nf-prognosis')
+    },
+    s2c: { earlyIntervention: r('nf-earlyIntervention'), earlyInterventionDesc: g('nf-earlyInterventionDesc') },
+    s2d: { existingAssessments: g('nf-existingAssessments'), assessmentsAttached: r('nf-assessmentsAttached') },
+    s2e: Object.fromEntries(fcKeys.map(k=>[k,{
+      desc: g(`nf-fc-${k}-desc`), assist: g(`nf-fc-${k}-assist`), freq: g(`nf-fc-${k}-freq`)
+    }]))
+  };
+  saveAll(); showToast('NDIS Access Request Form saved ✓');
 }
 
 // ============================================================
