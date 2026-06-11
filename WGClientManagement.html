@@ -5749,6 +5749,45 @@ function renderDisabilityTab(c) {
         <button class="btn btn-sm btn-primary" onclick="saveDisability('${c.id}')">💾 Save</button>
       </div>
     </div>
+    <div style="background:var(--bg);border-radius:8px;padding:14px;margin-bottom:16px">
+      <div style="font-weight:600;font-size:13px;color:var(--primary);border-bottom:2px solid var(--primary);padding-bottom:6px;margin-bottom:12px">🔍 Disability Screening Questions</div>
+      <div class="grid-2">
+        <div class="form-group"><label>Do you have a formally diagnosed disability?</label>
+          <div style="display:flex;gap:16px;flex-wrap:wrap;padding:4px 0">
+            ${['Yes','No','Undiagnosed / Suspected'].map(v=>`<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="dis-hasDiagnosis" value="${v}" ${dis.hasDiagnosis===v?'checked':''}> <span>${v}</span></label>`).join('')}
+          </div></div>
+        <div class="form-group"><label>Are you currently receiving the Disability Support Pension (DSP)?</label>
+          <div style="display:flex;gap:16px;flex-wrap:wrap;padding:4px 0">
+            ${['Yes','No','Applied — pending','Not eligible'].map(v=>`<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="dis-dsp" value="${v}" ${dis.dsp===v?'checked':''}> <span>${v}</span></label>`).join('')}
+          </div></div>
+        <div class="form-group"><label>Have you applied for NDIS?</label>
+          <div style="display:flex;gap:16px;flex-wrap:wrap;padding:4px 0">
+            ${['Yes — approved','Yes — pending','No','Not eligible','Needs assistance to apply'].map(v=>`<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="dis-ndisStatus" value="${v}" ${dis.ndisStatus===v?'checked':''}> <span>${v}</span></label>`).join('')}
+          </div></div>
+        <div class="form-group"><label>Are you currently receiving any disability support services?</label>
+          <div style="display:flex;gap:16px;flex-wrap:wrap;padding:4px 0">
+            ${['Yes','No'].map(v=>`<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="dis-receivingServices" value="${v}" ${dis.receivingServices===v?'checked':''}> <span>${v}</span></label>`).join('')}
+          </div></div>
+        <div class="form-group"><label>Do you have a Mental Health Care Plan (MHCP)?</label>
+          <div style="display:flex;gap:16px;flex-wrap:wrap;padding:4px 0">
+            ${['Yes','No','In progress'].map(v=>`<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="dis-mhcp" value="${v}" ${dis.mhcp===v?'checked':''}> <span>${v}</span></label>`).join('')}
+          </div></div>
+        <div class="form-group"><label>Do you have a GP Management Plan (Chronic Disease)?</label>
+          <div style="display:flex;gap:16px;flex-wrap:wrap;padding:4px 0">
+            ${['Yes','No','In progress'].map(v=>`<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="dis-gpPlan" value="${v}" ${dis.gpPlan===v?'checked':''}> <span>${v}</span></label>`).join('')}
+          </div></div>
+        <div class="form-group"><label>Do you have a Carer?</label>
+          <div style="display:flex;gap:16px;flex-wrap:wrap;padding:4px 0">
+            ${['Yes — formal carer','Yes — informal/family','No'].map(v=>`<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="dis-hasCarer" value="${v}" ${dis.hasCarer===v?'checked':''}> <span>${v}</span></label>`).join('')}
+          </div></div>
+        <div class="form-group"><label>Is the disability affecting daily living / ability to work?</label>
+          <div style="display:flex;gap:16px;flex-wrap:wrap;padding:4px 0">
+            ${['Yes — significantly','Yes — partially','No'].map(v=>`<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="dis-impactDaily" value="${v}" ${dis.impactDaily===v?'checked':''}> <span>${v}</span></label>`).join('')}
+          </div></div>
+      </div>
+      <div class="form-group"><label>Additional screening notes</label>
+        <textarea id="dis-screeningNotes" style="min-height:60px">${dis.screeningNotes||''}</textarea></div>
+    </div>
     <div class="grid-2">
       <div class="form-group"><label>Disability Type / Diagnosis</label>
         <input id="dis-type" value="${dis.disabilityType||''}"></div>
@@ -5820,7 +5859,10 @@ function saveDisability(id) {
   const c=clients.find(cl=>cl.id===id); if(!c) return;
   const g=sel=>document.getElementById(sel)?.value||'';
   const r=name=>document.querySelector(`input[name="${name}"]:checked`)?.value||'';
-  c.dis = { disabilityType:g('dis-type'), primary:g('dis-primary'), ndisNum:g('dis-ndisNum'),
+  c.dis = { hasDiagnosis:r('dis-hasDiagnosis'), dsp:r('dis-dsp'), ndisStatus:r('dis-ndisStatus'),
+    receivingServices:r('dis-receivingServices'), mhcp:r('dis-mhcp'), gpPlan:r('dis-gpPlan'),
+    hasCarer:r('dis-hasCarer'), impactDaily:r('dis-impactDaily'), screeningNotes:g('dis-screeningNotes'),
+    disabilityType:g('dis-type'), primary:g('dis-primary'), ndisNum:g('dis-ndisNum'),
     ndisStart:g('dis-ndisStart'), ndisEnd:g('dis-ndisEnd'), planMgmt:g('dis-planMgmt'),
     supportCoord:g('dis-supportCoord'), coordPhone:g('dis-coordPhone'), specCoord:g('dis-specCoord'), lac:g('dis-lac'),
     fundedSupports:g('dis-fundedSupports'), currentServices:g('dis-currentServices'),
