@@ -2290,52 +2290,12 @@ function field(label, value) {
   return `<div class="form-group"><label>${label}</label><div style="padding:8px 12px;background:var(--bg);border-radius:6px;font-size:13px;min-height:36px">${value||'<span style="color:var(--muted)">Not recorded</span>'}</div></div>`;
 }
 
-function renderNoteAttachments(atts) {
-  if(!atts || !atts.length) return '';
-  return `<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">
-    ${atts.map(a=>a.type?.startsWith('image/')
-      ? `<a href="${a.data}" target="_blank" title="${a.name}"><img src="${a.data}" style="max-width:120px;max-height:120px;border-radius:6px;border:1px solid var(--border)"></a>`
-      : `<a href="${a.data}" download="${a.name}" style="display:inline-flex;align-items:center;gap:6px;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:12px;text-decoration:none;color:var(--text)">📄 ${a.name}</a>`
-    ).join('')}
-  </div>`;
-}
-
-function sessionAttachFiles(files) {
-  if(!window._sessionAttachments) window._sessionAttachments = [];
-  [...files].forEach(f=>{
-    if(f.size > 5*1024*1024) { alert(`${f.name} is over 5MB — skipped`); return; }
-    const reader = new FileReader();
-    reader.onload = e => {
-      window._sessionAttachments.push({ name:f.name||'pasted-image.png', type:f.type, data:e.target.result });
-      renderSessionAttachList();
-    };
-    reader.readAsDataURL(f);
-  });
-}
-
-function renderSessionAttachList() {
-  const wrap = document.getElementById('sm-attach-list'); if(!wrap) return;
-  const atts = window._sessionAttachments||[];
-  wrap.innerHTML = atts.map((a,i)=>`<div style="position:relative;display:inline-block">
-    ${a.type?.startsWith('image/')
-      ? `<img src="${a.data}" style="width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid var(--border)">`
-      : `<div style="padding:8px 12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;font-size:12px">📄 ${a.name}</div>`}
-    <button type="button" onclick="sessionRemoveAttach(${i})" style="position:absolute;top:-6px;right:-6px;background:#dc2626;color:#fff;border:none;border-radius:50%;width:20px;height:20px;font-size:11px;cursor:pointer;line-height:1">✕</button>
-  </div>`).join('');
-}
-
-function sessionRemoveAttach(i) {
-  window._sessionAttachments.splice(i,1);
-  renderSessionAttachList();
-}
-
 function filterNotes(clientId, type) {
   const filtered = notes.filter(n=>n.clientId===clientId&&(n.type||'general')===type).sort((a,b)=>b.created?.localeCompare(a.created));
   if(!filtered.length) return '<p style="color:var(--muted);font-size:13px">No notes recorded for this area yet</p>';
   return filtered.map(n=>`<div class="note-entry ${type}">
     <div class="note-meta"><span>${fmtdt(n.created)}</span><span>${n.worker||''}</span>${n.contactType?`<span>📍 ${n.contactType}</span>`:''}</div>
     <div class="note-text">${(n.text||'').replace(/\n/g,'<br>')}</div>
-    ${renderNoteAttachments(n.attachments)}
   </div>`).join('');
 }
 
@@ -5539,37 +5499,9 @@ function openSessionModal(clientId, defaultType) {
   <div class="form-group"><label>Follow-up Date (creates calendar reminder)</label>
     <input type="date" id="sm-followupDate">
   </div>
-  <div class="form-group">
-    <label style="display:flex;align-items:center;justify-content:space-between">
-      <span>Attachments (paste images or attach files)</span>
-      <span>
-        <input type="file" id="sm-files" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv" style="display:none" onchange="sessionAttachFiles(this.files)">
-        <button type="button" onclick="document.getElementById('sm-files').click()"
-          style="display:inline-flex;align-items:center;gap:5px;background:var(--bg);border:1px solid var(--border);border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer;color:var(--text)">
-          📎 Attach File
-        </button>
-      </span>
-    </label>
-    <div id="sm-attach-list" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px"></div>
-    <div style="font-size:11px;color:var(--muted);margin-top:4px">Tip: paste images directly into the notes box (Ctrl/Cmd+V)</div>
-  </div>
   <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
     <input type="checkbox" id="sm-addtocal" checked> Add to Calendar automatically
   </label>`;
-
-  window._sessionAttachments = [];
-  setTimeout(()=>{
-    const ta = document.getElementById('sm-text');
-    if(ta) ta.addEventListener('paste', e=>{
-      const items = e.clipboardData?.items||[];
-      for(const it of items) {
-        if(it.type.startsWith('image/')) {
-          const file = it.getAsFile();
-          if(file) { sessionAttachFiles([file]); e.preventDefault(); }
-        }
-      }
-    });
-  }, 50);
 
   showModal('📝 Log Session', html, () => {
     const text = document.getElementById('sm-text')?.value?.trim();
@@ -5590,8 +5522,7 @@ function openSessionModal(clientId, defaultType) {
 
     // Create note
     const n = { id:uid(), clientId, type, contactType:contact, location,
-      created:noteDate, duration:mins, worker, text, followup, followupDate,
-      attachments: (window._sessionAttachments||[]).slice() };
+      created:noteDate, duration:mins, worker, text, followup, followupDate };
     notes.push(n);
 
     // Create time log entry linked to note
