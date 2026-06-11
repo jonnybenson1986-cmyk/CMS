@@ -260,6 +260,9 @@
   </div>
   <div class="nav-section">
     <div class="nav-section-label">Admin</div>
+    <div class="nav-item" onclick="showPage('chat')" id="nav-chat">
+      <span class="icon">💬</span><span>Messages</span><span id="chat-unread-badge" style="display:none;background:#dc2626;color:#fff;font-size:10px;font-weight:700;border-radius:10px;padding:1px 6px;margin-left:auto"></span>
+    </div>
     <div class="nav-item" onclick="showPage('calendar')">
       <span class="icon">📅</span><span>Calendar</span>
     </div>
@@ -641,7 +644,7 @@ function showPage(page) {
     btn.onclick = openNewClientModal;
   }
 
-  const pages = { dashboard: renderDashboard, referrals: renderReferrals, clients: renderClients, sessions: renderSessions, walkins: renderWalkins, sewb: renderSEWB, aod: renderAOD, justice: renderJustice, cultural: renderCultural, disability: renderDisability, homeownership: renderHomeOwnership, reports: renderReportsPage, calendar: renderCalendarPage, auditlog: renderAuditLog, settings: renderSettings };
+  const pages = { dashboard: renderDashboard, referrals: renderReferrals, clients: renderClients, sessions: renderSessions, walkins: renderWalkins, sewb: renderSEWB, aod: renderAOD, justice: renderJustice, cultural: renderCultural, disability: renderDisability, homeownership: renderHomeOwnership, reports: renderReportsPage, calendar: renderCalendarPage, auditlog: renderAuditLog, settings: renderSettings, chat: renderChatPage };
   const fn = pages[page];
   document.getElementById('content').innerHTML = fn ? fn() : '<p>Coming soon</p>';
   attachPageEvents(page);
@@ -6557,6 +6560,257 @@ function clearData() {
   clients=[]; notes=[]; timeLogs=[]; saveAll(); showToast('Data cleared'); showPage('dashboard');
 }
 
+// ============================================================
+// INTERNAL CHAT SYSTEM
+// ============================================================
+let _chatUnsubscribes = [];
+let _activeChatId = null;
+let _chatConversations = [];
+let _chatMessages = {};
+
+function chatCol(name) {
+  if(!FSYNC.isReady()) return null;
+  const cfg = JSON.parse(localStorage.getItem('fb_cfg')||'null');
+  const teamId = cfg?.teamId||'wg_default';
+  return firebase.firestore().collection('teams').doc(teamId).collection(name);
+}
+
+function renderChatPage() {
+  document.getElementById('page-title').textContent = 'Messages';
+  document.getElementById('top-action-btn').textContent = '✏️ New Message';
+  document.getElementById('top-action-btn').onclick = openNewConvModal;
+
+  const syncReady = FSYNC.isReady();
+  document.getElementById('content').innerHTML = `
+  <div id="chat-wrap" style="display:flex;gap:0;height:calc(100vh - 110px);background:var(--card);border-radius:12px;overflow:hidden;border:1px solid var(--border)">
+    <div id="chat-list-pane" style="width:280px;min-width:220px;border-right:1px solid var(--border);display:flex;flex-direction:column;background:var(--bg)">
+      <div style="padding:14px 14px 10px;border-bottom:1px solid var(--border);display:flex;gap:8px">
+        <button class="btn btn-sm btn-primary" style="flex:1" onclick="openNewConvModal()">✏️ New DM</button>
+        <button class="btn btn-sm btn-outline" style="flex:1" onclick="openNewGroupModal()">👥 New Group</button>
+      </div>
+      <div id="chat-conv-list" style="flex:1;overflow-y:auto;padding:8px 0">
+        ${syncReady ? '<div style="padding:20px;text-align:center;color:var(--muted);font-size:13px">Loading…</div>' : '<div style="padding:16px;font-size:12px;color:var(--muted)">⚠️ Firebase required for live chat. Set up Cloud Sync in Settings first.</div>'}
+      </div>
+    </div>
+    <div id="chat-msg-pane" style="flex:1;display:flex;flex-direction:column">
+      <div id="chat-msg-header" style="padding:14px 18px;border-bottom:1px solid var(--border);font-weight:700;font-size:15px;display:flex;align-items:center;gap:10px;min-height:52px">
+        <span style="color:var(--muted);font-size:13px;font-weight:400">Select a conversation</span>
+      </div>
+      <div id="chat-msg-body" style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px"></div>
+      <div id="chat-msg-footer" style="padding:12px 14px;border-top:1px solid var(--border);display:none;gap:8px;align-items:flex-end">
+        <textarea id="chat-input" rows="2" placeholder="Type a message…" style="flex:1;resize:none;padding:8px 12px;border:1px solid var(--border);border-radius:8px;font-size:13px;background:var(--bg);color:var(--text)"
+          onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChatMessage()}"></textarea>
+        <button class="btn btn-primary" onclick="sendChatMessage()" style="padding:8px 18px;height:40px">Send ➤</button>
+      </div>
+    </div>
+  </div>`;
+
+  if(syncReady) { _chatUnsubAll(); _chatListenConvs(); }
+}
+
+function _chatUnsubAll() {
+  _chatUnsubscribes.forEach(u=>{ try{u()}catch(e){} });
+  _chatUnsubscribes = [];
+}
+
+function _chatListenConvs() {
+  const col = chatCol('chatConvs'); if(!col) return;
+  const myId = currentUser?.id;
+  const unsub = col.where('members','array-contains', myId)
+    .orderBy('lastAt','desc')
+    .onSnapshot(snap=>{
+      _chatConversations = snap.docs.map(d=>({id:d.id,...d.data()}));
+      _renderConvList();
+      _updateUnreadBadge();
+    }, e=>console.warn('chat convs error',e));
+  _chatUnsubscribes.push(unsub);
+}
+
+function _renderConvList() {
+  const el = document.getElementById('chat-conv-list'); if(!el) return;
+  if(!_chatConversations.length) {
+    el.innerHTML='<div style="padding:20px;text-align:center;color:var(--muted);font-size:13px">No conversations yet.<br>Start a new DM or group.</div>';
+    return;
+  }
+  el.innerHTML = _chatConversations.map(conv=>{
+    const isActive = conv.id === _activeChatId;
+    const myId = currentUser?.id;
+    const unread = (conv.unread||{})[myId]||0;
+    const name = conv.type==='group' ? conv.name : _dmName(conv);
+    const icon = conv.type==='group' ? '👥' : '👤';
+    const preview = (conv.lastMsg||'').slice(0,45);
+    return `<div onclick="openChat('${conv.id}')" style="padding:12px 14px;cursor:pointer;border-left:3px solid ${isActive?'var(--primary)':'transparent'};background:${isActive?'var(--card)':'transparent'};display:flex;align-items:center;gap:10px;transition:background 0.15s" onmouseover="if('${conv.id}'!=='${_activeChatId}')this.style.background='var(--card)'" onmouseout="if('${conv.id}'!=='${_activeChatId}')this.style.background='transparent'">
+      <span style="font-size:20px">${icon}</span>
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:${unread?'700':'600'};font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${name}</div>
+        <div style="font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${preview||'No messages yet'}</div>
+      </div>
+      ${unread ? `<span style="background:#dc2626;color:#fff;font-size:10px;font-weight:700;border-radius:10px;padding:1px 7px;flex-shrink:0">${unread}</span>` : ''}
+    </div>`;
+  }).join('');
+}
+
+function _dmName(conv) {
+  const myId = currentUser?.id;
+  const otherId = (conv.members||[]).find(m=>m!==myId);
+  const other = userProfiles.find(u=>u.id===otherId);
+  return other?.name || 'Unknown';
+}
+
+function _updateUnreadBadge() {
+  const myId = currentUser?.id;
+  const total = _chatConversations.reduce((s,c)=>s+((c.unread||{})[myId]||0),0);
+  const badge = document.getElementById('chat-unread-badge');
+  if(!badge) return;
+  if(total>0){ badge.textContent=total; badge.style.display=''; }
+  else badge.style.display='none';
+}
+
+function openChat(convId) {
+  _activeChatId = convId;
+  _renderConvList();
+  const conv = _chatConversations.find(c=>c.id===convId); if(!conv) return;
+  const name = conv.type==='group' ? `👥 ${conv.name}` : `👤 ${_dmName(conv)}`;
+  const members = (conv.members||[]).map(id=>userProfiles.find(u=>u.id===id)?.name||'?').join(', ');
+  const header = document.getElementById('chat-msg-header');
+  if(header) header.innerHTML = `<span>${name}</span><span style="font-size:11px;font-weight:400;color:var(--muted);margin-left:8px">${members}</span>`;
+  const footer = document.getElementById('chat-msg-footer');
+  if(footer) footer.style.display='flex';
+  _chatMarkRead(convId);
+  _chatUnsubscribes.filter((_,i)=>i>0).forEach(u=>{try{u()}catch(e){}});
+  const msgUnsub = chatCol('chatMsgs').where('convId','==',convId)
+    .orderBy('at','asc')
+    .onSnapshot(snap=>{
+      _chatMessages[convId] = snap.docs.map(d=>({id:d.id,...d.data()}));
+      _renderMessages(convId);
+    }, e=>console.warn('msg error',e));
+  _chatUnsubscribes.push(msgUnsub);
+}
+
+function _renderMessages(convId) {
+  const el = document.getElementById('chat-msg-body'); if(!el) return;
+  const msgs = _chatMessages[convId]||[];
+  if(!msgs.length){ el.innerHTML='<div style="text-align:center;color:var(--muted);font-size:13px;margin-top:40px">No messages yet. Say hello! 👋</div>'; return; }
+  const myId = currentUser?.id;
+  el.innerHTML = msgs.map(m=>{
+    const mine = m.senderId===myId;
+    const sender = userProfiles.find(u=>u.id===m.senderId);
+    const name = sender?.name||'Unknown';
+    const ts = m.at ? new Date(m.at).toLocaleString('en-AU',{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'short'}) : '';
+    return `<div style="display:flex;flex-direction:column;align-items:${mine?'flex-end':'flex-start'};gap:2px">
+      ${!mine?`<span style="font-size:11px;color:var(--muted);padding:0 6px">${name}</span>`:''}
+      <div style="max-width:70%;padding:10px 14px;border-radius:${mine?'16px 4px 16px 16px':'4px 16px 16px 16px'};background:${mine?'var(--primary)':'var(--bg)'};color:${mine?'#fff':'var(--text)'};font-size:13px;line-height:1.5;border:1px solid ${mine?'transparent':'var(--border)'}">
+        ${(m.text||'').replace(/\n/g,'<br>')}
+      </div>
+      <span style="font-size:10px;color:var(--muted);padding:0 6px">${ts}</span>
+    </div>`;
+  }).join('');
+  el.scrollTop = el.scrollHeight;
+}
+
+async function sendChatMessage() {
+  const input = document.getElementById('chat-input');
+  const text = input?.value?.trim(); if(!text || !_activeChatId) return;
+  input.value = '';
+  const myId = currentUser?.id;
+  const at = new Date().toISOString();
+  const msg = { convId:_activeChatId, senderId:myId, senderName:currentUser?.name||'?', text, at };
+  const col = chatCol('chatMsgs'); if(!col) return;
+  await col.add(msg).catch(e=>console.warn('send error',e));
+  const conv = _chatConversations.find(c=>c.id===_activeChatId); if(!conv) return;
+  const unread = {...(conv.unread||{})};
+  (conv.members||[]).forEach(id=>{ if(id!==myId) unread[id]=(unread[id]||0)+1; });
+  chatCol('chatConvs').doc(_activeChatId).update({ lastMsg:text, lastAt:at, unread }).catch(()=>{});
+}
+
+async function _chatMarkRead(convId) {
+  const myId = currentUser?.id;
+  const conv = _chatConversations.find(c=>c.id===convId); if(!conv) return;
+  const unread = {...(conv.unread||{})};
+  if(!unread[myId]) return;
+  unread[myId]=0;
+  chatCol('chatConvs').doc(convId).update({ unread }).catch(()=>{});
+}
+
+function openNewConvModal() {
+  if(!FSYNC.isReady()){ alert('Firebase Cloud Sync must be enabled to use chat. Set it up in Settings.'); return; }
+  const myId = currentUser?.id;
+  const others = userProfiles.filter(u=>u.id!==myId);
+  showModal('💬 New Direct Message', `
+    <div class="form-group"><label>Send message to *</label>
+      <select id="dm-target">
+        <option value="">— Select worker —</option>
+        ${others.map(u=>`<option value="${u.id}">${ROLES[u.role]?.icon||'👤'} ${u.name}</option>`).join('')}
+      </select>
+    </div>
+    <div class="form-group"><label>First message</label>
+      <textarea id="dm-text" rows="3" placeholder="Type your message…" style="resize:none"></textarea>
+    </div>`, async ()=>{
+    const targetId = document.getElementById('dm-target')?.value;
+    const text = document.getElementById('dm-text')?.value?.trim();
+    if(!targetId){ alert('Select a worker'); return false; }
+    const myId = currentUser?.id;
+    const at = new Date().toISOString();
+    const existing = _chatConversations.find(c=>c.type==='dm'&&c.members.includes(targetId)&&c.members.includes(myId));
+    let convId = existing?.id;
+    if(!convId){
+      const ref = await chatCol('chatConvs').add({ type:'dm', members:[myId,targetId], lastMsg:'', lastAt:at, unread:{} });
+      convId = ref.id;
+    }
+    if(text){
+      await chatCol('chatMsgs').add({ convId, senderId:myId, senderName:currentUser?.name, text, at });
+      const unread = {}; unread[targetId]=1;
+      chatCol('chatConvs').doc(convId).update({ lastMsg:text, lastAt:at, unread });
+    }
+    _activeChatId = convId;
+    showPage('chat');
+    return true;
+  });
+}
+
+function openNewGroupModal() {
+  if(!FSYNC.isReady()){ alert('Firebase Cloud Sync must be enabled to use chat. Set it up in Settings.'); return; }
+  const myId = currentUser?.id;
+  const others = userProfiles.filter(u=>u.id!==myId);
+  showModal('👥 New Group Chat', `
+    <div class="form-group"><label>Group Name *</label>
+      <input id="grp-name" placeholder="e.g. SEWB Team, All Staff">
+    </div>
+    <div class="form-group"><label>Members * (select multiple)</label>
+      <div style="display:flex;flex-direction:column;gap:6px;padding:8px;border:1px solid var(--border);border-radius:6px;max-height:200px;overflow-y:auto">
+        ${others.map(u=>`<label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+          <input type="checkbox" class="grp-member-cb" value="${u.id}">
+          <span>${ROLES[u.role]?.icon||'👤'} ${u.name}</span>
+        </label>`).join('')}
+      </div>
+    </div>
+    <div class="form-group"><label>First message (optional)</label>
+      <textarea id="grp-text" rows="2" placeholder="Welcome to the group!" style="resize:none"></textarea>
+    </div>`, async ()=>{
+    const name = document.getElementById('grp-name')?.value?.trim();
+    const selected = [...document.querySelectorAll('.grp-member-cb:checked')].map(el=>el.value);
+    if(!name){ alert('Group name required'); return false; }
+    if(!selected.length){ alert('Select at least one member'); return false; }
+    const members = [myId, ...selected];
+    const at = new Date().toISOString();
+    const text = document.getElementById('grp-text')?.value?.trim();
+    const ref = await chatCol('chatConvs').add({ type:'group', name, members, lastMsg:'', lastAt:at, unread:{} });
+    const convId = ref.id;
+    if(text){
+      await chatCol('chatMsgs').add({ convId, senderId:myId, senderName:currentUser?.name, text, at });
+      const unread = {}; selected.forEach(id=>unread[id]=1);
+      chatCol('chatConvs').doc(convId).update({ lastMsg:text, lastAt:at, unread });
+    }
+    _activeChatId = convId;
+    showPage('chat');
+    return true;
+  });
+}
+
+// ============================================================
+// END CHAT SYSTEM
+// ============================================================
+
 // ===== MODAL ENGINE =====
 function showModal(title, html, onSave, maxWidth='720px', noSave=false) {
   const mc = document.getElementById('modal-container');
@@ -6774,7 +7028,7 @@ function initApp() {
     <button onclick="logout()" style="background:none;border:none;color:rgba(255,255,255,0.5);cursor:pointer;font-size:11px;flex-shrink:0" title="Sign out">⏻</button>`;
   sidebar?.appendChild(badge);
 
-  FSYNC.init(); // non-blocking — loads cloud data and starts listeners
+  FSYNC.init().then(()=>{ if(FSYNC.isReady()) _chatListenConvs(); }); // non-blocking — loads cloud data and starts listeners
   showPage('dashboard');
 }
 
