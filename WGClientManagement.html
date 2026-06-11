@@ -6590,6 +6590,7 @@ const ROLES = {
 let currentUser = DB.load('currentUser', null);
 let userProfiles = DB.load('userProfiles', []);
 function saveUserProfiles() { DB.save('userProfiles', userProfiles); }
+function saveCurrentUser(u) { currentUser = u; DB.save('currentUser', u); }
 
 
 function checkLogin() {
