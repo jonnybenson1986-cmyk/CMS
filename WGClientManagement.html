@@ -149,6 +149,8 @@
   .time-entry { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
   .time-entry:last-child { border-bottom: none; }
   .time-badge { background: var(--primary); color: #fff; padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+  .sticky-save-bar { position: sticky; bottom: 0; background: var(--card); border-top: 2px solid var(--border); padding: 12px 0 4px; margin-top: 16px; display: flex; justify-content: flex-end; gap: 10px; z-index: 10; }
+  .sticky-save-bar .btn { min-width: 130px; padding: 10px 20px; font-size: 14px; }
 
   /* SEWB DOMAINS */
   .domain-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
@@ -920,6 +922,9 @@ function renderProfileTab(tab, c, clientNotes, clientTime) {
     <div class="card">
       <div class="card-header"><div class="card-title">📝 SEWB Notes</div><button class="btn btn-sm btn-primary" onclick="openNoteModal('${c.id}','sewb')">Add SEWB Note</button></div>
       ${filterNotes(c.id,'sewb')}
+    </div>
+    <div class="sticky-save-bar">
+      <button class="btn btn-primary" onclick="saveSEWBGoals('${c.id}')">💾 Save SEWB Form</button>
     </div>`;
   }
 
@@ -954,6 +959,9 @@ function renderProfileTab(tab, c, clientNotes, clientTime) {
     <div class="card">
       <div class="card-header"><div class="card-title">📝 AOD Notes</div><button class="btn btn-sm btn-primary" onclick="openNoteModal('${c.id}','aod')">Add AOD Note</button></div>
       ${filterNotes(c.id,'aod')}
+    </div>
+    <div class="sticky-save-bar">
+      <button class="btn btn-primary" onclick="saveAOD('${c.id}')">💾 Save AOD Form</button>
     </div>`;
   }
 
@@ -982,6 +990,9 @@ function renderProfileTab(tab, c, clientNotes, clientTime) {
     <div class="card">
       <div class="card-header"><div class="card-title">📝 Justice Notes</div><button class="btn btn-sm btn-primary" onclick="openNoteModal('${c.id}','justice')">Add Justice Note</button></div>
       ${filterNotes(c.id,'justice')}
+    </div>
+    <div class="sticky-save-bar">
+      <button class="btn btn-primary" onclick="saveJustice('${c.id}')">💾 Save Justice Form</button>
     </div>`;
   }
 
@@ -1027,6 +1038,9 @@ function renderProfileTab(tab, c, clientNotes, clientTime) {
     <div class="card">
       <div class="card-header"><div class="card-title">📝 Cultural Notes</div><button class="btn btn-sm btn-primary" onclick="openNoteModal('${c.id}','cultural')">Add Cultural Note</button></div>
       ${filterNotes(c.id,'cultural')}
+    </div>
+    <div class="sticky-save-bar">
+      <button class="btn btn-primary" onclick="saveCultural('${c.id}')">💾 Save Cultural Form</button>
     </div>`;
   }
 
@@ -5792,6 +5806,9 @@ function renderDisabilityTab(c) {
         <div class="note-text">${(n.text||'').replace(/\n/g,'<br>')}</div>
       </div>`).join('')
     }
+  </div>
+  <div class="sticky-save-bar">
+    <button class="btn btn-primary" onclick="saveDisability('${c.id}')">💾 Save Disability Form</button>
   </div>`;
 }
 
