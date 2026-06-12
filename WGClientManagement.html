@@ -327,7 +327,10 @@ const FSYNC = (() => {
       if (!firebase.apps.length) firebase.initializeApp(cfg);
       db = firebase.firestore();
       teamId = cfg.teamId || 'wg_default';
-      await firebase.auth().signInAnonymously();
+      await firebase.auth().signInWithEmailAndPassword(
+        window._fbLoginEmail || 'app@wg-cms.internal',
+        window._fbLoginPass  || 'anonymous_fallback_9x!'
+      ).catch(()=> firebase.auth().signInAnonymously());
       await _loadAll();
       _startListeners();
       _showSyncBadge(true);
@@ -6835,6 +6838,46 @@ function renderSettings() {
     <button class="btn btn-primary" onclick="saveSettings()">Save Settings</button>
   </div>
 
+  <!-- STAFF ACCOUNTS CARD -->
+  <div class="card" style="border-left:4px solid var(--primary)">
+    <div class="card-header">
+      <div class="card-title">👥 Staff Accounts</div>
+      <button class="btn btn-sm btn-primary" onclick="openAddStaffModal()">➕ Add Staff Account</button>
+    </div>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:14px">
+      Staff accounts are managed through Firebase Authentication. Add a staff member here to link their Firebase login to their CMS profile and role.
+      ${FSYNC.isReady()?'':'<strong style="color:#d97706"> ⚠️ Cloud Sync must be connected first.</strong>'}
+    </p>
+    <div style="overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead><tr style="background:var(--bg)">
+          <th style="text-align:left;padding:8px 10px;border-bottom:1px solid var(--border)">Name</th>
+          <th style="text-align:left;padding:8px 10px;border-bottom:1px solid var(--border)">Email</th>
+          <th style="text-align:left;padding:8px 10px;border-bottom:1px solid var(--border)">Role</th>
+          <th style="text-align:left;padding:8px 10px;border-bottom:1px solid var(--border)">Firebase</th>
+          <th style="padding:8px 10px;border-bottom:1px solid var(--border)">Actions</th>
+        </tr></thead>
+        <tbody>
+          ${userProfiles.length===0
+            ? `<tr><td colspan="5" style="padding:14px 10px;color:var(--muted);text-align:center">No staff accounts yet. Click "Add Staff Account" to create the first one.</td></tr>`
+            : userProfiles.map(u=>`
+            <tr style="border-bottom:1px solid var(--border)">
+              <td style="padding:8px 10px;font-weight:600">${ROLES[u.role]?.icon||'👤'} ${u.name}</td>
+              <td style="padding:8px 10px;color:var(--muted)">${u.email||'<em>no email set</em>'}</td>
+              <td style="padding:8px 10px"><span style="background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:2px 8px;font-size:11px">${ROLES[u.role]?.label||u.role}</span></td>
+              <td style="padding:8px 10px">${u.firebaseUid
+                ? '<span style="color:#16a34a;font-size:12px">✓ Linked</span>'
+                : '<span style="color:#d97706;font-size:12px">○ Not linked</span>'}</td>
+              <td style="padding:8px 10px;white-space:nowrap;text-align:center">
+                <button class="btn btn-sm btn-outline" style="margin-right:4px" onclick="openEditStaffModal('${u.id}')">✏️ Edit</button>
+                <button class="btn btn-sm btn-outline" style="color:#dc2626" onclick="removeStaffAccount('${u.id}')">🗑️</button>
+              </td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
   <div class="card">
     <div class="card-title" style="margin-bottom:16px">💾 Data Management</div>
     <p style="font-size:13px;color:var(--muted);margin-bottom:16px">All data is stored locally in your browser. Export regularly to back up client records.</p>
@@ -6878,6 +6921,118 @@ function saveSettings() {
   DB.save('orgName', document.getElementById('set-org')?.value||'');
   DB.save('workerName', document.getElementById('set-worker')?.value||'');
   showToast('Settings saved');
+}
+
+// ── Staff Account Management ─────────────────────────────────
+function openAddStaffModal() {
+  const html = `
+    <p style="font-size:13px;color:var(--muted);margin-bottom:16px">
+      This creates a Firebase Authentication account for the staff member. They will receive an email to set their password (if using Firebase Email Link), or you can set a temporary password here.
+    </p>
+    <div class="grid-2">
+      <div class="form-group"><label>Full Name *</label><input id="sa-name" placeholder="e.g. Jane Smith"></div>
+      <div class="form-group"><label>Role *</label>
+        <select id="sa-role">${Object.entries(ROLES).map(([k,v])=>`<option value="${k}">${v.icon} ${v.label}</option>`).join('')}</select></div>
+      <div class="form-group"><label>Email Address *</label><input type="email" id="sa-email" placeholder="jane@worngundidj.org.au"></div>
+      <div class="form-group"><label>Temporary Password *</label>
+        <input type="password" id="sa-pass" placeholder="Min 8 characters">
+        <small style="color:var(--muted)">Staff member should change this on first login.</small></div>
+    </div>
+    <p id="sa-error" style="color:#dc2626;font-size:13px;margin-top:8px;min-height:18px"></p>`;
+  showModal('➕ Add Staff Account', html, createStaffAccount, '580px');
+}
+
+async function createStaffAccount() {
+  const name  = document.getElementById('sa-name')?.value?.trim();
+  const email = document.getElementById('sa-email')?.value?.trim();
+  const pass  = document.getElementById('sa-pass')?.value;
+  const role  = document.getElementById('sa-role')?.value;
+  const errEl = document.getElementById('sa-error');
+  if(!name){errEl.textContent='Name is required';return false;}
+  if(!email){errEl.textContent='Email is required';return false;}
+  if(!pass||pass.length<8){errEl.textContent='Password must be at least 8 characters';return false;}
+
+  const cfg = FSYNC.getCfg();
+  if(!cfg?.apiKey){errEl.textContent='Firebase Cloud Sync must be set up first (Settings → Cloud Sync)';return false;}
+
+  errEl.textContent='Creating account…';
+
+  try {
+    const secondaryApp = firebase.apps.find(a=>a.name==='staff-creator')
+      || firebase.initializeApp(cfg, 'staff-creator');
+    const secondaryAuth = secondaryApp.auth();
+    const cred = await secondaryAuth.createUserWithEmailAndPassword(email, pass);
+    await cred.user.updateProfile({ displayName: name });
+    await secondaryAuth.signOut();
+
+    const existing = userProfiles.find(u=>u.email===email);
+    if(existing){
+      existing.name=name; existing.role=role; existing.firebaseUid=cred.user.uid;
+    } else {
+      userProfiles.push({ id: cred.user.uid, name, email, role, firebaseUid: cred.user.uid });
+    }
+    saveUserProfiles();
+    if(FSYNC.isReady()) FSYNC.push('userProfiles', userProfiles);
+    showToast(`✓ Account created for ${name}`);
+    navigate('settings');
+    return true;
+  } catch(e) {
+    const msgs = {
+      'auth/email-already-in-use': 'An account with that email already exists.',
+      'auth/invalid-email':        'Please enter a valid email address.',
+      'auth/weak-password':        'Password is too weak — use at least 8 characters.',
+    };
+    errEl.textContent = msgs[e.code] || e.message;
+    return false;
+  }
+}
+
+function openEditStaffModal(userId) {
+  const u = userProfiles.find(p=>p.id===userId); if(!u) return;
+  const html = `
+    <div class="grid-2">
+      <div class="form-group"><label>Full Name</label><input id="se-name" value="${u.name||''}"></div>
+      <div class="form-group"><label>Role</label>
+        <select id="se-role">${Object.entries(ROLES).map(([k,v])=>`<option value="${k}" ${u.role===k?'selected':''}>${v.icon} ${v.label}</option>`).join('')}</select></div>
+      <div class="form-group"><label>Email Address</label><input type="email" id="se-email" value="${u.email||''}"></div>
+      <div class="form-group"><label>Reset Password (leave blank to keep)</label>
+        <input type="password" id="se-pass" placeholder="New password (8+ chars)"></div>
+    </div>
+    <p id="se-error" style="color:#dc2626;font-size:13px;margin-top:8px;min-height:18px"></p>`;
+  showModal('✏️ Edit Staff — ' + u.name, html, ()=>saveStaffEdit(userId), '560px');
+}
+
+async function saveStaffEdit(userId) {
+  const u = userProfiles.find(p=>p.id===userId); if(!u) return false;
+  const name  = document.getElementById('se-name')?.value?.trim();
+  const email = document.getElementById('se-email')?.value?.trim();
+  const pass  = document.getElementById('se-pass')?.value;
+  const role  = document.getElementById('se-role')?.value;
+  const errEl = document.getElementById('se-error');
+  if(!name){errEl.textContent='Name is required';return false;}
+  u.name=name; u.email=email||u.email; u.role=role;
+  if(pass && pass.length>=8 && u.firebaseUid) {
+    errEl.style.color='#d97706';
+    errEl.textContent='⚠️ To reset a password, go to Firebase Console → Authentication → Users → Reset password. Profile saved.';
+    saveUserProfiles();
+    if(FSYNC.isReady()) FSYNC.push('userProfiles', userProfiles);
+    return false;
+  }
+  saveUserProfiles();
+  if(FSYNC.isReady()) FSYNC.push('userProfiles', userProfiles);
+  showToast('Staff profile updated ✓');
+  navigate('settings');
+  return true;
+}
+
+function removeStaffAccount(userId) {
+  const u = userProfiles.find(p=>p.id===userId); if(!u) return;
+  if(!confirm(`Remove ${u.name} from the CMS?\n\nThis removes their profile from this system. Their Firebase Authentication account will remain — delete it from the Firebase Console if needed.`)) return;
+  userProfiles = userProfiles.filter(p=>p.id!==userId);
+  saveUserProfiles();
+  if(FSYNC.isReady()) FSYNC.push('userProfiles', userProfiles);
+  showToast(`${u.name} removed from CMS`);
+  navigate('settings');
 }
 
 function exportData() {
@@ -7216,13 +7371,11 @@ function saveCurrentUser(u) { currentUser = u; DB.save('currentUser', u); }
 
 
 function checkLogin() {
-  // If no users set up yet, go straight to setup
-  if(userProfiles.length===0) { showLoginScreen(true); return false; }
-  if(!currentUser) { showLoginScreen(false); return false; }
+  if(!currentUser) { showLoginScreen(); return false; }
   return true;
 }
 
-function showLoginScreen(setup) {
+function showLoginScreen() {
   document.getElementById('sidebar').style.display='none';
   document.getElementById('main').style.marginLeft='0';
   document.getElementById('main').innerHTML = `
@@ -7231,93 +7384,75 @@ function showLoginScreen(setup) {
       <div style="text-align:center;margin-bottom:28px">
         <img src="${document.querySelector('#sidebar img')?.src||''}" alt="WG" style="height:60px;margin-bottom:12px">
         <h1 style="font-size:20px;font-weight:700;color:var(--primary)">Worn Gundidj CMS</h1>
-        <p style="font-size:13px;color:var(--muted);margin-top:4px">${setup?'First time setup — create your admin account':'Sign in to continue'}</p>
+        <p style="font-size:13px;color:#6b7280;margin-top:4px">Sign in with your staff account</p>
       </div>
-      ${setup ? `
-        <div class="form-group"><label>Your Name *</label>
-          <select id="login-name" onchange="autoSetRole()" style="font-size:14px;padding:10px">
-            <option value="">— Select your name —</option>
-            <option value="Jon Benson">Jon Benson — SEWB Case Worker</option>
-            <option value="Jade Atkinson">Jade Atkinson</option>
-            <option value="Brett Clarke">Brett Clarke</option>
-            <option value="Simon Dart">Simon Dart — First Home Ownership Program</option>
-            <option value="Taylem Wason">Taylem Wason — Work Foundations Case Manager</option>
-            <option value="Taf Chitava">Taf Chitava — CFO WGAC</option>
-            <option value="Chris Shepperd">Chris Shepperd — CEO WGAC</option>
-            <option value="Nic Nitcher">Nic Nitcher — Reception &amp; Housing</option>
-            <option value="Brett Nuske">Brett Nuske — Housing Officer &amp; Program Manager</option>
-            <option value="Sean Bloom">Sean Bloom — Reception &amp; SEWB Assistance</option>
-            <option value="__other__">Other (type below)</option>
-          </select>
-          <input id="login-name-other" placeholder="Enter full name" style="display:none;margin-top:8px;width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:6px;font-size:13px">
-        </div>
-        <div class="form-group"><label>Role</label>
-          <select id="login-role">${Object.entries(ROLES).map(([k,v])=>`<option value="${k}">${v.icon} ${v.label}</option>`).join('')}</select></div>
-        <div class="form-group"><label>Create Password *</label><input type="password" id="login-pin" placeholder="e.g. Warrnambool1!"></div>
-        <div class="form-group"><label>Confirm Password *</label><input type="password" id="login-pin2" placeholder="Repeat password"></div>
-        <button class="btn btn-primary" style="width:100%;padding:12px;font-size:15px" onclick="createFirstUser()">Create Account &amp; Sign In</button>
-      ` : `
-        <div class="form-group"><label>Select Worker</label>
-          <select id="login-user" style="font-size:14px;padding:10px">
-            <option value="">— Select your name —</option>
-            ${userProfiles.map(u=>`<option value="${u.id}">${ROLES[u.role]?.icon||'👤'} ${u.name} (${ROLES[u.role]?.label||u.role})</option>`).join('')}
-          </select></div>
-        <button class="btn btn-primary" style="width:100%;padding:12px;font-size:15px;margin-bottom:10px" onclick="doLogin()">Sign In →</button>
-        <p id="login-error" style="color:#dc2626;font-size:13px;text-align:center;min-height:18px"></p>
-      `}
+      <div class="form-group" style="margin-bottom:14px">
+        <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:5px">Email Address</label>
+        <input type="email" id="login-email" placeholder="you@worngundidj.org.au"
+          style="width:100%;padding:11px 14px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;box-sizing:border-box"
+          onkeydown="if(event.key==='Enter')document.getElementById('login-pass').focus()">
+      </div>
+      <div class="form-group" style="margin-bottom:20px">
+        <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:5px">Password</label>
+        <input type="password" id="login-pass" placeholder="••••••••"
+          style="width:100%;padding:11px 14px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;box-sizing:border-box"
+          onkeydown="if(event.key==='Enter')doLogin()">
+      </div>
+      <button class="btn btn-primary" id="login-btn" style="width:100%;padding:13px;font-size:15px;border-radius:8px" onclick="doLogin()">Sign In →</button>
+      <p id="login-error" style="color:#dc2626;font-size:13px;text-align:center;margin-top:12px;min-height:18px"></p>
+      <p style="font-size:12px;color:#9ca3af;text-align:center;margin-top:16px">Contact your system manager to create or reset your account</p>
     </div>
   </div>`;
+  setTimeout(()=>document.getElementById('login-email')?.focus(),100);
 }
 
-function autoSetRole() {
-  const sel = document.getElementById('login-name')?.value;
-  const roleEl = document.getElementById('login-role');
-  const otherEl = document.getElementById('login-name-other');
-  if(otherEl) otherEl.style.display = sel === '__other__' ? 'block' : 'none';
-  if(!roleEl) return;
-  // Auto-assign roles by name
-  const roleMap = {
-    'Jon Benson':    'sysmanager',
-    'Chris Shepperd':'admin',
-    'Taf Chitava':   'admin',
-    'Brett Nuske':   'supervisor',
-    'Jade Atkinson': 'worker',
-    'Brett Clarke':  'worker',
-    'Simon Dart':    'worker',
-    'Taylem Wason':  'worker',
-    'Nic Nitcher':   'reception',
-    'Sean Bloom':    'reception',
-  };
-  if(roleMap[sel]) roleEl.value = roleMap[sel];
+async function doLogin() {
+  const email = document.getElementById('login-email')?.value?.trim();
+  const pass  = document.getElementById('login-pass')?.value;
+  const errEl = document.getElementById('login-error');
+  const btn   = document.getElementById('login-btn');
+  if(!email){errEl.textContent='Please enter your email address';return;}
+  if(!pass) {errEl.textContent='Please enter your password';return;}
+  errEl.textContent='';
+  btn.disabled=true; btn.textContent='Signing in…';
+
+  const cfg = (() => { try { return JSON.parse(localStorage.getItem('fb_cfg')||'null'); } catch { return null; } })();
+  if(!cfg?.apiKey) {
+    const u = userProfiles.find(p=>p.email===email);
+    if(!u){btn.disabled=false;btn.textContent='Sign In →';errEl.textContent='Account not found. Ask your system manager to set up your account.';return;}
+    saveCurrentUser(u); initApp(); return;
+  }
+
+  try {
+    if(!firebase.apps.length) firebase.initializeApp(cfg);
+    window._fbLoginEmail = email;
+    window._fbLoginPass  = pass;
+    const cred = await firebase.auth().signInWithEmailAndPassword(email, pass);
+    let u = userProfiles.find(p=>p.email===email);
+    if(!u) {
+      const displayName = cred.user.displayName || email.split('@')[0];
+      u = { id: cred.user.uid, name: displayName, email, role: 'worker', firebaseUid: cred.user.uid };
+      userProfiles.push(u); saveUserProfiles();
+    } else {
+      u.firebaseUid = cred.user.uid;
+      saveUserProfiles();
+    }
+    saveCurrentUser(u); initApp();
+  } catch(e) {
+    btn.disabled=false; btn.textContent='Sign In →';
+    const msgs = {
+      'auth/user-not-found':   'No account found with that email.',
+      'auth/wrong-password':   'Incorrect password.',
+      'auth/invalid-email':    'Please enter a valid email address.',
+      'auth/too-many-requests':'Too many attempts. Please wait a few minutes.',
+      'auth/invalid-credential':'Email or password is incorrect.',
+    };
+    errEl.textContent = msgs[e.code] || ('Error: ' + e.message);
+  }
 }
 
-function createFirstUser() {
-  const sel = document.getElementById('login-name')?.value;
-  const name = sel === '__other__'
-    ? (document.getElementById('login-name-other')?.value?.trim())
-    : sel;
-  const pin=document.getElementById('login-pin')?.value;
-  const pin2=document.getElementById('login-pin2')?.value;
-  const role=document.getElementById('login-role')?.value;
-  if(!name){alert('Please select or enter your name');return;}
-  if(!pin||pin.length<3){alert('Password required');return;}
-  if(pin!==pin2){alert('Passwords do not match');return;}
-  // Check if this staff member already has an account — just update their password
-  const existing = userProfiles.find(u=>u.name===name);
-  if(existing){existing.pin=pin;saveUserProfiles();saveCurrentUser(existing);initApp();return;}
-  const u={id:uid(),name,role,pin};
-  userProfiles.push(u); saveUserProfiles();
-  saveCurrentUser(u); initApp();
-}
-
-function doLogin() {
-  const userId=document.getElementById('login-user')?.value;
-  const errEl=document.getElementById('login-error');
-  if(!userId){errEl.textContent='Please select your name';return;}
-  const u=userProfiles.find(p=>p.id===userId);
-  if(!u){errEl.textContent='Worker not found';return;}
-  saveCurrentUser(u); initApp();
-}
+function createFirstUser() {} // legacy — no longer used
+function autoSetRole() {}     // legacy — no longer used
 
 function logout() {
   saveCurrentUser(null);
