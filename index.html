@@ -7397,6 +7397,7 @@ function checkLogin() {
 }
 
 function showLoginScreen() {
+  const hasFb = !!(()=>{ try{ return JSON.parse(localStorage.getItem('fb_cfg')||'null'); }catch{return null;} })()?.apiKey;
   document.getElementById('sidebar').style.display='none';
   document.getElementById('main').style.marginLeft='0';
   document.getElementById('main').innerHTML = `
@@ -7405,44 +7406,94 @@ function showLoginScreen() {
       <div style="text-align:center;margin-bottom:28px">
         <img src="${document.querySelector('#sidebar img')?.src||''}" alt="WG" style="height:60px;margin-bottom:12px">
         <h1 style="font-size:20px;font-weight:700;color:var(--primary)">Worn Gundidj CMS</h1>
-        <p style="font-size:13px;color:#6b7280;margin-top:4px">Sign in with your staff account</p>
+        <p style="font-size:13px;color:#6b7280;margin-top:4px">${hasFb ? 'Sign in with your staff account' : 'Select your name to sign in'}</p>
       </div>
-      <div class="form-group" style="margin-bottom:14px">
-        <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:5px">Email Address</label>
-        <input type="email" id="login-email" placeholder="you@worngundidj.org.au"
-          style="width:100%;padding:11px 14px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;box-sizing:border-box"
-          onkeydown="if(event.key==='Enter')document.getElementById('login-pass').focus()">
-      </div>
-      <div class="form-group" style="margin-bottom:20px">
-        <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:5px">Password</label>
-        <input type="password" id="login-pass" placeholder="••••••••"
-          style="width:100%;padding:11px 14px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;box-sizing:border-box"
-          onkeydown="if(event.key==='Enter')doLogin()">
-      </div>
-      <button class="btn btn-primary" id="login-btn" style="width:100%;padding:13px;font-size:15px;border-radius:8px" onclick="doLogin()">Sign In →</button>
-      <p id="login-error" style="color:#dc2626;font-size:13px;text-align:center;margin-top:12px;min-height:18px"></p>
-      <p style="font-size:12px;color:#9ca3af;text-align:center;margin-top:16px">Contact your system manager to create or reset your account</p>
+      ${hasFb ? `
+        <div class="form-group" style="margin-bottom:14px">
+          <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:5px">Email Address</label>
+          <input type="email" id="login-email" placeholder="you@worngundidj.org.au"
+            style="width:100%;padding:11px 14px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;box-sizing:border-box"
+            onkeydown="if(event.key==='Enter')document.getElementById('login-pass').focus()">
+        </div>
+        <div class="form-group" style="margin-bottom:20px">
+          <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:5px">Password</label>
+          <input type="password" id="login-pass" placeholder="••••••••"
+            style="width:100%;padding:11px 14px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;box-sizing:border-box"
+            onkeydown="if(event.key==='Enter')doLogin()">
+        </div>
+        <button class="btn btn-primary" id="login-btn" style="width:100%;padding:13px;font-size:15px;border-radius:8px" onclick="doLogin()">Sign In →</button>
+        <p id="login-error" style="color:#dc2626;font-size:13px;text-align:center;margin-top:12px;min-height:18px"></p>
+        <p style="font-size:12px;color:#9ca3af;text-align:center;margin-top:16px">Contact your system manager to create or reset your account</p>
+      ` : `
+        <div class="form-group" style="margin-bottom:20px">
+          <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:8px">Select Your Name</label>
+          <select id="login-user" style="width:100%;padding:11px 14px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;box-sizing:border-box">
+            <option value="">— Select your name —</option>
+            ${userProfiles.length > 0
+              ? userProfiles.map(u=>`<option value="${u.id}">${ROLES[u.role]?.icon||'👤'} ${u.name}</option>`).join('')
+              : `<option value="__new_jon">👤 Jon Benson (System Manager)</option>
+                 <option value="__new_jade">👤 Jade Atkinson</option>
+                 <option value="__new_brett_c">👤 Brett Clarke</option>
+                 <option value="__new_simon">👤 Simon Dart</option>
+                 <option value="__new_taylem">👤 Taylem Wason</option>
+                 <option value="__new_taf">👤 Taf Chitava</option>
+                 <option value="__new_chris">👤 Chris Shepperd</option>
+                 <option value="__new_nic">👤 Nic Nitcher</option>
+                 <option value="__new_brett_n">👤 Brett Nuske</option>
+                 <option value="__new_sean">👤 Sean Bloom</option>`}
+          </select>
+        </div>
+        <button class="btn btn-primary" id="login-btn" style="width:100%;padding:13px;font-size:15px;border-radius:8px" onclick="doLogin()">Sign In →</button>
+        <p id="login-error" style="color:#dc2626;font-size:13px;text-align:center;margin-top:12px;min-height:18px"></p>
+        <p style="font-size:12px;color:#9ca3af;text-align:center;margin-top:16px">Set up Firebase in Settings to enable secure email/password login</p>
+      `}
     </div>
   </div>`;
-  setTimeout(()=>document.getElementById('login-email')?.focus(),100);
+  setTimeout(()=>(document.getElementById('login-email')||document.getElementById('login-user'))?.focus(),100);
 }
 
 async function doLogin() {
-  const email = document.getElementById('login-email')?.value?.trim();
-  const pass  = document.getElementById('login-pass')?.value;
   const errEl = document.getElementById('login-error');
   const btn   = document.getElementById('login-btn');
+
+  // No-Firebase fallback: simple dropdown login
+  const dropdownEl = document.getElementById('login-user');
+  if(dropdownEl) {
+    const val = dropdownEl.value;
+    if(!val){errEl.textContent='Please select your name';return;}
+    // Bootstrap preset names if no profiles exist yet
+    const presets = {
+      '__new_jon':    {name:'Jon Benson',    role:'sysmanager'},
+      '__new_jade':   {name:'Jade Atkinson', role:'worker'},
+      '__new_brett_c':{name:'Brett Clarke',  role:'worker'},
+      '__new_simon':  {name:'Simon Dart',    role:'worker'},
+      '__new_taylem': {name:'Taylem Wason',  role:'worker'},
+      '__new_taf':    {name:'Taf Chitava',   role:'admin'},
+      '__new_chris':  {name:'Chris Shepperd',role:'admin'},
+      '__new_nic':    {name:'Nic Nitcher',   role:'reception'},
+      '__new_brett_n':{name:'Brett Nuske',   role:'supervisor'},
+      '__new_sean':   {name:'Sean Bloom',    role:'reception'},
+    };
+    let u = userProfiles.find(p=>p.id===val);
+    if(!u && presets[val]) {
+      u = {id:uid(), ...presets[val]};
+      userProfiles.push(u); saveUserProfiles();
+    }
+    if(!u){errEl.textContent='Worker not found';return;}
+    saveCurrentUser(u); initApp(); return;
+  }
+
+  const email = document.getElementById('login-email')?.value?.trim();
+  const pass  = document.getElementById('login-pass')?.value;
   if(!email){errEl.textContent='Please enter your email address';return;}
   if(!pass) {errEl.textContent='Please enter your password';return;}
   errEl.textContent='';
   btn.disabled=true; btn.textContent='Signing in…';
 
-  // Firebase config required for auth
   const cfg = (() => { try { return JSON.parse(localStorage.getItem('fb_cfg')||'null'); } catch { return null; } })();
   if(!cfg?.apiKey) {
-    // Fallback: no Firebase configured — match against local userProfiles by email
     const u = userProfiles.find(p=>p.email===email);
-    if(!u){btn.disabled=false;btn.textContent='Sign In →';errEl.textContent='Account not found. Ask your system manager to set up your account.';return;}
+    if(!u){btn.disabled=false;btn.textContent='Sign In →';errEl.textContent='Account not found.';return;}
     saveCurrentUser(u); initApp(); return;
   }
 
