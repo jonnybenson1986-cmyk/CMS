@@ -431,20 +431,23 @@ const FSYNC = (() => {
   function showSetupModal() {
     const cfg = getCfg()||{};
     showModal('☁️ Firebase Cloud Sync Setup', `
-      <div class="alert alert-info" style="margin-bottom:16px">
-        <div><strong>Enable real-time sync so Jon, Jade &amp; Brett can all access the same data from any device.</strong><br>
-        Takes ~5 minutes. Uses Google Firebase (free tier — no credit card needed).</div>
+      <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:14px;margin-bottom:16px;font-size:13px;line-height:1.8">
+        <strong>How to get your Firebase config:</strong><br>
+        1. Go to <strong>console.firebase.google.com</strong> → your project<br>
+        2. Click <strong>⚙️ Project Settings</strong> → scroll to <em>Your apps</em> → click <strong>&lt;/&gt; Web</strong><br>
+        3. Copy the entire <code style="background:#dbeafe;padding:1px 5px;border-radius:3px">const firebaseConfig = { … }</code> block<br>
+        4. Paste it into the box below — fields will fill automatically
       </div>
-      <div style="background:#f9fafb;border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:16px;font-size:13px;line-height:1.8">
-        <strong>Steps to get your Firebase config:</strong><br>
-        1. Go to <strong>console.firebase.google.com</strong> → Create a project (e.g. "WornGundidj")<br>
-        2. In the project: click <strong>⚙️ Project Settings</strong> → scroll to <em>Your apps</em> → click <strong>&lt;/&gt; Web</strong><br>
-        3. Register the app → copy the <strong>firebaseConfig</strong> object<br>
-        4. Back in Project Settings → click <strong>Firestore Database</strong> → Create database → Start in <strong>test mode</strong><br>
-        5. Also enable <strong>Authentication → Anonymous</strong> sign-in<br>
-        6. Paste your config values below and click Save.
+
+      <div class="form-group" style="margin-bottom:6px">
+        <label style="font-weight:700">📋 Paste Firebase Config Here</label>
+        <textarea id="fb-paste" rows="8" placeholder="Paste the full firebaseConfig block from Firebase Console here, e.g.:\n\nconst firebaseConfig = {\n  apiKey: &quot;AIzaSy…&quot;,\n  authDomain: &quot;myapp.firebaseapp.com&quot;,\n  projectId: &quot;myapp&quot;,\n  …\n};"
+          style="font-family:monospace;font-size:12px;width:100%;box-sizing:border-box;resize:vertical"
+          oninput="parseFbConfig()">${cfg.apiKey ? `const firebaseConfig = {\n  apiKey: "${cfg.apiKey}",\n  authDomain: "${cfg.authDomain||''}",\n  projectId: "${cfg.projectId||''}",\n  storageBucket: "${cfg.storageBucket||''}",\n  messagingSenderId: "${cfg.messagingSenderId||''}",\n  appId: "${cfg.appId||''}"\n};` : ''}</textarea>
+        <p id="fb-parse-status" style="font-size:12px;margin-top:4px;min-height:16px;color:#16a34a"></p>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">
         <div class="form-group"><label>API Key *</label><input id="fb-apiKey" value="${cfg.apiKey||''}" placeholder="AIzaSy…"></div>
         <div class="form-group"><label>Auth Domain *</label><input id="fb-authDomain" value="${cfg.authDomain||''}" placeholder="yourapp.firebaseapp.com"></div>
         <div class="form-group"><label>Project ID *</label><input id="fb-projectId" value="${cfg.projectId||''}" placeholder="your-project-id"></div>
@@ -452,12 +455,13 @@ const FSYNC = (() => {
         <div class="form-group"><label>Messaging Sender ID</label><input id="fb-messagingSenderId" value="${cfg.messagingSenderId||''}"></div>
         <div class="form-group"><label>App ID</label><input id="fb-appId" value="${cfg.appId||''}"></div>
       </div>
-      <div class="form-group"><label>Team ID (shared across all staff — any short word)</label><input id="fb-teamId" value="${cfg.teamId||'worngundidj'}" placeholder="worngundidj"></div>
-      ${cfg.apiKey?`<div style="display:flex;gap:10px;margin-top:4px"><button class="btn btn-sm btn-danger" onclick="FSYNC.clearConfig();closeModal()">🗑️ Disconnect Sync</button></div>`:''}
+      <div class="form-group"><label>Team ID <span style="font-weight:400;color:var(--muted)">(shared across all staff — any short word)</span></label>
+        <input id="fb-teamId" value="${cfg.teamId||'worngundidj'}" placeholder="worngundidj"></div>
+      ${cfg.apiKey?`<div style="margin-top:4px"><button class="btn btn-sm btn-danger" onclick="FSYNC.clearConfig();closeModal()">🗑️ Disconnect Sync</button></div>`:''}
     `, () => {
       const g = id => document.getElementById(id)?.value?.trim()||'';
       const apiKey = g('fb-apiKey');
-      if (!apiKey) { alert('API Key is required'); return false; }
+      if (!apiKey) { alert('API Key is required — paste your Firebase config above'); return false; }
       const cfg = {
         apiKey, authDomain: g('fb-authDomain'), projectId: g('fb-projectId'),
         storageBucket: g('fb-storageBucket'), messagingSenderId: g('fb-messagingSenderId'),
@@ -472,6 +476,32 @@ const FSYNC = (() => {
       return true;
     });
   }
+
+  window.parseFbConfig = function() {
+    const raw = document.getElementById('fb-paste')?.value || '';
+    const status = document.getElementById('fb-parse-status');
+    const extract = key => {
+      const m = raw.match(new RegExp(`${key}\\s*:\\s*["'\`]([^"'\`]+)["'\`]`));
+      return m ? m[1] : '';
+    };
+    const apiKey            = extract('apiKey');
+    const authDomain        = extract('authDomain');
+    const projectId         = extract('projectId');
+    const storageBucket     = extract('storageBucket');
+    const messagingSenderId = extract('messagingSenderId');
+    const appId             = extract('appId');
+    if (apiKey) {
+      document.getElementById('fb-apiKey').value            = apiKey;
+      document.getElementById('fb-authDomain').value        = authDomain;
+      document.getElementById('fb-projectId').value         = projectId;
+      document.getElementById('fb-storageBucket').value     = storageBucket;
+      document.getElementById('fb-messagingSenderId').value = messagingSenderId;
+      document.getElementById('fb-appId').value             = appId;
+      if (status) { status.textContent = '✓ Config detected — fields filled automatically'; status.style.color='#16a34a'; }
+    } else {
+      if (status && raw.length > 10) { status.textContent = '⚠️ Could not read config — make sure you pasted the full firebaseConfig block'; status.style.color='#d97706'; }
+    }
+  };
 
   function clearConfig() {
     localStorage.removeItem('fb_cfg');
