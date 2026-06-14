@@ -7480,26 +7480,80 @@ async function doLogin() {
     window._fbLoginEmail = email;
     window._fbLoginPass  = pass;
     const cred = await firebase.auth().signInWithEmailAndPassword(email, pass);
-    let u = userProfiles.find(p=>p.email===email);
-    if(!u) {
-      const displayName = cred.user.displayName || email.split('@')[0];
-      u = { id: cred.user.uid, name: displayName, email, role: 'worker', firebaseUid: cred.user.uid };
-      userProfiles.push(u); saveUserProfiles();
-    } else {
-      u.firebaseUid = cred.user.uid;
-      saveUserProfiles();
-    }
-    saveCurrentUser(u); initApp();
+    _finishLogin(cred.user, email);
   } catch(e) {
+    if(e.code === 'auth/multi-factor-auth-required') {
+      window._mfaResolver = e.resolver;
+      _showMFAScreen();
+      return;
+    }
     btn.disabled=false; btn.textContent='Sign In →';
     const msgs = {
-      'auth/user-not-found':   'No account found with that email.',
-      'auth/wrong-password':   'Incorrect password.',
-      'auth/invalid-email':    'Please enter a valid email address.',
-      'auth/too-many-requests':'Too many attempts. Please wait a few minutes.',
+      'auth/user-not-found':    'No account found with that email.',
+      'auth/wrong-password':    'Incorrect password.',
+      'auth/invalid-email':     'Please enter a valid email address.',
+      'auth/too-many-requests': 'Too many attempts. Please wait a few minutes.',
       'auth/invalid-credential':'Email or password is incorrect.',
     };
     errEl.textContent = msgs[e.code] || ('Error: ' + e.message);
+  }
+}
+
+function _finishLogin(firebaseUser, email) {
+  let u = userProfiles.find(p=>p.email===email);
+  if(!u) {
+    const displayName = firebaseUser.displayName || email.split('@')[0];
+    u = { id: firebaseUser.uid, name: displayName, email, role: 'worker', firebaseUid: firebaseUser.uid };
+    userProfiles.push(u); saveUserProfiles();
+  } else {
+    u.firebaseUid = firebaseUser.uid;
+    saveUserProfiles();
+  }
+  saveCurrentUser(u); initApp();
+}
+
+function _showMFAScreen() {
+  document.querySelector('#main > div').innerHTML = `
+    <div style="text-align:center;margin-bottom:24px">
+      <div style="font-size:40px;margin-bottom:8px">🔐</div>
+      <h1 style="font-size:20px;font-weight:700;color:var(--primary)">Two-Factor Verification</h1>
+      <p style="font-size:13px;color:#6b7280;margin-top:4px">Open Microsoft Authenticator and enter the 6-digit code for this account</p>
+    </div>
+    <div class="form-group" style="margin-bottom:20px">
+      <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:5px">Authenticator Code</label>
+      <input type="text" id="mfa-code" inputmode="numeric" pattern="[0-9]*" maxlength="6"
+        placeholder="000000"
+        style="width:100%;padding:14px;border:1px solid #d1d5db;border-radius:8px;font-size:22px;text-align:center;letter-spacing:8px;box-sizing:border-box"
+        onkeydown="if(event.key==='Enter')submitMFACode()" oninput="this.value=this.value.replace(/[^0-9]/g,'')">
+    </div>
+    <button class="btn btn-primary" id="mfa-btn" style="width:100%;padding:13px;font-size:15px;border-radius:8px" onclick="submitMFACode()">Verify →</button>
+    <p id="mfa-error" style="color:#dc2626;font-size:13px;text-align:center;margin-top:12px;min-height:18px"></p>
+    <button onclick="location.reload()" style="width:100%;margin-top:12px;background:none;border:none;color:#9ca3af;font-size:13px;cursor:pointer">← Back to login</button>`;
+  setTimeout(()=>document.getElementById('mfa-code')?.focus(), 100);
+}
+
+async function submitMFACode() {
+  const code   = document.getElementById('mfa-code')?.value?.trim();
+  const errEl  = document.getElementById('mfa-error');
+  const btn    = document.getElementById('mfa-btn');
+  if(!code || code.length !== 6){errEl.textContent='Please enter the 6-digit code';return;}
+  errEl.textContent=''; btn.disabled=true; btn.textContent='Verifying…';
+
+  try {
+    const resolver = window._mfaResolver;
+    const totpHint = resolver.hints.find(h=>h.factorId === firebase.auth.TotpMultiFactorGenerator?.FACTOR_ID || h.factorId === 'totp');
+    if(!totpHint) throw new Error('No TOTP factor found on this account.');
+    const assertion = firebase.auth.TotpMultiFactorGenerator.assertionForSignIn(totpHint.uid, code);
+    const cred = await resolver.resolveSignIn(assertion);
+    _finishLogin(cred.user, window._fbLoginEmail || cred.user.email);
+  } catch(e) {
+    btn.disabled=false; btn.textContent='Verify →';
+    const msgs = {
+      'auth/invalid-verification-code': 'Incorrect code — check the app and try again.',
+      'auth/code-expired':              'Code has expired — enter the new code shown in the app.',
+      'auth/too-many-requests':         'Too many attempts. Please wait a few minutes.',
+    };
+    errEl.textContent = msgs[e.code] || ('Error: ' + (e.message||e));
   }
 }
 
