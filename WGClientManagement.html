@@ -6677,7 +6677,7 @@ function openFPHOForm(id) {
         <div class="fpho-field"><label>Email${required?' *':''}</label><input type="email" id="${prefix}-email" value="${a[prefix+'Email']||''}" placeholder="email@example.com"></div>
         <div class="fpho-field"><label>Phone${required?' *':''}</label><input type="tel" id="${prefix}-phone" value="${a[prefix+'Phone']||''}" placeholder="Phone number"></div>
         ${prefix==='primary'?`<div class="fpho-field"><label>Preferred Contact *</label><select id="${prefix}-contact"><option value="">—</option>${['Phone','Email','Post'].map(m=>`<option value="${m}" ${a[prefix+'Contact']===m?'selected':''}>${m}</option>`).join('')}</select></div>`:''}
-        <div class="fpho-field"><label>Annual Income${required?' *':''}</label><input id="${prefix}-income" value="${a[prefix+'Income']||''}" placeholder="e.g. 65000"></div>
+        <div class="fpho-field"><label>Annual Income${required?' *':''}</label><input id="${prefix}-income" value="${a[prefix+'Income']||''}" placeholder="e.g. 65000" oninput="fphoCalcTotalIncome()"></div>
       </div>
       ${showAtsi?`<div class="fpho-field" style="margin-top:10px"><label>I identify as *</label>
         <div class="fpho-radio-group">
@@ -6691,6 +6691,36 @@ function openFPHOForm(id) {
   const coBlocks = [1,2,3].map(n=>`
     <div id="co${n}-block" style="display:${coCount>=n?'block':'none'}">
       ${applicantBlock('co'+n, `Co-applicant ${n}`, true, true)}
+    </div>`).join('');
+
+  const coDocBlocks = [1,2,3].map(n=>`
+    <div id="co-doc-${n}" style="display:${coCount>=n?'block':'none'}">
+      <div style="font-weight:700;font-size:13px;margin-bottom:8px;margin-top:16px;color:var(--primary)">Documentation — Co-applicant ${n}</div>
+      <div style="margin-bottom:12px">
+        <div style="font-weight:700;font-size:13px;margin-bottom:8px">Proof of Income</div>
+        <div class="fpho-check-group">
+          <label><input type="checkbox" id="doc-co${n}-taxreturn" ${a['co'+n+'DocTaxReturn']?'checked':''}> Latest tax return</label>
+          <label><input type="checkbox" id="doc-co${n}-centrelink" ${a['co'+n+'DocCentrelink']?'checked':''}> Centrelink Annual statement or latest fortnightly statement (if applicable)</label>
+        </div>
+      </div>
+      <div style="margin-bottom:12px">
+        <div style="font-weight:700;font-size:13px;margin-bottom:8px">Proof of Identification</div>
+        <div class="fpho-radio-group">
+          ${['Victorian Drivers Licence','Proof of Identification card (ID)','Residential Rental Tenancy Agreement'].map(v=>`<label><input type="radio" name="fpho-co${n}-proofid" value="${v}" ${a['co'+n+'ProofIdType']===v?'checked':''}><span>${v}</span></label>`).join('')}
+        </div>
+      </div>
+    </div>`).join('');
+
+  const coDeclBlocks = [1,2,3].map(n=>`
+    <div id="co-decl-${n}" style="display:${coCount>=n?'block':'none'};margin-top:12px">
+      <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:14px;font-size:13px">
+        <strong>Co-applicant ${n} Declaration</strong>
+        <div class="fpho-check-group" style="margin-top:8px">
+          <label><input type="checkbox" id="decl-co${n}-1" ${a['co'+n+'Decl1']?'checked':''}> I declare that the information provided in the application is true, correct and complete to the best of my knowledge.</label>
+          <label><input type="checkbox" id="decl-co${n}-2" ${a['co'+n+'Decl2']?'checked':''}> I understand that providing false or misleading information may result in this application being deemed ineligible or any funding being withdrawn.</label>
+          <label><input type="checkbox" id="decl-co${n}-3" ${a['co'+n+'Decl3']?'checked':''}> I consent for Homes Victoria to use of my/our personal information for the purpose of this application.</label>
+        </div>
+      </div>
     </div>`).join('');
 
   const html = `
@@ -6714,6 +6744,11 @@ function openFPHOForm(id) {
       </div>
     </div>
 
+    <!-- PRIVACY NOTE -->
+    <div class="fpho-info-box" style="margin-top:12px;font-size:12px">
+      Information provided will be used by Homes Victoria for assessment, administration and evaluation. By applying, you consent to provision of information to State Departments and Agencies for assessment purposes.
+    </div>
+
     <!-- APPLICATION STATUS -->
     <div class="fpho-field" style="margin-top:12px"><label>Application Status</label>
       <select id="fpho-status">
@@ -6733,6 +6768,13 @@ function openFPHOForm(id) {
     <div class="fpho-section-title">Primary Applicant Details</div>
     <div class="fpho-warn-box">The primary applicant must be an Aboriginal or Torres Strait Islander person and hold a Confirmation of Aboriginality (CoA). The primary applicant must own at least 25% of the property.</div>
     ${applicantBlock('primary','Primary Applicant',true,true)}
+
+    <!-- TOTAL TAXABLE INCOME -->
+    <div class="fpho-field" style="margin-top:12px">
+      <label>Total Taxable Income (auto-calculated)</label>
+      <input id="fpho-total-income" value="${a.totalIncome||''}" readonly style="background:#f3f4f6;font-weight:700" placeholder="0">
+      <div style="font-size:11px;color:#888;margin-top:2px">Total taxable income calculated from all applicants</div>
+    </div>
 
     <!-- PURCHASE DETAILS -->
     <div class="fpho-section-title">Purchase Details</div>
@@ -6793,8 +6835,14 @@ function openFPHOForm(id) {
       </div>
     </div>
 
+    <!-- CO-APPLICANT DOCUMENTATION -->
+    ${coDocBlocks}
+
     <!-- APPLICATION SUPPORT -->
     <div class="fpho-section-title">Application Support</div>
+    <div class="fpho-info-box" style="margin-bottom:12px;font-size:12px;line-height:1.5">
+      The First Peoples Home Ownership program has four community support roles, known as ACCO Home Ownership Officers. These roles have been funded to provide direct community support, to promote the program and deliver information sessions. The ACCO Home Ownership Officers are delivered through Aboriginal Housing Victoria and Worn Gundidj across 4 regions for coverage across all of Victoria.
+    </div>
     <div class="fpho-field">
       <label>Have you received support or guidance regarding this program? *</label>
       <div class="fpho-radio-group" style="flex-direction:row;gap:20px">
@@ -6825,6 +6873,7 @@ function openFPHOForm(id) {
         <label><input type="checkbox" id="decl-3" ${a.decl3?'checked':''}> I consent for Homes Victoria to use of my/our personal information for the purpose of this application.</label>
       </div>
     </div>
+    ${coDeclBlocks}
 
   </div>`;
 
@@ -6850,6 +6899,7 @@ function openFPHOForm(id) {
       primaryContact: document.getElementById('primary-contact')?.value||'',
       primaryIncome: document.getElementById('primary-income')?.value||'',
       primaryAtsi: getRadio('primary-atsi'),
+      totalIncome: document.getElementById('fpho-total-income')?.value||'',
       // Purchase
       purchaseSuburb: document.getElementById('fpho-suburb')?.value||'',
       depositSaved: document.getElementById('fpho-deposit')?.value||'',
@@ -6866,6 +6916,12 @@ function openFPHOForm(id) {
         [`co${n}Phone`]: document.getElementById(`co${n}-phone`)?.value||'',
         [`co${n}Income`]: document.getElementById(`co${n}-income`)?.value||'',
         [`co${n}Atsi`]: getCoAtsi('co'+n),
+        [`co${n}DocTaxReturn`]: document.getElementById(`doc-co${n}-taxreturn`)?.checked||false,
+        [`co${n}DocCentrelink`]: document.getElementById(`doc-co${n}-centrelink`)?.checked||false,
+        [`co${n}ProofIdType`]: getRadio(`fpho-co${n}-proofid`),
+        [`co${n}Decl1`]: document.getElementById(`decl-co${n}-1`)?.checked||false,
+        [`co${n}Decl2`]: document.getElementById(`decl-co${n}-2`)?.checked||false,
+        [`co${n}Decl3`]: document.getElementById(`decl-co${n}-3`)?.checked||false,
       }),{}),
       // Docs
       docTaxReturn: document.getElementById('doc-taxreturn')?.checked||false,
@@ -6898,13 +6954,30 @@ function openFPHOForm(id) {
     showPage('homeownership');
     return true;
   }, '900px');
+
+  // Calculate total income on load
+  setTimeout(()=>fphoCalcTotalIncome(),100);
+}
+
+function fphoCalcTotalIncome() {
+  const parse = id => parseFloat((document.getElementById(id)?.value||'').replace(/[^0-9.]/g,''))||0;
+  let total = parse('primary-income');
+  const coCount = parseInt(document.querySelector('input[name="fpho-cocount"]:checked')?.value||'0');
+  for(let n=1;n<=coCount;n++) total += parse('co'+n+'-income');
+  const el = document.getElementById('fpho-total-income');
+  if(el) el.value = total > 0 ? total.toFixed(2) : '';
 }
 
 function fphoToggleCo(count) {
   [1,2,3].forEach(n => {
     const el = document.getElementById(`co${n}-block`);
     if(el) el.style.display = n <= count ? 'block' : 'none';
+    const docEl = document.getElementById(`co-doc-${n}`);
+    if(docEl) docEl.style.display = n <= count ? 'block' : 'none';
+    const declEl = document.getElementById(`co-decl-${n}`);
+    if(declEl) declEl.style.display = n <= count ? 'block' : 'none';
   });
+  fphoCalcTotalIncome();
 }
 
 function printFPHO(id) {
