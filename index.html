@@ -128,10 +128,10 @@
 
   /* MODAL */
   .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 200; display: flex; align-items: flex-start; justify-content: center; padding: 40px 20px; overflow-y: auto; }
-  .modal { background: var(--card); border-radius: 12px; width: 100%; max-width: 720px; box-shadow: 0 20px 60px rgba(0,0,0,0.2); }
+  .modal { background: var(--card); border-radius: 12px; width: 100%; max-width: 720px; box-shadow: 0 20px 60px rgba(0,0,0,0.2); overflow-x: hidden; box-sizing: border-box; }
   .modal-header { padding: 20px 24px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
   .modal-header h3 { font-size: 17px; font-weight: 700; }
-  .modal-body { padding: 24px; max-height: 70vh; overflow-y: auto; }
+  .modal-body { padding: 24px; max-height: 70vh; overflow-y: auto; overflow-x: hidden; }
   .modal-footer { padding: 16px 24px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 10px; }
   .close-btn { background: none; border: none; font-size: 20px; cursor: pointer; color: var(--muted); line-height: 1; }
 
@@ -229,6 +229,9 @@
     </div>
     <div class="nav-item" onclick="showPage('clients')">
       <span class="icon">👥</span><span>Clients</span>
+    </div>
+    <div class="nav-item" onclick="showPage('closedclients')">
+      <span class="icon">📁</span><span>Closed Clients</span>
     </div>
     <div class="nav-item" onclick="showPage('sessions')">
       <span class="icon">📝</span><span>Session Log</span>
@@ -681,7 +684,7 @@ function showPage(page) {
     btn.onclick = openNewClientModal;
   }
 
-  const pages = { dashboard: renderDashboard, referrals: renderReferrals, clients: renderClients, sessions: renderSessions, walkins: renderWalkins, sewb: renderSEWB, aod: renderAOD, justice: renderJustice, cultural: renderCultural, disability: renderDisability, workfoundations: renderWorkFoundations, homeownership: renderHomeOwnership, reports: renderReportsPage, calendar: renderCalendarPage, auditlog: renderAuditLog, settings: renderSettings, chat: renderChatPage };
+  const pages = { dashboard: renderDashboard, referrals: renderReferrals, clients: renderClients, closedclients: renderClosedClients, sessions: renderSessions, walkins: renderWalkins, sewb: renderSEWB, aod: renderAOD, justice: renderJustice, cultural: renderCultural, disability: renderDisability, workfoundations: renderWorkFoundations, homeownership: renderHomeOwnership, reports: renderReportsPage, calendar: renderCalendarPage, auditlog: renderAuditLog, settings: renderSettings, chat: renderChatPage };
   const fn = pages[page];
   document.getElementById('content').innerHTML = fn ? fn() : '<p>Coming soon</p>';
   attachPageEvents(page);
@@ -768,7 +771,7 @@ function renderDashboard() {
 // ===== CLIENTS LIST =====
 function renderClients() {
   const search = document.getElementById('global-search')?.value?.toLowerCase()||'';
-  const filtered = clients.filter(c=>!search||c.fullName?.toLowerCase().includes(search)||c.clientId?.toLowerCase().includes(search)||c.community?.toLowerCase().includes(search));
+  const filtered = clients.filter(c=>(c.status||'active')!=='closed').filter(c=>!search||c.fullName?.toLowerCase().includes(search)||c.clientId?.toLowerCase().includes(search)||c.community?.toLowerCase().includes(search));
   return `
   <div class="card" style="padding:0;overflow:hidden">
     <div class="table-wrap">
@@ -802,6 +805,76 @@ function renderClients() {
 
 function filterClients() { document.getElementById('content').innerHTML = renderClients(); attachPageEvents('clients'); }
 
+function renderClosedClients() {
+  const closed = clients.filter(c=>c.status==='closed').sort((a,b)=>(b.closedDate||'').localeCompare(a.closedDate||''));
+  return `
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">📁 Closed Clients</div>
+      <span style="font-size:13px;color:var(--muted)">${closed.length} closed file${closed.length!==1?'s':''}</span>
+    </div>
+    ${closed.length===0?'<p style="color:var(--muted);font-size:13px;padding:20px 0;text-align:center">No closed client files</p>':
+    `<div class="table-wrap"><table>
+      <thead><tr>
+        <th>Client</th><th>ID</th><th>Programs</th><th>Closed Date</th><th>Closure Reason</th><th>Actions</th>
+      </tr></thead>
+      <tbody>
+        ${closed.map(c=>{
+          const progs = [c.sewb&&'SEWB',c.aod&&'AOD',c.justice&&'Justice',c.cultural&&'Cultural',c.disability&&'Disability',c.workFoundations&&'Work Foundations'].filter(Boolean);
+          return `<tr>
+            <td><div style="display:flex;align-items:center;gap:10px"><div class="avatar" style="opacity:0.6">${initials(c.fullName)}</div><div style="font-weight:600;font-size:13px">${c.fullName}</div></div></td>
+            <td style="font-size:12px;color:var(--muted)">${c.clientId||'—'}</td>
+            <td>${progs.map(p=>`<span class="tag" style="font-size:10px;margin-right:3px">${p}</span>`).join('')||'—'}</td>
+            <td style="font-size:13px">${c.closedDate||'—'}</td>
+            <td style="font-size:13px;color:var(--muted)">${c.closureReason||'—'}</td>
+            <td style="white-space:nowrap">
+              <button class="btn btn-sm btn-outline" onclick="openClientProfile('${c.id}')">View</button>
+              <button class="btn btn-sm" style="background:#d1fae5;color:#065f46;margin-left:4px" onclick="reopenClient('${c.id}')">🔓 Reopen</button>
+            </td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table></div>`}
+  </div>`;
+}
+
+function closeClient(id) {
+  const c = clients.find(cl=>cl.id===id); if(!c) return;
+  const html = `
+    <p style="font-size:13px;color:var(--muted);margin-bottom:14px">Closing <strong>${c.fullName}</strong>'s file will move them to the Closed Clients area. You can reopen them at any time.</p>
+    <div class="form-group"><label>Closure Reason *</label>
+      <select id="close-reason">
+        <option value="">— Select reason —</option>
+        ${['Goals achieved','Moved away','Disengaged','Referred to another service','Program completed','Deceased','Client request','Other'].map(r=>`<option>${r}</option>`).join('')}
+      </select></div>
+    <div class="form-group"><label>Closure Notes</label>
+      <textarea id="close-notes" rows="3" placeholder="Any additional notes about the closure…"></textarea></div>`;
+  showModal('🔒 Close Client File — ' + c.fullName, html, () => {
+    const reason = document.getElementById('close-reason')?.value;
+    if(!reason) { alert('Please select a closure reason'); return false; }
+    c.status = 'closed';
+    c.closedDate = today();
+    c.closureReason = reason;
+    c.closureNotes = document.getElementById('close-notes')?.value || '';
+    audit('Closed client', c.fullName + ' — ' + reason, id);
+    saveAll();
+    showToast(c.fullName + ' has been closed');
+    showPage('clients');
+    return true;
+  }, '500px');
+}
+
+function reopenClient(id) {
+  const c = clients.find(cl=>cl.id===id); if(!c) return;
+  if(!confirm('Reopen ' + c.fullName + '? They will appear in the active clients list again.')) return;
+  c.status = 'active';
+  c.reopenedDate = today();
+  audit('Reopened client', c.fullName, id);
+  saveAll();
+  showToast(c.fullName + ' has been reopened');
+  showPage('clients');
+}
+
 // ===== CLIENT PROFILE =====
 function openClientProfile(id) {
   const c = clients.find(cl=>cl.id===id);
@@ -833,6 +906,9 @@ function openClientProfile(id) {
       <button class="btn btn-outline btn-sm" onclick="openEditClientModal('${id}')">✏️ Edit</button>
       <button class="btn btn-primary btn-sm" onclick="openNoteModal('${id}')">📝 Add Note</button>
       <button class="btn btn-accent btn-sm" onclick="openTimeModal('${id}')">⏱️ Log Time</button>
+      ${(c.status||'active')==='closed'
+        ? `<button class="btn btn-sm" style="background:#d1fae5;color:#065f46" onclick="reopenClient('${id}')">🔓 Reopen</button>`
+        : `<button class="btn btn-sm" style="background:#fee2e2;color:#991b1b" onclick="closeClient('${id}')">🔒 Close Client</button>`}
     </div>
   </div>
 
@@ -2522,6 +2598,8 @@ function clientFormHTML(c) {
         <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="cf-justice" ${c.justice?'checked':''}> Justice</label>
         <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="cf-cultural" ${c.cultural?'checked':''}> Cultural Strengthening</label>
         <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="cf-disability" ${c.disability?'checked':''}> ♿ Disability</label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="cf-workfoundations" ${c.workFoundations?'checked':''}> 🔨 Work Foundations</label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="cf-homeownership" ${c.homeOwnership?'checked':''}> 🏠 First Peoples Home Ownership</label>
       </div>
     </div>
   </div>
@@ -2547,7 +2625,7 @@ function collectClientForm() {
     children: g('cf-children'), healthConditions: g('cf-healthConditions'), medications: g('cf-medications'),
     referralSource: g('cf-referralSource'), referralDate: g('cf-referralDate'), keyWorker: g('cf-keyWorker'),
     riskLevel: g('cf-riskLevel'), status: g('cf-status'),
-    sewb: gc('cf-sewb'), aod: gc('cf-aod'), justice: gc('cf-justice'), cultural: gc('cf-cultural'), disability: gc('cf-disability'),
+    sewb: gc('cf-sewb'), aod: gc('cf-aod'), justice: gc('cf-justice'), cultural: gc('cf-cultural'), disability: gc('cf-disability'), workFoundations: gc('cf-workfoundations'), homeOwnership: gc('cf-homeownership'),
     referralReason: g('cf-referralReason'), goals: g('cf-goals'), strengths: g('cf-strengths'),
   };
 }
@@ -6509,14 +6587,16 @@ function renderHomeOwnership() {
   <style>
     .fpho-card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:12px}
     .fpho-section-title{font-size:13px;font-weight:700;color:var(--primary);text-transform:uppercase;letter-spacing:.5px;margin:20px 0 12px;padding-bottom:6px;border-bottom:2px solid var(--primary-light)}
-    .fpho-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
+    .fpho-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
+    .fpho-field{min-width:0}
     .fpho-field label{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;display:block;margin-bottom:4px}
-    .fpho-field input,.fpho-field select,.fpho-field textarea{width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg);color:var(--text)}
-    .fpho-radio-group,.fpho-check-group{display:flex;flex-direction:column;gap:6px;padding:4px 0}
-    .fpho-radio-group label,.fpho-check-group label{display:flex;align-items:flex-start;gap:8px;font-size:13px;font-weight:400;cursor:pointer;line-height:1.4}
+    .fpho-field input,.fpho-field select,.fpho-field textarea{width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg);color:var(--text);box-sizing:border-box}
+    .fpho-radio-group,.fpho-check-group{display:flex;flex-direction:column;gap:6px;padding:4px 0;max-width:100%}
+    .fpho-radio-group label,.fpho-check-group label{display:flex;align-items:flex-start;gap:8px;font-size:13px;font-weight:400;cursor:pointer;line-height:1.4;word-wrap:break-word;min-width:0}
+    .fpho-radio-group label span,.fpho-check-group label span{min-width:0;word-wrap:break-word}
     .fpho-radio-group input,.fpho-check-group input{margin-top:2px;flex-shrink:0}
-    .fpho-info-box{background:#e0f2fe;border:1px solid #7dd3fc;border-radius:8px;padding:14px;font-size:13px;line-height:1.6;margin-bottom:16px}
-    .fpho-warn-box{background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:12px;font-size:12px;margin-bottom:12px}
+    .fpho-info-box{background:#e0f2fe;border:1px solid #7dd3fc;border-radius:8px;padding:14px;font-size:13px;line-height:1.6;margin-bottom:16px;word-wrap:break-word}
+    .fpho-warn-box{background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:12px;font-size:12px;margin-bottom:12px;word-wrap:break-word}
     .fpho-grant-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;margin-bottom:16px}
     .fpho-grant-card{border:1px solid var(--border);border-radius:8px;padding:14px;background:var(--bg)}
     .fpho-grant-card .gc-amt{font-size:20px;font-weight:800;color:var(--primary)}
@@ -6526,7 +6606,7 @@ function renderHomeOwnership() {
     .fpho-tab.active{background:var(--primary);color:#fff;border-color:var(--primary)}
     .fpho-tab:not(.active){background:var(--bg);color:var(--text);border-color:var(--border)}
     .fpho-tab:not(.active):hover{border-color:var(--primary-light)}
-    .coapplicant-block{border:1px solid var(--border);border-radius:10px;padding:16px;margin-top:12px}
+    .coapplicant-block{border:1px solid var(--border);border-radius:10px;padding:16px;margin-top:12px;box-sizing:border-box;max-width:100%;overflow:hidden}
   </style>
 
   <div class="card" style="margin-bottom:16px;background:linear-gradient(135deg,#1a3a2a,#2d6a4f);color:#fff">
@@ -6614,7 +6694,7 @@ function openFPHOForm(id) {
     </div>`).join('');
 
   const html = `
-  <div style="max-height:70vh;overflow-y:auto;padding-right:4px">
+  <div style="overflow-x:hidden;padding-right:4px;box-sizing:border-box;width:100%">
 
     <!-- PROGRAM INFO -->
     <div class="fpho-info-box">
@@ -6817,7 +6897,7 @@ function openFPHOForm(id) {
     showToast('Application saved ✓');
     showPage('homeownership');
     return true;
-  }, { wide: true });
+  }, '900px');
 }
 
 function fphoToggleCo(count) {
