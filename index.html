@@ -6590,11 +6590,11 @@ function renderHomeOwnership() {
     .fpho-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
     .fpho-field{min-width:0;max-width:100%;box-sizing:border-box}
     .fpho-field label{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;display:block;margin-bottom:4px}
-    .fpho-field input,.fpho-field select,.fpho-field textarea{width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg);color:var(--text);box-sizing:border-box;max-width:100%}
+    .fpho-field input[type="text"],.fpho-field input[type="email"],.fpho-field input[type="tel"],.fpho-field input[type="number"],.fpho-field input[type="date"],.fpho-field input:not([type]),.fpho-field select,.fpho-field textarea{width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg);color:var(--text);box-sizing:border-box}
     .fpho-radio-group,.fpho-check-group{display:flex;flex-direction:column;gap:6px;padding:4px 0}
     .fpho-radio-group label,.fpho-check-group label{display:flex;align-items:flex-start;gap:8px;font-size:13px;font-weight:400;cursor:pointer;line-height:1.4}
     .fpho-radio-group label span,.fpho-check-group label span{overflow-wrap:break-word;word-break:break-word}
-    .fpho-radio-group input,.fpho-check-group input{margin-top:2px;flex-shrink:0}
+    .fpho-radio-group input[type="radio"],.fpho-check-group input[type="checkbox"]{margin-top:2px;flex-shrink:0;width:auto}
     .fpho-info-box{background:#e0f2fe;border:1px solid #7dd3fc;border-radius:8px;padding:14px;font-size:13px;line-height:1.6;margin-bottom:16px;overflow-wrap:break-word}
     .fpho-warn-box{background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:12px;font-size:12px;margin-bottom:12px;overflow-wrap:break-word;line-height:1.5}
     .fpho-grant-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;margin-bottom:16px}
@@ -6729,11 +6729,11 @@ function openFPHOForm(id) {
     .fpho-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
     .fpho-field{min-width:0;max-width:100%;box-sizing:border-box}
     .fpho-field label{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;display:block;margin-bottom:4px}
-    .fpho-field input,.fpho-field select,.fpho-field textarea{width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg);color:var(--text);box-sizing:border-box;max-width:100%}
+    .fpho-field input[type="text"],.fpho-field input[type="email"],.fpho-field input[type="tel"],.fpho-field input[type="number"],.fpho-field input[type="date"],.fpho-field input:not([type]),.fpho-field select,.fpho-field textarea{width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg);color:var(--text);box-sizing:border-box}
     .fpho-radio-group,.fpho-check-group{display:flex;flex-direction:column;gap:6px;padding:4px 0}
     .fpho-radio-group label,.fpho-check-group label{display:flex;align-items:flex-start;gap:8px;font-size:13px;font-weight:400;cursor:pointer;line-height:1.4}
     .fpho-radio-group label span,.fpho-check-group label span{overflow-wrap:break-word;word-break:break-word}
-    .fpho-radio-group input,.fpho-check-group input{margin-top:2px;flex-shrink:0}
+    .fpho-radio-group input[type="radio"],.fpho-check-group input[type="checkbox"]{margin-top:2px;flex-shrink:0;width:auto}
     .fpho-info-box{background:#e0f2fe;border:1px solid #7dd3fc;border-radius:8px;padding:14px;font-size:13px;line-height:1.6;margin-bottom:16px;overflow-wrap:break-word}
     .fpho-warn-box{background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:12px;font-size:12px;margin-bottom:12px;overflow-wrap:break-word;line-height:1.5}
     .coapplicant-block{border:1px solid var(--border);border-radius:10px;padding:14px;margin-top:12px;box-sizing:border-box;overflow:hidden}
