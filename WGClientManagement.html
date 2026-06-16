@@ -131,7 +131,7 @@
   .modal { background: var(--card); border-radius: 12px; width: 100%; max-width: 720px; box-shadow: 0 20px 60px rgba(0,0,0,0.2); }
   .modal-header { padding: 20px 24px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
   .modal-header h3 { font-size: 17px; font-weight: 700; }
-  .modal-body { padding: 24px; max-height: 70vh; overflow-y: auto; }
+  .modal-body { padding: 24px; max-height: 70vh; overflow-y: auto; overflow-x: hidden; }
   .modal-footer { padding: 16px 24px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 10px; }
   .close-btn { background: none; border: none; font-size: 20px; cursor: pointer; color: var(--muted); line-height: 1; }
 
@@ -483,6 +483,7 @@ const FSYNC = (() => {
     });
   }
 
+  // Called on every keystroke in the paste box — extracts values into fields
   window.parseFbConfig = function() {
     const raw = document.getElementById('fb-paste')?.value || '';
     const status = document.getElementById('fb-parse-status');
@@ -490,12 +491,12 @@ const FSYNC = (() => {
       const m = raw.match(new RegExp(`${key}\\s*:\\s*["'\`]([^"'\`]+)["'\`]`));
       return m ? m[1] : '';
     };
-    const apiKey            = extract('apiKey');
-    const authDomain        = extract('authDomain');
-    const projectId         = extract('projectId');
-    const storageBucket     = extract('storageBucket');
-    const messagingSenderId = extract('messagingSenderId');
-    const appId             = extract('appId');
+    const apiKey           = extract('apiKey');
+    const authDomain       = extract('authDomain');
+    const projectId        = extract('projectId');
+    const storageBucket    = extract('storageBucket');
+    const messagingSenderId= extract('messagingSenderId');
+    const appId            = extract('appId');
     if (apiKey) {
       document.getElementById('fb-apiKey').value            = apiKey;
       document.getElementById('fb-authDomain').value        = authDomain;
@@ -4110,6 +4111,96 @@ function buildWorkFoundationsClientReport(c) {
   ${wfNotes.map(n=>`<div class="note-block"><div class="note-meta">${fmtdt(n.created)} | ${n.worker||'—'}</div><p>${(n.text||'').replace(/\n/g,'<br>')}</p></div>`).join('')||'<p>None</p>'}`;
 }
 
+// ---- SAFETY PLAN REPORT ----
+function buildSafetyReport(c) {
+  return `
+  ${reportHeader('Safety Plan','Client Safety & Crisis Plan', c.fullName)}
+  <div style="background:#fff3cd;border-left:4px solid #d97706;padding:10px 14px;margin-bottom:16px;font-size:12px">
+    ⚠️ This document is confidential. Safety plans must be reviewed regularly with the client.
+  </div>
+  <div class="field-row">
+    <div class="field"><label>Date Reviewed</label><p>${c.sfDate||'—'}</p></div>
+    <div class="field"><label>Next Review Date</label><p>${c.sfNext||'—'}</p></div>
+    <div class="field"><label>Risk Level</label><p><span class="badge badge-${c.riskLevel||'low'}">${(c.riskLevel||'LOW').toUpperCase()}</span></p></div>
+  </div>
+  <table>
+    <tr><th colspan="2">Safety Plan Details</th></tr>
+    <tr><td>Warning Signs</td><td>${c.sfWarning||'—'}</td></tr>
+    <tr><td>Internal Coping Strategies</td><td>${c.sfCoping||'—'}</td></tr>
+    <tr><td>Support People</td><td>${c.sfPeople||'—'}</td></tr>
+    <tr><td>Professionals / Agencies</td><td>${c.sfPros||'—'}</td></tr>
+    <tr><td>Making Environment Safe</td><td>${c.sfEnv||'—'}</td></tr>
+    <tr><td>Reasons for Living</td><td>${c.sfReasons||'—'}</td></tr>
+  </table>
+  <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:12px;margin-top:12px">
+    <strong>Crisis Numbers:</strong><br>
+    🆘 000 Emergency &nbsp;|&nbsp; 📞 Lifeline 13 11 14 &nbsp;|&nbsp; 📞 13YARN 13 92 76 (Aboriginal &amp; TSI)<br>
+    📞 Beyond Blue 1300 22 4636 &nbsp;|&nbsp; 📞 1800RESPECT 1800 737 732
+  </div>`;
+}
+
+// ---- NOTES REPORT ----
+function buildNotesReport(c, from, to) {
+  const filtered = notes.filter(n=>n.clientId===c.id&&n.created>=from&&n.created<=to+'T23:59:59').sort((a,b)=>b.created.localeCompare(a.created));
+  const byType = {};
+  filtered.forEach(n=>{ const t=n.type||'general'; if(!byType[t])byType[t]=[]; byType[t].push(n); });
+  return `
+  ${reportHeader('Case Notes Report',`Period: ${fmt(from)} — ${fmt(to)}`, c.fullName)}
+  <div class="stat-row">
+    <div class="stat-box"><div class="sv">${filtered.length}</div><div class="sl">Total Notes</div></div>
+    ${Object.entries(byType).map(([t,ns])=>`<div class="stat-box"><div class="sv">${ns.length}</div><div class="sl">${t.toUpperCase()}</div></div>`).join('')}
+  </div>
+  ${Object.entries(byType).map(([t,ns])=>`
+    <h2>${t.toUpperCase()} Notes (${ns.length})</h2>
+    ${ns.map(n=>`<div class="note-block ${t}">
+      <div class="note-meta">${fmtdt(n.created)} | ${n.worker||'—'} | ${n.contactType||''} ${n.duration?'| '+n.duration+' min':''}</div>
+      <p>${(n.text||'').replace(/\n/g,'<br>')}</p>
+      ${n.followup?`<p style="margin-top:5px"><strong>Follow-up:</strong> ${n.followup}</p>`:''}
+    </div>`).join('')}
+  `).join('')}`;
+}
+
+// ---- TIME REPORT (CLIENT) ----
+function buildTimeReport(c, from, to) {
+  const filtered = timeLogs.filter(t=>t.clientId===c.id&&t.date>=from&&t.date<=to).sort((a,b)=>b.date.localeCompare(a.date));
+  const total = filtered.reduce((a,t)=>a+(t.minutes||0),0);
+  const byActivity = {};
+  filtered.forEach(t=>{ const a=t.activity||'Other'; if(!byActivity[a])byActivity[a]=0; byActivity[a]+=t.minutes||0; });
+  return `
+  ${reportHeader('Time Log Report',`Period: ${fmt(from)} — ${fmt(to)}`, c.fullName)}
+  <div class="stat-row">
+    <div class="stat-box"><div class="sv">${Math.floor(total/60)}h ${total%60}m</div><div class="sl">Total Time</div></div>
+    <div class="stat-box"><div class="sv">${filtered.length}</div><div class="sl">Sessions</div></div>
+    <div class="stat-box"><div class="sv">${filtered.length?Math.round(total/filtered.length):0} min</div><div class="sl">Avg Session</div></div>
+  </div>
+  <h2>Time by Activity</h2>
+  <table><tr><th>Activity</th><th>Total</th></tr>
+  ${Object.entries(byActivity).sort((a,b)=>b[1]-a[1]).map(([a,m])=>`<tr><td>${a}</td><td>${Math.floor(m/60)}h ${m%60}m</td></tr>`).join('')}
+  </table>
+  <h2>All Sessions</h2>
+  <table><tr><th>Date</th><th>Activity</th><th>Mode</th><th>Duration</th><th>Worker</th><th>Notes</th></tr>
+  ${filtered.map(t=>`<tr><td>${fmt(t.date)}</td><td>${t.activity||'—'}</td><td>${t.type||'—'}</td><td>${t.minutes} min</td><td>${t.worker||'—'}</td><td style="font-size:10px">${t.notes||''}</td></tr>`).join('')}
+  <tr style="font-weight:700;background:#f0f7f3"><td colspan="3">TOTAL</td><td>${Math.floor(total/60)}h ${total%60}m</td><td colspan="2"></td></tr>
+  </table>`;
+}
+
+// ===== PROGRAM-LEVEL REPORTS =====
+function generateProgramReport(type) {
+  const from = document.getElementById('rpt-from')?.value||'2000-01-01';
+  const to = document.getElementById('rpt-to')?.value||today();
+  if(type==='sewb') openReport(buildSEWBProgramReport(from, to));
+  else if(type==='aod') openReport(buildAODProgramReport(from, to));
+  else if(type==='justice') openReport(buildJusticeProgramReport(from, to));
+  else if(type==='cultural') openReport(buildCulturalProgramReport(from, to));
+  else if(type==='disability') openReport(buildDisabilityProgramReport(from, to));
+  else if(type==='workfoundations') openReport(buildWorkFoundationsProgramReport(from, to));
+  else if(type==='allprograms') openReport(buildAllProgramsReport(from, to));
+  else if(type==='caseload') openReport(buildCaseloadReport(from, to));
+  else if(type==='activity') openReport(buildActivityReport(from, to));
+  else if(type==='risk') openReport(buildRiskRegister());
+  else if(type==='goals') openReport(buildGoalsReport());
+}
+
 function buildDisabilityProgramReport(from, to) {
   const dc = clients.filter(c=>c.disability);
   const rptNotes = notes.filter(n=>n.type==='disability'&&n.created>=from&&n.created<=to+'T23:59:59');
@@ -4207,96 +4298,6 @@ function buildAllProgramsReport(from, to) {
     </table>`;
   }).join('')}
   ` + reportFooter();
-}
-
-// ---- SAFETY PLAN REPORT ----
-function buildSafetyReport(c) {
-  return `
-  ${reportHeader('Safety Plan','Client Safety & Crisis Plan', c.fullName)}
-  <div style="background:#fff3cd;border-left:4px solid #d97706;padding:10px 14px;margin-bottom:16px;font-size:12px">
-    ⚠️ This document is confidential. Safety plans must be reviewed regularly with the client.
-  </div>
-  <div class="field-row">
-    <div class="field"><label>Date Reviewed</label><p>${c.sfDate||'—'}</p></div>
-    <div class="field"><label>Next Review Date</label><p>${c.sfNext||'—'}</p></div>
-    <div class="field"><label>Risk Level</label><p><span class="badge badge-${c.riskLevel||'low'}">${(c.riskLevel||'LOW').toUpperCase()}</span></p></div>
-  </div>
-  <table>
-    <tr><th colspan="2">Safety Plan Details</th></tr>
-    <tr><td>Warning Signs</td><td>${c.sfWarning||'—'}</td></tr>
-    <tr><td>Internal Coping Strategies</td><td>${c.sfCoping||'—'}</td></tr>
-    <tr><td>Support People</td><td>${c.sfPeople||'—'}</td></tr>
-    <tr><td>Professionals / Agencies</td><td>${c.sfPros||'—'}</td></tr>
-    <tr><td>Making Environment Safe</td><td>${c.sfEnv||'—'}</td></tr>
-    <tr><td>Reasons for Living</td><td>${c.sfReasons||'—'}</td></tr>
-  </table>
-  <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:12px;margin-top:12px">
-    <strong>Crisis Numbers:</strong><br>
-    🆘 000 Emergency &nbsp;|&nbsp; 📞 Lifeline 13 11 14 &nbsp;|&nbsp; 📞 13YARN 13 92 76 (Aboriginal &amp; TSI)<br>
-    📞 Beyond Blue 1300 22 4636 &nbsp;|&nbsp; 📞 1800RESPECT 1800 737 732
-  </div>`;
-}
-
-// ---- NOTES REPORT ----
-function buildNotesReport(c, from, to) {
-  const filtered = notes.filter(n=>n.clientId===c.id&&n.created>=from&&n.created<=to+'T23:59:59').sort((a,b)=>b.created.localeCompare(a.created));
-  const byType = {};
-  filtered.forEach(n=>{ const t=n.type||'general'; if(!byType[t])byType[t]=[]; byType[t].push(n); });
-  return `
-  ${reportHeader('Case Notes Report',`Period: ${fmt(from)} — ${fmt(to)}`, c.fullName)}
-  <div class="stat-row">
-    <div class="stat-box"><div class="sv">${filtered.length}</div><div class="sl">Total Notes</div></div>
-    ${Object.entries(byType).map(([t,ns])=>`<div class="stat-box"><div class="sv">${ns.length}</div><div class="sl">${t.toUpperCase()}</div></div>`).join('')}
-  </div>
-  ${Object.entries(byType).map(([t,ns])=>`
-    <h2>${t.toUpperCase()} Notes (${ns.length})</h2>
-    ${ns.map(n=>`<div class="note-block ${t}">
-      <div class="note-meta">${fmtdt(n.created)} | ${n.worker||'—'} | ${n.contactType||''} ${n.duration?'| '+n.duration+' min':''}</div>
-      <p>${(n.text||'').replace(/\n/g,'<br>')}</p>
-      ${n.followup?`<p style="margin-top:5px"><strong>Follow-up:</strong> ${n.followup}</p>`:''}
-    </div>`).join('')}
-  `).join('')}`;
-}
-
-// ---- TIME REPORT (CLIENT) ----
-function buildTimeReport(c, from, to) {
-  const filtered = timeLogs.filter(t=>t.clientId===c.id&&t.date>=from&&t.date<=to).sort((a,b)=>b.date.localeCompare(a.date));
-  const total = filtered.reduce((a,t)=>a+(t.minutes||0),0);
-  const byActivity = {};
-  filtered.forEach(t=>{ const a=t.activity||'Other'; if(!byActivity[a])byActivity[a]=0; byActivity[a]+=t.minutes||0; });
-  return `
-  ${reportHeader('Time Log Report',`Period: ${fmt(from)} — ${fmt(to)}`, c.fullName)}
-  <div class="stat-row">
-    <div class="stat-box"><div class="sv">${Math.floor(total/60)}h ${total%60}m</div><div class="sl">Total Time</div></div>
-    <div class="stat-box"><div class="sv">${filtered.length}</div><div class="sl">Sessions</div></div>
-    <div class="stat-box"><div class="sv">${filtered.length?Math.round(total/filtered.length):0} min</div><div class="sl">Avg Session</div></div>
-  </div>
-  <h2>Time by Activity</h2>
-  <table><tr><th>Activity</th><th>Total</th></tr>
-  ${Object.entries(byActivity).sort((a,b)=>b[1]-a[1]).map(([a,m])=>`<tr><td>${a}</td><td>${Math.floor(m/60)}h ${m%60}m</td></tr>`).join('')}
-  </table>
-  <h2>All Sessions</h2>
-  <table><tr><th>Date</th><th>Activity</th><th>Mode</th><th>Duration</th><th>Worker</th><th>Notes</th></tr>
-  ${filtered.map(t=>`<tr><td>${fmt(t.date)}</td><td>${t.activity||'—'}</td><td>${t.type||'—'}</td><td>${t.minutes} min</td><td>${t.worker||'—'}</td><td style="font-size:10px">${t.notes||''}</td></tr>`).join('')}
-  <tr style="font-weight:700;background:#f0f7f3"><td colspan="3">TOTAL</td><td>${Math.floor(total/60)}h ${total%60}m</td><td colspan="2"></td></tr>
-  </table>`;
-}
-
-// ===== PROGRAM-LEVEL REPORTS =====
-function generateProgramReport(type) {
-  const from = document.getElementById('rpt-from')?.value||'2000-01-01';
-  const to = document.getElementById('rpt-to')?.value||today();
-  if(type==='sewb') openReport(buildSEWBProgramReport(from, to));
-  else if(type==='aod') openReport(buildAODProgramReport(from, to));
-  else if(type==='justice') openReport(buildJusticeProgramReport(from, to));
-  else if(type==='cultural') openReport(buildCulturalProgramReport(from, to));
-  else if(type==='disability') openReport(buildDisabilityProgramReport(from, to));
-  else if(type==='workfoundations') openReport(buildWorkFoundationsProgramReport(from, to));
-  else if(type==='allprograms') openReport(buildAllProgramsReport(from, to));
-  else if(type==='caseload') openReport(buildCaseloadReport(from, to));
-  else if(type==='activity') openReport(buildActivityReport(from, to));
-  else if(type==='risk') openReport(buildRiskRegister());
-  else if(type==='goals') openReport(buildGoalsReport());
 }
 
 function genFunderReport(funder) {
@@ -6586,14 +6587,15 @@ function renderHomeOwnership() {
   <style>
     .fpho-card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:12px}
     .fpho-section-title{font-size:13px;font-weight:700;color:var(--primary);text-transform:uppercase;letter-spacing:.5px;margin:20px 0 12px;padding-bottom:6px;border-bottom:2px solid var(--primary-light)}
-    .fpho-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
+    .fpho-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
+    .fpho-field{min-width:0}
     .fpho-field label{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;display:block;margin-bottom:4px}
-    .fpho-field input,.fpho-field select,.fpho-field textarea{width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg);color:var(--text)}
+    .fpho-field input,.fpho-field select,.fpho-field textarea{width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg);color:var(--text);box-sizing:border-box}
     .fpho-radio-group,.fpho-check-group{display:flex;flex-direction:column;gap:6px;padding:4px 0}
     .fpho-radio-group label,.fpho-check-group label{display:flex;align-items:flex-start;gap:8px;font-size:13px;font-weight:400;cursor:pointer;line-height:1.4}
     .fpho-radio-group input,.fpho-check-group input{margin-top:2px;flex-shrink:0}
-    .fpho-info-box{background:#e0f2fe;border:1px solid #7dd3fc;border-radius:8px;padding:14px;font-size:13px;line-height:1.6;margin-bottom:16px}
-    .fpho-warn-box{background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:12px;font-size:12px;margin-bottom:12px}
+    .fpho-info-box{background:#e0f2fe;border:1px solid #7dd3fc;border-radius:8px;padding:14px;font-size:13px;line-height:1.6;margin-bottom:16px;word-wrap:break-word}
+    .fpho-warn-box{background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:12px;font-size:12px;margin-bottom:12px;word-wrap:break-word}
     .fpho-grant-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;margin-bottom:16px}
     .fpho-grant-card{border:1px solid var(--border);border-radius:8px;padding:14px;background:var(--bg)}
     .fpho-grant-card .gc-amt{font-size:20px;font-weight:800;color:var(--primary)}
@@ -6894,7 +6896,7 @@ function openFPHOForm(id) {
     showToast('Application saved ✓');
     showPage('homeownership');
     return true;
-  }, { wide: true });
+  }, '900px');
 }
 
 function fphoToggleCo(count) {
@@ -7349,6 +7351,7 @@ async function createStaffAccount() {
   errEl.textContent='Creating account…';
 
   try {
+    // Create a secondary Firebase app instance so we don't displace the current signed-in user
     const secondaryApp = firebase.apps.find(a=>a.name==='staff-creator')
       || firebase.initializeApp(cfg, 'staff-creator');
     const secondaryAuth = secondaryApp.auth();
@@ -7356,6 +7359,7 @@ async function createStaffAccount() {
     await cred.user.updateProfile({ displayName: name });
     await secondaryAuth.signOut();
 
+    // Save local worker profile
     const existing = userProfiles.find(u=>u.email===email);
     if(existing){
       existing.name=name; existing.role=role; existing.firebaseUid=cred.user.uid;
@@ -7403,11 +7407,13 @@ async function saveStaffEdit(userId) {
   if(!name){errEl.textContent='Name is required';return false;}
   u.name=name; u.email=email||u.email; u.role=role;
   if(pass && pass.length>=8 && u.firebaseUid) {
+    errEl.textContent='Updating password…';
+    // Password reset via Firebase requires Admin SDK; instruct user to use Firebase console
     errEl.style.color='#d97706';
     errEl.textContent='⚠️ To reset a password, go to Firebase Console → Authentication → Users → Reset password. Profile saved.';
     saveUserProfiles();
     if(FSYNC.isReady()) FSYNC.push('userProfiles', userProfiles);
-    return false;
+    return false; // keep modal open so user can see the message
   }
   saveUserProfiles();
   if(FSYNC.isReady()) FSYNC.push('userProfiles', userProfiles);
@@ -7462,8 +7468,8 @@ function clearData() {
 // ============================================================
 let _chatUnsubscribes = [];
 let _activeChatId = null;
-let _chatConversations = [];
-let _chatMessages = {};
+let _chatConversations = [];   // local cache for offline / pre-Firebase
+let _chatMessages = {};        // { [convId]: [msg, ...] }
 
 function chatCol(name) {
   if(!FSYNC.isReady()) return null;
@@ -7472,6 +7478,7 @@ function chatCol(name) {
   return firebase.firestore().collection('teams').doc(teamId).collection(name);
 }
 
+// ---- render chat page ----
 function renderChatPage() {
   document.getElementById('page-title').textContent = 'Messages';
   document.getElementById('top-action-btn').textContent = '✏️ New Message';
@@ -7480,6 +7487,7 @@ function renderChatPage() {
   const syncReady = FSYNC.isReady();
   document.getElementById('content').innerHTML = `
   <div id="chat-wrap" style="display:flex;gap:0;height:calc(100vh - 110px);background:var(--card);border-radius:12px;overflow:hidden;border:1px solid var(--border)">
+    <!-- Sidebar list -->
     <div id="chat-list-pane" style="width:280px;min-width:220px;border-right:1px solid var(--border);display:flex;flex-direction:column;background:var(--bg)">
       <div style="padding:14px 14px 10px;border-bottom:1px solid var(--border);display:flex;gap:8px">
         <button class="btn btn-sm btn-primary" style="flex:1" onclick="openNewConvModal()">✏️ New DM</button>
@@ -7489,6 +7497,7 @@ function renderChatPage() {
         ${syncReady ? '<div style="padding:20px;text-align:center;color:var(--muted);font-size:13px">Loading…</div>' : '<div style="padding:16px;font-size:12px;color:var(--muted)">⚠️ Firebase required for live chat. Set up Cloud Sync in Settings first.</div>'}
       </div>
     </div>
+    <!-- Message pane -->
     <div id="chat-msg-pane" style="flex:1;display:flex;flex-direction:column">
       <div id="chat-msg-header" style="padding:14px 18px;border-bottom:1px solid var(--border);font-weight:700;font-size:15px;display:flex;align-items:center;gap:10px;min-height:52px">
         <span style="color:var(--muted);font-size:13px;font-weight:400">Select a conversation</span>
@@ -7502,7 +7511,10 @@ function renderChatPage() {
     </div>
   </div>`;
 
-  if(syncReady) { _chatUnsubAll(); _chatListenConvs(); }
+  if(syncReady) {
+    _chatUnsubAll();
+    _chatListenConvs();
+  }
 }
 
 function _chatUnsubAll() {
@@ -7565,15 +7577,22 @@ function _updateUnreadBadge() {
 
 function openChat(convId) {
   _activeChatId = convId;
-  _renderConvList();
+  _renderConvList(); // re-render to show active highlight
+
   const conv = _chatConversations.find(c=>c.id===convId); if(!conv) return;
   const name = conv.type==='group' ? `👥 ${conv.name}` : `👤 ${_dmName(conv)}`;
   const members = (conv.members||[]).map(id=>userProfiles.find(u=>u.id===id)?.name||'?').join(', ');
+
   const header = document.getElementById('chat-msg-header');
   if(header) header.innerHTML = `<span>${name}</span><span style="font-size:11px;font-weight:400;color:var(--muted);margin-left:8px">${members}</span>`;
+
   const footer = document.getElementById('chat-msg-footer');
   if(footer) footer.style.display='flex';
+
+  // mark as read
   _chatMarkRead(convId);
+
+  // listen to messages
   _chatUnsubscribes.filter((_,i)=>i>0).forEach(u=>{try{u()}catch(e){}});
   const msgUnsub = chatCol('chatMsgs').where('convId','==',convId)
     .orderBy('at','asc')
@@ -7612,8 +7631,11 @@ async function sendChatMessage() {
   const myId = currentUser?.id;
   const at = new Date().toISOString();
   const msg = { convId:_activeChatId, senderId:myId, senderName:currentUser?.name||'?', text, at };
+
   const col = chatCol('chatMsgs'); if(!col) return;
   await col.add(msg).catch(e=>console.warn('send error',e));
+
+  // update conv lastMsg + unread counts for other members
   const conv = _chatConversations.find(c=>c.id===_activeChatId); if(!conv) return;
   const unread = {...(conv.unread||{})};
   (conv.members||[]).forEach(id=>{ if(id!==myId) unread[id]=(unread[id]||0)+1; });
@@ -7648,6 +7670,7 @@ function openNewConvModal() {
     if(!targetId){ alert('Select a worker'); return false; }
     const myId = currentUser?.id;
     const at = new Date().toISOString();
+    // check existing DM
     const existing = _chatConversations.find(c=>c.type==='dm'&&c.members.includes(targetId)&&c.members.includes(myId));
     let convId = existing?.id;
     if(!convId){
@@ -7831,6 +7854,7 @@ async function doLogin() {
   if(dropdownEl) {
     const val = dropdownEl.value;
     if(!val){errEl.textContent='Please select your name';return;}
+    // Bootstrap preset names if no profiles exist yet
     const presets = {
       '__new_jon':    {name:'Jon Benson',    role:'sysmanager'},
       '__new_jade':   {name:'Jade Atkinson', role:'worker'},
@@ -7874,6 +7898,7 @@ async function doLogin() {
     _finishLogin(cred.user, email);
   } catch(e) {
     if(e.code === 'auth/multi-factor-auth-required') {
+      // MFA required — show TOTP code entry screen
       window._mfaResolver = e.resolver;
       _showMFAScreen();
       return;
@@ -7904,6 +7929,7 @@ function _finishLogin(firebaseUser, email) {
 }
 
 function _showMFAScreen() {
+  const email = document.getElementById('login-email')?.value?.trim() || window._fbLoginEmail || '';
   document.querySelector('#main > div').innerHTML = `
     <div style="text-align:center;margin-bottom:24px">
       <div style="font-size:40px;margin-bottom:8px">🔐</div>
@@ -7932,6 +7958,7 @@ async function submitMFACode() {
 
   try {
     const resolver = window._mfaResolver;
+    // Find the TOTP factor hint
     const totpHint = resolver.hints.find(h=>h.factorId === firebase.auth.TotpMultiFactorGenerator?.FACTOR_ID || h.factorId === 'totp');
     if(!totpHint) throw new Error('No TOTP factor found on this account.');
     const assertion = firebase.auth.TotpMultiFactorGenerator.assertionForSignIn(totpHint.uid, code);

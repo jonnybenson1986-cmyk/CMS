@@ -131,7 +131,7 @@
   .modal { background: var(--card); border-radius: 12px; width: 100%; max-width: 720px; box-shadow: 0 20px 60px rgba(0,0,0,0.2); }
   .modal-header { padding: 20px 24px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
   .modal-header h3 { font-size: 17px; font-weight: 700; }
-  .modal-body { padding: 24px; max-height: 70vh; overflow-y: auto; }
+  .modal-body { padding: 24px; max-height: 70vh; overflow-y: auto; overflow-x: hidden; }
   .modal-footer { padding: 16px 24px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 10px; }
   .close-btn { background: none; border: none; font-size: 20px; cursor: pointer; color: var(--muted); line-height: 1; }
 
@@ -6587,14 +6587,15 @@ function renderHomeOwnership() {
   <style>
     .fpho-card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:12px}
     .fpho-section-title{font-size:13px;font-weight:700;color:var(--primary);text-transform:uppercase;letter-spacing:.5px;margin:20px 0 12px;padding-bottom:6px;border-bottom:2px solid var(--primary-light)}
-    .fpho-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
+    .fpho-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
+    .fpho-field{min-width:0}
     .fpho-field label{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;display:block;margin-bottom:4px}
-    .fpho-field input,.fpho-field select,.fpho-field textarea{width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg);color:var(--text)}
+    .fpho-field input,.fpho-field select,.fpho-field textarea{width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg);color:var(--text);box-sizing:border-box}
     .fpho-radio-group,.fpho-check-group{display:flex;flex-direction:column;gap:6px;padding:4px 0}
     .fpho-radio-group label,.fpho-check-group label{display:flex;align-items:flex-start;gap:8px;font-size:13px;font-weight:400;cursor:pointer;line-height:1.4}
     .fpho-radio-group input,.fpho-check-group input{margin-top:2px;flex-shrink:0}
-    .fpho-info-box{background:#e0f2fe;border:1px solid #7dd3fc;border-radius:8px;padding:14px;font-size:13px;line-height:1.6;margin-bottom:16px}
-    .fpho-warn-box{background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:12px;font-size:12px;margin-bottom:12px}
+    .fpho-info-box{background:#e0f2fe;border:1px solid #7dd3fc;border-radius:8px;padding:14px;font-size:13px;line-height:1.6;margin-bottom:16px;word-wrap:break-word}
+    .fpho-warn-box{background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:12px;font-size:12px;margin-bottom:12px;word-wrap:break-word}
     .fpho-grant-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;margin-bottom:16px}
     .fpho-grant-card{border:1px solid var(--border);border-radius:8px;padding:14px;background:var(--bg)}
     .fpho-grant-card .gc-amt{font-size:20px;font-weight:800;color:var(--primary)}
@@ -6895,7 +6896,7 @@ function openFPHOForm(id) {
     showToast('Application saved ✓');
     showPage('homeownership');
     return true;
-  }, { wide: true });
+  }, '900px');
 }
 
 function fphoToggleCo(count) {
