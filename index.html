@@ -2598,6 +2598,8 @@ function clientFormHTML(c) {
         <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="cf-justice" ${c.justice?'checked':''}> Justice</label>
         <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="cf-cultural" ${c.cultural?'checked':''}> Cultural Strengthening</label>
         <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="cf-disability" ${c.disability?'checked':''}> ♿ Disability</label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="cf-workfoundations" ${c.workFoundations?'checked':''}> 🔨 Work Foundations</label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="cf-homeownership" ${c.homeOwnership?'checked':''}> 🏠 First Peoples Home Ownership</label>
       </div>
     </div>
   </div>
@@ -2623,7 +2625,7 @@ function collectClientForm() {
     children: g('cf-children'), healthConditions: g('cf-healthConditions'), medications: g('cf-medications'),
     referralSource: g('cf-referralSource'), referralDate: g('cf-referralDate'), keyWorker: g('cf-keyWorker'),
     riskLevel: g('cf-riskLevel'), status: g('cf-status'),
-    sewb: gc('cf-sewb'), aod: gc('cf-aod'), justice: gc('cf-justice'), cultural: gc('cf-cultural'), disability: gc('cf-disability'),
+    sewb: gc('cf-sewb'), aod: gc('cf-aod'), justice: gc('cf-justice'), cultural: gc('cf-cultural'), disability: gc('cf-disability'), workFoundations: gc('cf-workfoundations'), homeOwnership: gc('cf-homeownership'),
     referralReason: g('cf-referralReason'), goals: g('cf-goals'), strengths: g('cf-strengths'),
   };
 }
