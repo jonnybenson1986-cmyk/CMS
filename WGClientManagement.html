@@ -272,6 +272,9 @@
     <div class="nav-item" onclick="showPage('calendar')">
       <span class="icon">📅</span><span>Calendar</span>
     </div>
+    <div class="nav-item" onclick="showPage('resources')">
+      <span class="icon">📁</span><span>Resources</span>
+    </div>
     <div class="nav-item" onclick="showPage('reports')">
       <span class="icon">📊</span><span>Reports</span>
     </div>
@@ -685,7 +688,7 @@ function showPage(page) {
     btn.onclick = openNewClientModal;
   }
 
-  const pages = { dashboard: renderDashboard, referrals: renderReferrals, clients: renderClients, closedclients: renderClosedClients, sessions: renderSessions, walkins: renderWalkins, sewb: renderSEWB, aod: renderAOD, justice: renderJustice, cultural: renderCultural, disability: renderDisability, workfoundations: renderWorkFoundations, homeownership: renderHomeOwnership, reports: renderReportsPage, calendar: renderCalendarPage, auditlog: renderAuditLog, settings: renderSettings, chat: renderChatPage };
+  const pages = { dashboard: renderDashboard, referrals: renderReferrals, clients: renderClients, closedclients: renderClosedClients, sessions: renderSessions, walkins: renderWalkins, sewb: renderSEWB, aod: renderAOD, justice: renderJustice, cultural: renderCultural, disability: renderDisability, workfoundations: renderWorkFoundations, homeownership: renderHomeOwnership, reports: renderReportsPage, calendar: renderCalendarPage, resources: renderResourcesPage, auditlog: renderAuditLog, settings: renderSettings, chat: renderChatPage };
   const fn = pages[page];
   document.getElementById('content').innerHTML = fn ? fn() : '<p>Coming soon</p>';
   attachPageEvents(page);
@@ -7417,6 +7420,21 @@ function renderSettings() {
 // ===== RESOURCES =====
 function saveResources() { DB.save('resources', resources); }
 
+function renderResourcesPage() {
+  return `
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">📁 Resources</div>
+      <label class="btn btn-primary" style="cursor:pointer;margin:0">
+        ➕ Upload File
+        <input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.png,.jpg,.jpeg" multiple style="display:none" onchange="uploadResources(this)">
+      </label>
+    </div>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:16px">Store PDF, Word, Excel and other documents for the team to access.</p>
+    <div id="resources-list">${renderResourcesList()}</div>
+  </div>`;
+}
+
 function renderResourcesList() {
   if(!resources.length) return `<div class="empty-state" style="padding:20px"><div class="icon">📂</div><p>No files uploaded yet.</p></div>`;
   const icons = { pdf:'📄', doc:'📝', docx:'📝', xls:'📊', xlsx:'📊', ppt:'📋', pptx:'📋', txt:'📃', png:'🖼️', jpg:'🖼️', jpeg:'🖼️' };
@@ -7479,6 +7497,7 @@ function deleteResource(id) {
   const el = document.getElementById('resources-list');
   if(el) el.innerHTML = renderResourcesList();
   audit('Resource deleted', r.name);
+  showToast(`"${r.name}" deleted`);
 }
 
 function saveSettings() {
