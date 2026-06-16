@@ -254,6 +254,9 @@
     <div class="nav-item" onclick="showPage('disability')">
       <span class="icon">♿</span><span>Disability</span>
     </div>
+    <div class="nav-item" onclick="showPage('workfoundations')">
+      <span class="icon">💼</span><span>Work Foundations</span>
+    </div>
     <div class="nav-item" onclick="showPage('homeownership')">
       <span class="icon">🏠</span><span>First Peoples Home Ownership</span>
     </div>
@@ -677,7 +680,7 @@ function showPage(page) {
     btn.onclick = openNewClientModal;
   }
 
-  const pages = { dashboard: renderDashboard, referrals: renderReferrals, clients: renderClients, sessions: renderSessions, walkins: renderWalkins, sewb: renderSEWB, aod: renderAOD, justice: renderJustice, cultural: renderCultural, disability: renderDisability, homeownership: renderHomeOwnership, reports: renderReportsPage, calendar: renderCalendarPage, auditlog: renderAuditLog, settings: renderSettings, chat: renderChatPage };
+  const pages = { dashboard: renderDashboard, referrals: renderReferrals, clients: renderClients, sessions: renderSessions, walkins: renderWalkins, sewb: renderSEWB, aod: renderAOD, justice: renderJustice, cultural: renderCultural, disability: renderDisability, workfoundations: renderWorkFoundations, homeownership: renderHomeOwnership, reports: renderReportsPage, calendar: renderCalendarPage, auditlog: renderAuditLog, settings: renderSettings, chat: renderChatPage };
   const fn = pages[page];
   document.getElementById('content').innerHTML = fn ? fn() : '<p>Coming soon</p>';
   attachPageEvents(page);
@@ -842,6 +845,7 @@ function openClientProfile(id) {
     <div class="tab" onclick="switchProfileTab('aod','${id}')">AOD</div>
     <div class="tab" onclick="switchProfileTab('justice','${id}')">Justice</div>
     <div class="tab" onclick="switchProfileTab('disability','${id}')">♿ Disability</div>
+    <div class="tab" onclick="switchProfileTab('workfoundations','${id}')">💼 Work Foundations</div>
     <div class="tab" onclick="switchProfileTab('cultural','${id}')">Cultural</div>
     <div class="tab" onclick="switchProfileTab('notes','${id}')">Notes (${clientNotes.length})</div>
     <div class="tab" onclick="switchProfileTab('time','${id}')">Time (${hrs}h ${mins}m)</div>
@@ -3149,6 +3153,8 @@ function renderReportsPage() {
       <button class="btn" style="background:#fee2e2;color:#991b1b" onclick="generateReport('aod')">🔴 AOD Report</button>
       <button class="btn" style="background:#dbeafe;color:#1e40af" onclick="generateReport('justice')">⚖️ Justice Report</button>
       <button class="btn" style="background:#fef3c7;color:#92400e" onclick="generateReport('cultural')">🌀 Cultural Report</button>
+      <button class="btn" style="background:#f3e8ff;color:#6b21a8" onclick="generateReport('disability')">♿ Disability Report</button>
+      <button class="btn" style="background:#dbeafe;color:#1e40af" onclick="generateReport('workfoundations')">💼 Work Foundations</button>
       <button class="btn" style="background:#f3e8ff;color:#6b21a8" onclick="generateReport('intake')">📋 Intake Form</button>
       <button class="btn" style="background:#fce7f3;color:#9d174d" onclick="generateReport('safety')">🛡️ Safety Plan</button>
       <button class="btn btn-outline" onclick="generateReport('notes')">📝 Case Notes</button>
@@ -3184,6 +3190,26 @@ function renderReportsPage() {
         <div class="rc-title">Cultural Strengthening Report</div>
         <div class="rc-desc">All cultural clients, connection areas, goals, and activities</div>
         <span class="rc-badge" style="background:#fef3c7;color:#92400e">${clients.filter(c=>c.cultural).length} clients</span>
+      </div>
+      <div class="report-card" onclick="generateProgramReport('disability')">
+        <div class="rc-icon">♿</div>
+        <div class="rc-title">Disability Program Report</div>
+        <div class="rc-desc">All disability clients, NDIS status, support plans, and goals</div>
+        <span class="rc-badge" style="background:#f3e8ff;color:#6b21a8">${clients.filter(c=>c.disability).length} clients</span>
+      </div>
+      <div class="report-card" onclick="generateProgramReport('workfoundations')">
+        <div class="rc-icon">💼</div>
+        <div class="rc-title">Work Foundations Report</div>
+        <div class="rc-desc">All Work Foundations clients, employment status, barriers, and outcomes</div>
+        <span class="rc-badge" style="background:#dbeafe;color:#1e40af">${clients.filter(c=>c.workFoundations).length} clients</span>
+      </div>
+    </div>
+    <div style="margin-top:12px">
+      <div class="report-card" onclick="generateProgramReport('allprograms')" style="border:2px solid var(--primary);background:linear-gradient(135deg,#f0fdf4,#eff6ff)">
+        <div class="rc-icon">📊</div>
+        <div class="rc-title" style="color:var(--primary)">All Programs Combined Report</div>
+        <div class="rc-desc">Unified report across SEWB, AOD, Justice, Cultural, Disability, and Work Foundations — totals, breakdowns, and cross-program client summary</div>
+        <span class="rc-badge" style="background:var(--primary);color:#fff">${clients.length} total clients</span>
       </div>
     </div>
     <div class="grid-3" style="margin-top:12px">
@@ -3369,6 +3395,7 @@ function openQuickReport(type, clientId) {
   else if(type==='justice') openReport(buildJusticeClientReport(c));
   else if(type==='cultural') openReport(buildCulturalClientReport(c));
   else if(type==='disability') openReport(buildDisabilityClientReport(c));
+  else if(type==='workfoundations') openReport(buildWorkFoundationsClientReport(c));
   else if(type==='full') openReport(buildFullClientReport(c,'2000-01-01',today()));
 }
 
@@ -3722,6 +3749,8 @@ function generateReport(type) {
   else if(type==='aod') openReport(buildAODClientReport(c));
   else if(type==='justice') openReport(buildJusticeClientReport(c));
   else if(type==='cultural') openReport(buildCulturalClientReport(c));
+  else if(type==='disability') openReport(buildDisabilityClientReport(c));
+  else if(type==='workfoundations') openReport(buildWorkFoundationsClientReport(c));
   else if(type==='intake') printIntake(id);
   else if(type==='safety') openReport(buildSafetyReport(c));
   else if(type==='notes') openReport(buildNotesReport(c, from, to));
@@ -3971,6 +4000,137 @@ function buildDisabilityClientReport(c) {
   ${disNotes.map(n=>`<div class="note-block"><div class="note-meta">${fmtdt(n.created)} | ${n.worker||'—'}</div><p>${(n.text||'').replace(/\n/g,'<br>')}</p></div>`).join('')||'<p>None</p>'}`;
 }
 
+// ---- WORK FOUNDATIONS CLIENT REPORT ----
+function buildWorkFoundationsClientReport(c) {
+  const wf = c.wf||{};
+  const wfNotes = notes.filter(n=>n.clientId===c.id&&n.type==='workfoundations').sort((a,b)=>b.created.localeCompare(a.created));
+  return `
+  ${reportHeader('Work Foundations Report','Employment Support Plan', c.fullName)}
+  <h2>💼 Employment Overview</h2>
+  <table>
+    <tr><td>Employment Goal</td><td>${wf.employmentGoal||'—'}</td></tr>
+    <tr><td>Current Employment Status</td><td>${wf.empStatus||'—'}</td></tr>
+    <tr><td>Target Industry / Role</td><td>${wf.targetRole||'—'}</td></tr>
+    <tr><td>Program Stage</td><td>${wf.status||'—'}</td></tr>
+    <tr><td>Education Level</td><td>${wf.education||'—'}</td></tr>
+    <tr><td>Licences / Tickets</td><td>${wf.licences||'—'}</td></tr>
+    <tr><td>Start Date</td><td>${wf.startDate||'—'}</td></tr>
+    <tr><td>Exit Date</td><td>${wf.exitDate||'—'}</td></tr>
+    <tr><td>Exit Reason</td><td>${wf.exitReason||'—'}</td></tr>
+    <tr><td>Wage / Hours (if placed)</td><td>${wf.wage||'—'}</td></tr>
+    <tr><td>External Provider</td><td>${wf.externalProvider||'—'}</td></tr>
+    <tr><td>Referral Source</td><td>${wf.referralSource||'—'}</td></tr>
+  </table>
+  <h2>Barriers to Employment</h2>
+  <p>${wf.barriers||'None identified'}</p>
+  ${wf.barriersNotes?`<p><em>${wf.barriersNotes}</em></p>`:''}
+  <h2>Support Plan / Action Steps</h2>
+  <p>${(wf.supportPlan||'—').replace(/\n/g,'<br>')}</p>
+  <h2>Achievements / Milestones</h2>
+  <p>${(wf.achievements||'—').replace(/\n/g,'<br>')}</p>
+  <h3>Work Foundations Notes (${wfNotes.length})</h3>
+  ${wfNotes.map(n=>`<div class="note-block"><div class="note-meta">${fmtdt(n.created)} | ${n.worker||'—'}</div><p>${(n.text||'').replace(/\n/g,'<br>')}</p></div>`).join('')||'<p>None</p>'}`;
+}
+
+function buildDisabilityProgramReport(from, to) {
+  const dc = clients.filter(c=>c.disability);
+  const rptNotes = notes.filter(n=>n.type==='disability'&&n.created>=from&&n.created<=to+'T23:59:59');
+  const ndisCount = dc.filter(c=>c.dis?.ndisNum||c.ndis).length;
+  const dspCount  = dc.filter(c=>c.dis?.dsp==='Yes').length;
+  const byType = {}; dc.forEach(c=>{ const k=c.dis?.primary||'Unknown'; byType[k]=(byType[k]||0)+1; });
+  return reportHeader('Disability Program Report', from, to) + `
+  <h2>Summary</h2>
+  <table><tr><td><strong>Total Disability Clients</strong></td><td>${dc.length}</td></tr>
+  <tr><td>With NDIS Number</td><td>${ndisCount}</td></tr>
+  <tr><td>Receiving DSP</td><td>${dspCount}</td></tr>
+  <tr><td>Session Notes (period)</td><td>${rptNotes.length}</td></tr></table>
+  <h2>Clients by Disability Type</h2>
+  <table><tr><th>Type</th><th>Count</th></tr>${Object.entries(byType).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<tr><td>${k}</td><td>${v}</td></tr>`).join('')}</table>
+  <h2>Client Details</h2>
+  <table><tr><th>Client</th><th>Primary Disability</th><th>NDIS #</th><th>Plan Management</th><th>DSP</th><th>Worker</th></tr>
+  ${dc.map(c=>`<tr><td>${c.fullName}</td><td>${c.dis?.primary||'—'}</td><td>${c.dis?.ndisNum||c.ndis||'—'}</td><td>${c.dis?.planMgmt||'—'}</td><td>${c.dis?.dsp||'—'}</td><td>${c.keyWorker||'—'}</td></tr>`).join('')}
+  </table>` + reportFooter();
+}
+
+function buildWorkFoundationsProgramReport(from, to) {
+  const wc = clients.filter(c=>c.workFoundations);
+  const rptNotes = notes.filter(n=>n.type==='workfoundations'&&n.created>=from&&n.created<=to+'T23:59:59');
+  const employed = wc.filter(c=>c.wf?.status==='Placed'||c.wf?.empStatus?.startsWith('Employed'));
+  const byStatus = {}; wc.forEach(c=>{ const k=c.wf?.status||'Unknown'; byStatus[k]=(byStatus[k]||0)+1; });
+  const byBarrier = {}; wc.forEach(c=>{ (c.wf?.barriers||'').split(', ').filter(Boolean).forEach(b=>{ byBarrier[b]=(byBarrier[b]||0)+1; }); });
+  return reportHeader('Work Foundations Program Report', from, to) + `
+  <h2>Summary</h2>
+  <table><tr><td><strong>Total Clients</strong></td><td>${wc.length}</td></tr>
+  <tr><td>Currently Placed / Employed</td><td>${employed.length}</td></tr>
+  <tr><td>Employment Rate</td><td>${wc.length?Math.round(employed.length/wc.length*100):0}%</td></tr>
+  <tr><td>Session Notes (period)</td><td>${rptNotes.length}</td></tr></table>
+  <h2>Clients by Program Stage</h2>
+  <table><tr><th>Stage</th><th>Count</th></tr>${Object.entries(byStatus).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<tr><td>${k}</td><td>${v}</td></tr>`).join('')}</table>
+  <h2>Top Employment Barriers</h2>
+  <table><tr><th>Barrier</th><th>Clients</th></tr>${Object.entries(byBarrier).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<tr><td>${k}</td><td>${v}</td></tr>`).join('')}</table>
+  <h2>Client Details</h2>
+  <table><tr><th>Client</th><th>Employment Goal</th><th>Stage</th><th>Current Status</th><th>External Provider</th><th>Worker</th></tr>
+  ${wc.map(c=>`<tr><td>${c.fullName}</td><td>${c.wf?.employmentGoal||'—'}</td><td>${c.wf?.status||'—'}</td><td>${c.wf?.empStatus||'—'}</td><td>${c.wf?.externalProvider||'—'}</td><td>${c.keyWorker||'—'}</td></tr>`).join('')}
+  </table>` + reportFooter();
+}
+
+function buildAllProgramsReport(from, to) {
+  const programs = [
+    { key:'sewb',           label:'SEWB',                    icon:'💚', filter:c=>c.sewb,           color:'#d1fae5' },
+    { key:'aod',            label:'AOD',                     icon:'🔴', filter:c=>c.aod,            color:'#fee2e2' },
+    { key:'justice',        label:'Justice',                 icon:'⚖️', filter:c=>c.justice,        color:'#dbeafe' },
+    { key:'cultural',       label:'Cultural Strengthening',  icon:'🌀', filter:c=>c.cultural,       color:'#fef3c7' },
+    { key:'disability',     label:'Disability',              icon:'♿', filter:c=>c.disability,     color:'#f3e8ff' },
+    { key:'workfoundations',label:'Work Foundations',        icon:'💼', filter:c=>c.workFoundations, color:'#e0f2fe' },
+  ];
+  const rptNotes = notes.filter(n=>n.created>=from&&n.created<=to+'T23:59:59');
+  const activeClients = clients.filter(c=>c.status==='active');
+  const multiProgram = clients.filter(c=>programs.filter(p=>p.filter(c)).length>1);
+
+  return reportHeader('All Programs Combined Report', from, to) + `
+  <h2>Organisation Summary</h2>
+  <table>
+    <tr><td><strong>Total Clients (all time)</strong></td><td>${clients.length}</td></tr>
+    <tr><td>Active Clients</td><td>${activeClients.length}</td></tr>
+    <tr><td>Closed Clients</td><td>${clients.filter(c=>c.status==='closed').length}</td></tr>
+    <tr><td>Clients in Multiple Programs</td><td>${multiProgram.length}</td></tr>
+    <tr><td>Session Notes (period)</td><td>${rptNotes.length}</td></tr>
+    <tr><td>Reporting Period</td><td>${from} to ${to}</td></tr>
+  </table>
+
+  <h2>Program Enrolment Summary</h2>
+  <table>
+    <tr><th>Program</th><th>Total Clients</th><th>Active</th><th>Notes (period)</th></tr>
+    ${programs.map(p=>{
+      const pc = clients.filter(p.filter);
+      const pa = activeClients.filter(p.filter);
+      const pn = rptNotes.filter(n=>n.type===p.key);
+      return `<tr><td>${p.icon} ${p.label}</td><td>${pc.length}</td><td>${pa.length}</td><td>${pn.length}</td></tr>`;
+    }).join('')}
+  </table>
+
+  <h2>Cross-Program Client List</h2>
+  <table>
+    <tr><th>Client</th><th>Status</th>${programs.map(p=>`<th>${p.icon}</th>`).join('')}<th>Worker</th></tr>
+    ${clients.map(c=>`<tr>
+      <td>${c.fullName}</td>
+      <td>${c.status||'active'}</td>
+      ${programs.map(p=>`<td style="text-align:center">${p.filter(c)?'✓':''}</td>`).join('')}
+      <td>${c.keyWorker||'—'}</td>
+    </tr>`).join('')}
+  </table>
+
+  ${programs.map(p=>{
+    const pc = clients.filter(p.filter);
+    if(!pc.length) return '';
+    return `<h2 style="background:${p.color};padding:6px 10px;border-radius:4px">${p.icon} ${p.label} — ${pc.length} clients</h2>
+    <table><tr><th>Client</th><th>Key Worker</th><th>Risk</th><th>Status</th></tr>
+    ${pc.map(c=>`<tr><td>${c.fullName}</td><td>${c.keyWorker||'—'}</td><td>${c.riskLevel||'—'}</td><td>${c.status||'active'}</td></tr>`).join('')}
+    </table>`;
+  }).join('')}
+  ` + reportFooter();
+}
+
 // ---- SAFETY PLAN REPORT ----
 function buildSafetyReport(c) {
   return `
@@ -4052,6 +4212,9 @@ function generateProgramReport(type) {
   else if(type==='aod') openReport(buildAODProgramReport(from, to));
   else if(type==='justice') openReport(buildJusticeProgramReport(from, to));
   else if(type==='cultural') openReport(buildCulturalProgramReport(from, to));
+  else if(type==='disability') openReport(buildDisabilityProgramReport(from, to));
+  else if(type==='workfoundations') openReport(buildWorkFoundationsProgramReport(from, to));
+  else if(type==='allprograms') openReport(buildAllProgramsReport(from, to));
   else if(type==='caseload') openReport(buildCaseloadReport(from, to));
   else if(type==='activity') openReport(buildActivityReport(from, to));
   else if(type==='risk') openReport(buildRiskRegister());
@@ -5905,6 +6068,126 @@ function saveDisability(id) {
   c.ndis = g('dis-ndisNum')||c.ndis;
   c.disability = true;
   saveAll(); showToast('Disability details saved ✓');
+}
+
+// ============================================================
+// WORK FOUNDATIONS PROGRAM
+// ============================================================
+function renderWorkFoundations() {
+  const wc = clients.filter(c=>c.workFoundations);
+  return `
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">💼 Work Foundations Program</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-sm btn-outline" onclick="generateProgramReport('workfoundations')">📊 Program Report</button>
+        <button class="btn btn-sm btn-primary" onclick="showPage('clients')">➕ Add Client</button>
+      </div>
+    </div>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:14px">Clients receiving Work Foundations employment support. <strong>${wc.length}</strong> enrolled.</p>
+    ${wc.length===0?'<p style="color:var(--muted);font-size:13px">No clients currently enrolled in Work Foundations. Open a client profile and enable Work Foundations in their program details.</p>':
+    `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="background:var(--bg)">
+        <th style="text-align:left;padding:8px 10px;border-bottom:1px solid var(--border)">Client</th>
+        <th style="text-align:left;padding:8px 10px;border-bottom:1px solid var(--border)">Employment Goal</th>
+        <th style="text-align:left;padding:8px 10px;border-bottom:1px solid var(--border)">Barriers</th>
+        <th style="text-align:left;padding:8px 10px;border-bottom:1px solid var(--border)">Status</th>
+        <th style="text-align:left;padding:8px 10px;border-bottom:1px solid var(--border)">Worker</th>
+      </tr></thead>
+      <tbody>
+        ${wc.map(c=>`<tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="openClient('${c.id}')">
+          <td style="padding:8px 10px;font-weight:600">${c.fullName}</td>
+          <td style="padding:8px 10px;color:var(--muted)">${c.wf?.employmentGoal||'—'}</td>
+          <td style="padding:8px 10px;color:var(--muted)">${c.wf?.barriers||'—'}</td>
+          <td style="padding:8px 10px">${c.wf?.status?`<span style="background:#dbeafe;color:#1e40af;padding:2px 8px;border-radius:10px;font-size:11px">${c.wf.status}</span>`:'—'}</td>
+          <td style="padding:8px 10px;color:var(--muted)">${c.keyWorker||'—'}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table></div>`}
+  </div>`;
+}
+
+function renderWorkFoundationsTab(c) {
+  const wf = c.wf || {};
+  const wfNotes = notes.filter(n=>n.clientId===c.id&&n.type==='workfoundations').sort((a,b)=>b.created.localeCompare(a.created));
+  return `
+  <div class="card">
+    <div class="card-header"><div class="card-title">💼 Work Foundations</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-sm btn-outline" onclick="openQuickReport('workfoundations','${c.id}')">📊 Report</button>
+        <button class="btn btn-sm btn-primary" onclick="saveWorkFoundations('${c.id}')">💾 Save</button>
+      </div>
+    </div>
+    <div class="grid-2">
+      <div class="form-group"><label>Employment Goal</label><input id="wf-employmentGoal" value="${wf.employmentGoal||''}"></div>
+      <div class="form-group"><label>Current Employment Status</label>
+        <select id="wf-empStatus">
+          ${['','Unemployed','Employed part-time','Employed full-time','Casual','Self-employed','Studying','Volunteering','Unable to work'].map(s=>`<option ${wf.empStatus===s?'selected':''}>${s}</option>`).join('')}
+        </select></div>
+      <div class="form-group"><label>Target Industry / Role</label><input id="wf-targetRole" value="${wf.targetRole||''}"></div>
+      <div class="form-group"><label>Current Status / Stage</label>
+        <select id="wf-status">
+          ${['','Intake','Job Readiness','Job Search','Placed','Follow-up','Exited'].map(s=>`<option ${wf.status===s?'selected':''}>${s}</option>`).join('')}
+        </select></div>
+      <div class="form-group"><label>Highest Education Level</label>
+        <select id="wf-education">
+          ${['','No formal education','Primary school','Some secondary','Year 10','Year 12','Certificate I-II','Certificate III-IV','Diploma','Bachelor','Postgraduate'].map(s=>`<option ${wf.education===s?'selected':''}>${s}</option>`).join('')}
+        </select></div>
+      <div class="form-group"><label>Licences / Tickets Held</label><input id="wf-licences" value="${wf.licences||''}" placeholder="e.g. Driver's licence, White Card, Forklift"></div>
+    </div>
+    <div class="form-group"><label>Barriers to Employment</label>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;padding:6px 0">
+        ${['Transport','Housing instability','Mental health','AOD','Childcare','Criminal history','Low literacy/numeracy','No ID documents','Digital literacy','Cultural obligations','Health/disability','Other'].map(b=>`
+          <label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer">
+            <input type="checkbox" name="wf-barriers" value="${b}" ${(wf.barriers||'').includes(b)?'checked':''}> <span>${b}</span>
+          </label>`).join('')}
+      </div></div>
+    <div class="form-group"><label>Barriers — Additional Notes</label><textarea id="wf-barriersNotes" style="min-height:60px">${wf.barriersNotes||''}</textarea></div>
+    <div class="grid-2">
+      <div class="form-group"><label>Referral Source</label><input id="wf-referralSource" value="${wf.referralSource||''}"></div>
+      <div class="form-group"><label>External Provider (if any)</label><input id="wf-externalProvider" value="${wf.externalProvider||''}" placeholder="e.g. CVGT, APM, MAX Employment"></div>
+      <div class="form-group"><label>Start Date</label><input type="date" id="wf-startDate" value="${wf.startDate||''}"></div>
+      <div class="form-group"><label>Exit Date</label><input type="date" id="wf-exitDate" value="${wf.exitDate||''}"></div>
+      <div class="form-group"><label>Exit Reason</label>
+        <select id="wf-exitReason">
+          ${['','Employment gained','Withdrew','Lost contact','Referred elsewhere','Program ended','Other'].map(s=>`<option ${wf.exitReason===s?'selected':''}>${s}</option>`).join('')}
+        </select></div>
+      <div class="form-group"><label>Wage/Hours if Employed</label><input id="wf-wage" value="${wf.wage||''}" placeholder="e.g. 20hrs/week @ $25/hr"></div>
+    </div>
+    <div class="form-group"><label>Support Plan / Action Steps</label><textarea id="wf-supportPlan" style="min-height:90px">${wf.supportPlan||''}</textarea></div>
+    <div class="form-group"><label>Achievements / Milestones</label><textarea id="wf-achievements" style="min-height:70px">${wf.achievements||''}</textarea></div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">📝 Work Foundations Notes</div>
+      <button class="btn btn-sm btn-primary" onclick="openSessionModal('${c.id}','workfoundations')">➕ Add Note</button>
+    </div>
+    ${wfNotes.length===0?'<p style="color:var(--muted);font-size:13px">No work foundations notes recorded</p>':
+      wfNotes.map(n=>`<div class="note-entry" style="border-left:4px solid #2563eb">
+        <div class="note-meta"><span>${fmtdt(n.created)}</span><span>${n.worker||''}</span></div>
+        <div class="note-text">${(n.text||'').replace(/\n/g,'<br>')}</div>
+      </div>`).join('')}
+  </div>
+  <div class="sticky-save-bar">
+    <button class="btn btn-primary" onclick="saveWorkFoundations('${c.id}')">💾 Save Work Foundations</button>
+  </div>`;
+}
+
+function saveWorkFoundations(id) {
+  const c = clients.find(cl=>cl.id===id); if(!c) return;
+  const g = sel => document.getElementById(sel)?.value||'';
+  const barriers = [...document.querySelectorAll('input[name="wf-barriers"]:checked')].map(cb=>cb.value).join(', ');
+  c.wf = {
+    employmentGoal: g('wf-employmentGoal'), empStatus: g('wf-empStatus'), targetRole: g('wf-targetRole'),
+    status: g('wf-status'), education: g('wf-education'), licences: g('wf-licences'),
+    barriers, barriersNotes: g('wf-barriersNotes'),
+    referralSource: g('wf-referralSource'), externalProvider: g('wf-externalProvider'),
+    startDate: g('wf-startDate'), exitDate: g('wf-exitDate'), exitReason: g('wf-exitReason'), wage: g('wf-wage'),
+    supportPlan: g('wf-supportPlan'), achievements: g('wf-achievements')
+  };
+  c.workFoundations = true;
+  saveAll(); showToast('Work Foundations saved ✓');
 }
 
 // ============================================================
