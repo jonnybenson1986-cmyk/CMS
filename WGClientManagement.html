@@ -542,6 +542,7 @@ let referrals = DB.load('referrals', []);
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
+let resources = DB.load('resources', []);
 function saveFPHO() { DB.save('fphoApplications', fphoApplications); }
 
 // ===== AUDIT LOG =====
@@ -7369,6 +7370,21 @@ function renderSettings() {
       <button class="btn btn-danger" onclick="clearData()">🗑️ Clear All Data</button>
     </div>
   </div>
+  <!-- RESOURCES CARD -->
+  <div class="card" style="border-left:4px solid var(--primary)">
+    <div class="card-header">
+      <div class="card-title">📁 Resources</div>
+      <label class="btn btn-sm btn-primary" style="cursor:pointer;margin:0">
+        ➕ Upload File
+        <input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.png,.jpg,.jpeg" multiple style="display:none" onchange="uploadResources(this)">
+      </label>
+    </div>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:14px">Upload PDF, Word, Excel documents and images for the team to access. Files are stored locally (and synced to cloud if connected).</p>
+    <div id="resources-list">
+      ${renderResourcesList()}
+    </div>
+  </div>
+
   <!-- CLOUD SYNC CARD -->
   <div class="card" style="border-left:4px solid ${FSYNC.isReady()?'#16a34a':'#d97706'}">
     <div class="card-header">
@@ -7396,6 +7412,73 @@ function renderSettings() {
       Data is stored locally in your browser. Enable Cloud Sync above to share across devices.
     </p>
   </div>`;
+}
+
+// ===== RESOURCES =====
+function saveResources() { DB.save('resources', resources); }
+
+function renderResourcesList() {
+  if(!resources.length) return `<div class="empty-state" style="padding:20px"><div class="icon">📂</div><p>No files uploaded yet.</p></div>`;
+  const icons = { pdf:'📄', doc:'📝', docx:'📝', xls:'📊', xlsx:'📊', ppt:'📋', pptx:'📋', txt:'📃', png:'🖼️', jpg:'🖼️', jpeg:'🖼️' };
+  return `<div style="display:grid;gap:8px">
+    ${resources.map(r => {
+      const ext = r.name.split('.').pop().toLowerCase();
+      const icon = icons[ext] || '📎';
+      const size = r.size < 1024*1024 ? (r.size/1024).toFixed(1)+' KB' : (r.size/1024/1024).toFixed(1)+' MB';
+      return `<div style="display:flex;align-items:center;gap:12px;padding:10px 14px;background:var(--bg);border-radius:8px;border:1px solid var(--border)">
+        <span style="font-size:24px">${icon}</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.name}</div>
+          <div style="font-size:11px;color:var(--muted)">${size} &bull; Uploaded ${r.uploaded||''}</div>
+        </div>
+        <div style="display:flex;gap:6px;flex-shrink:0">
+          <button class="btn btn-sm btn-outline" onclick="downloadResource('${r.id}')">⬇️ Download</button>
+          <button class="btn btn-sm btn-danger" onclick="deleteResource('${r.id}')">✕</button>
+        </div>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
+function uploadResources(input) {
+  const files = [...input.files];
+  if(!files.length) return;
+  let done = 0;
+  files.forEach(file => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      resources.push({ id: uid(), name: file.name, size: file.size, type: file.type, data: e.target.result, uploaded: today() });
+      done++;
+      if(done === files.length) {
+        saveResources();
+        const el = document.getElementById('resources-list');
+        if(el) el.innerHTML = renderResourcesList();
+        showToast(`${files.length} file${files.length>1?'s':''} uploaded ✓`);
+        audit('Resource uploaded', files.map(f=>f.name).join(', '));
+      }
+    };
+    reader.readAsDataURL(file);
+  });
+  input.value = '';
+}
+
+function downloadResource(id) {
+  const r = resources.find(x=>x.id===id);
+  if(!r) return;
+  const a = document.createElement('a');
+  a.href = r.data;
+  a.download = r.name;
+  a.click();
+}
+
+function deleteResource(id) {
+  const r = resources.find(x=>x.id===id);
+  if(!r || !confirm(`Delete "${r.name}"?`)) return;
+  resources = resources.filter(x=>x.id!==id);
+  saveResources();
+  const el = document.getElementById('resources-list');
+  if(el) el.innerHTML = renderResourcesList();
+  audit('Resource deleted', r.name);
 }
 
 function saveSettings() {
