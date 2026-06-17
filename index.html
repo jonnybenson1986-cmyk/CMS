@@ -953,6 +953,11 @@ function switchProfileTab(tab, id) {
   document.querySelectorAll('#profile-tabs .tab').forEach(t=>t.classList.remove('active'));
   event.target.classList.add('active');
   document.getElementById('profile-tab-content').innerHTML = renderProfileTab(tab, c, clientNotes, clientTime);
+  if(tab === 'intake') {
+    startIntakeAutoSave(id);
+  } else {
+    stopIntakeAutoSave();
+  }
 }
 
 function renderProfileTab(tab, c, clientNotes, clientTime) {
@@ -1351,10 +1356,34 @@ function renderProfileTab(tab, c, clientNotes, clientTime) {
         </div>
       </div>
       <div class="form-group"><label>Education — currently studying or wishing to engage in training?</label>
+      <div style="display:flex;gap:4px;margin-bottom:8px;border-bottom:1px solid var(--border);padding-bottom:8px">
+        <div class="tab" onclick="switchEducationTab('main')" id="edu-tab-main" style="cursor:pointer;padding:4px 10px;border-radius:4px;background:var(--primary);color:#fff;font-size:12px;font-weight:600">Education</div>
+        <div class="tab" onclick="switchEducationTab('keso')" id="edu-tab-keso" style="cursor:pointer;padding:4px 10px;border-radius:4px;background:var(--bg);color:var(--text);font-size:12px;font-weight:600">KESO</div>
+        <div class="tab" onclick="switchEducationTab('iep')" id="edu-tab-iep" style="cursor:pointer;padding:4px 10px;border-radius:4px;background:var(--bg);color:var(--text);font-size:12px;font-weight:600">IEP</div>
+      </div>
+      <div id="edu-main-tab">
         <div style="display:flex;gap:16px;padding:6px 0">
           <label style="display:flex;align-items:center;gap:5px;font-size:13px;font-weight:400"><input type="radio" name="if-edu" value="Yes" ${c.ifEdu==='Yes'?'checked':''}> Yes</label>
           <label style="display:flex;align-items:center;gap:5px;font-size:13px;font-weight:400"><input type="radio" name="if-edu" value="No" ${c.ifEdu==='No'?'checked':''}> No</label>
         </div>
+      </div>
+      <div id="edu-keso-tab" style="display:none">
+        <div class="form-group"><label>KESO Participation</label>
+          <select id="if-kesoStatus">
+            ${['','Not participating','Currently enrolled','Completed','Deferred'].map(s=>`<option ${c.ifKesoStatus===s?'selected':''}>${s}</option>`).join('')}
+          </select></div>
+        <div class="form-group"><label>KESO Goals</label><textarea id="if-kesoGoals" style="min-height:50px;padding:8px">${c.ifKesoGoals||''}</textarea></div>
+        <div class="form-group"><label>KESO Progress Notes</label><textarea id="if-kesoProgress" style="min-height:50px;padding:8px">${c.ifKesoProgress||''}</textarea></div>
+      </div>
+      <div id="edu-iep-tab" style="display:none">
+        <div class="form-group"><label>Individual Education Plan (IEP) Present?</label>
+          <select id="if-iepPresent">
+            ${['','Yes','No','Not applicable'].map(s=>`<option ${c.ifIepPresent===s?'selected':''}>${s}</option>`).join('')}
+          </select></div>
+        <div class="form-group"><label>IEP Goals</label><textarea id="if-iepGoals" style="min-height:50px;padding:8px">${c.ifIepGoals||''}</textarea></div>
+        <div class="form-group"><label>Accommodations / Support</label><textarea id="if-iepAccommodations" style="min-height:50px;padding:8px">${c.ifIepAccommodations||''}</textarea></div>
+        <div class="form-group"><label>IEP Review Date</label><input type="date" id="if-iepReviewDate" value="${c.ifIepReviewDate||''}"></div>
+      </div>
       </div>
       <div class="form-group"><label>Additional information</label><textarea id="if-circAdditional" style="min-height:60px">${c.ifCircAdditional||''}</textarea></div>
     </div>
@@ -2222,8 +2251,29 @@ function workerColour(role) {
   return map[role] || '#4b5563';
 }
 
+// ===== EDUCATION TAB SWITCHING & AUTO-SAVE =====
+function switchEducationTab(tab) {
+  document.querySelectorAll('[id^="edu-"][id$="-tab"]').forEach(el => el.style.display = 'none');
+  document.querySelectorAll('[id^="edu-tab-"]').forEach(el => el.style.background = 'var(--bg)');
+  document.getElementById('edu-'+tab+'-tab').style.display = 'block';
+  document.getElementById('edu-tab-'+tab).style.background = 'var(--primary)';
+  document.getElementById('edu-tab-'+tab).style.color = '#fff';
+}
+
+let _intakeAutoSaveInterval = null;
+function startIntakeAutoSave(clientId) {
+  if(_intakeAutoSaveInterval) clearInterval(_intakeAutoSaveInterval);
+  _intakeAutoSaveInterval = setInterval(() => {
+    const c = clients.find(x=>x.id===clientId);
+    if(c) saveIntake(clientId, true);
+  }, 30000);
+}
+function stopIntakeAutoSave() {
+  if(_intakeAutoSaveInterval) { clearInterval(_intakeAutoSaveInterval); _intakeAutoSaveInterval=null; }
+}
+
 // ===== SAVE INTAKE =====
-function saveIntake(id) {
+function saveIntake(id, quiet=false) {
   const c = clients.find(cl=>cl.id===id); if(!c) return;
   const g = sel => document.getElementById(sel)?.value||'';
   const r = name => document.querySelector(`input[name="${name}"]:checked`)?.value||'';
@@ -2241,7 +2291,9 @@ function saveIntake(id) {
     ifHousing: [...document.querySelectorAll('.if-housing:checked')].map(el=>el.value),
     ifVhr: g('if-vhr'), ifHousingServices: g('if-housingServices'),
     ifEmployment: [...document.querySelectorAll('.if-employ:checked')].map(el=>el.value),
-    ifEdu: r('if-edu'), ifCircAdditional: g('if-circAdditional'),
+    ifEdu: r('if-edu'), ifKesoStatus: g('if-kesoStatus'), ifKesoGoals: g('if-kesoGoals'), ifKesoProgress: g('if-kesoProgress'),
+    ifIepPresent: g('if-iepPresent'), ifIepGoals: g('if-iepGoals'), ifIepAccommodations: g('if-iepAccommodations'), ifIepReviewDate: g('if-iepReviewDate'),
+    ifCircAdditional: g('if-circAdditional'),
     gp: g('if-gp'), ifHobbies: g('if-hobbies'),
     ifGoalShort: g('if-goalShort'), ifGoalMedium: g('if-goalMedium'), ifGoalLong: g('if-goalLong'),
     ifEspProvider: g('if-espProvider'), ifEspConsultant: g('if-espConsultant'), ifEspContact: g('if-espContact'),
@@ -2266,7 +2318,7 @@ function saveIntake(id) {
   svcKeys.forEach(k => { c.ifServices[k] = document.getElementById(`if-svc-${k}`)?.checked||false; });
 
   audit('Saved intake form', clients.find(cl=>cl.id===id)?.fullName||'', id);
-  saveAll(); showToast('Intake form saved ✓');
+  saveAll(); if(!quiet) showToast('Intake form saved ✓');
 }
 
 function printIntake(id) {
@@ -6245,6 +6297,27 @@ function renderWorkFoundationsTab(c) {
   </div>
 
   <div class="card">
+      <div class="card-header"><div class="card-title">🤝 Brokerage Services</div></div>
+      <div class="grid-2">
+        <div class="form-group"><label>Brokerage Services Offered</label><input id="wf-brokServices" value="${wf.brokServices||''}" placeholder="e.g. Job coaching, Interview prep"></div>
+        <div class="form-group"><label>Fee Structure</label>
+          <select id="wf-brokFeeType">
+            ${['','Percentage of wage','Flat fee','Hourly rate','No fee'].map(s=>`<option ${wf.brokFeeType===s?'selected':''}>${s}</option>`).join('')}
+          </select></div>
+        <div class="form-group"><label>Fee Amount</label><input id="wf-brokFeeAmt" value="${wf.brokFeeAmt||''}" placeholder="e.g. 15% or $500"></div>
+        <div class="form-group"><label>Broker Name / Agency</label><input id="wf-brokContact" value="${wf.brokContact||''}"></div>
+      </div>
+      <div class="grid-2">
+        <div class="form-group"><label>Broker Agreement Date</label><input type="date" id="wf-brokStartDate" value="${wf.brokStartDate||''}"></div>
+        <div class="form-group"><label>Agreement Status</label>
+          <select id="wf-brokStatus">
+            ${['','Active','Suspended','Completed','Terminated'].map(s=>`<option ${wf.brokStatus===s?'selected':''}>${s}</option>`).join('')}
+          </select></div>
+      </div>
+      <div class="form-group"><label>Brokerage Notes</label><textarea id="wf-brokNotes" style="min-height:60px">${wf.brokNotes||''}</textarea></div>
+    </div>
+
+  <div class="card">
     <div class="card-header">
       <div class="card-title">📝 Work Foundations Notes</div>
       <button class="btn btn-sm btn-primary" onclick="openSessionModal('${c.id}','workfoundations')">➕ Add Note</button>
@@ -6270,7 +6343,10 @@ function saveWorkFoundations(id) {
     barriers, barriersNotes: g('wf-barriersNotes'),
     referralSource: g('wf-referralSource'), externalProvider: g('wf-externalProvider'),
     startDate: g('wf-startDate'), exitDate: g('wf-exitDate'), exitReason: g('wf-exitReason'), wage: g('wf-wage'),
-    supportPlan: g('wf-supportPlan'), achievements: g('wf-achievements')
+    supportPlan: g('wf-supportPlan'), achievements: g('wf-achievements'),
+    brokServices: g('wf-brokServices'), brokFeeType: g('wf-brokFeeType'), brokFeeAmt: g('wf-brokFeeAmt'),
+    brokContact: g('wf-brokContact'), brokStartDate: g('wf-brokStartDate'), brokStatus: g('wf-brokStatus'),
+    brokNotes: g('wf-brokNotes')
   };
   c.workFoundations = true;
   saveAll(); showToast('Work Foundations saved ✓');
