@@ -1878,21 +1878,26 @@ function renderProfileTab(tab, c, clientNotes, clientTime) {
       <div class="card-header"><div class="card-title" style="color:#7c2d12">🤝 Brokerage Services</div></div>
       <div class="grid-2">
         <div class="form-group"><label>Brokerage Services Offered</label><input id="wf-brokServices" value="${wf.brokServices||''}" placeholder="Describe services offered"></div>
-        <div class="form-group"><label>Fee Structure</label>
-          <select id="wf-brokFeeType">
-            ${['','Fixed Fee','Hourly Rate','Per Session','No Fee','Other'].map(o=>`<option value="${o}" ${wf.brokFeeType===o?'selected':''}>${o||'— Select —'}</option>`).join('')}
-          </select>
-        </div>
-        <div class="form-group"><label>Fee Amount ($)</label><input id="wf-brokFeeAmt" value="${wf.brokFeeAmt||''}" placeholder="e.g. 50.00"></div>
+        <div class="form-group"><label>Brokerage Funded ($)</label><input id="wf-brokFeeAmt" value="${wf.brokFeeAmt||''}" placeholder="e.g. 500.00"></div>
         <div class="form-group"><label>Broker Name / Agency</label><input id="wf-brokContact" value="${wf.brokContact||''}" placeholder="Name or agency"></div>
         <div class="form-group"><label>Broker Agreement Date</label><input type="date" id="wf-brokStartDate" value="${wf.brokStartDate||''}"></div>
-        <div class="form-group"><label>Agreement Status</label>
-          <select id="wf-brokStatus">
-            ${['','Pending','Active','Completed','Cancelled'].map(o=>`<option value="${o}" ${wf.brokStatus===o?'selected':''}>${o||'— Select —'}</option>`).join('')}
-          </select>
-        </div>
+        <div class="form-group"><label>Worker</label>${workerSelectHTML('wf-brokWorker','wf-brokWorker-new',wf.brokWorker||DB.load('workerName',''))}</div>
       </div>
       <div class="form-group"><label>Brokerage Notes</label><textarea id="wf-brokNotes" style="min-height:80px">${wf.brokNotes||''}</textarea></div>
+      <div class="form-group">
+        <label>Receipt Upload</label>
+        ${wf.brokReceipt ? `
+          <div style="display:flex;align-items:center;gap:10px;padding:8px;background:#f0fdf4;border:1px solid #86efac;border-radius:6px;margin-bottom:8px">
+            <span style="font-size:13px;color:#166534">📎 ${wf.brokReceiptName||'Receipt'}</span>
+            <a href="${wf.brokReceipt}" download="${wf.brokReceiptName||'receipt'}" class="btn btn-sm btn-outline" style="margin-left:auto">⬇️ Download</a>
+            <button class="btn btn-sm" style="background:#fee2e2;color:#991b1b;border:none" onclick="clearBrokReceipt('${c.id}')">✕ Remove</button>
+          </div>` : ''}
+        <label class="btn btn-outline btn-sm" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px">
+          📎 ${wf.brokReceipt ? 'Replace Receipt' : 'Upload Receipt'}
+          <input type="file" accept="image/*,.pdf" style="display:none" onchange="uploadBrokReceipt('${c.id}', this)">
+        </label>
+        <span style="font-size:11px;color:var(--muted);margin-left:8px">PDF or image</span>
+      </div>
     </div>
 
     ${renderWFNotes(c)}`;
@@ -2034,7 +2039,9 @@ function saveWF(id) {
   const caItems = ['caSkills','caLearn','caJobs','caHelp','caSayNo','caRights','caConvo','caAcceptCrit','caGiveCrit','caAnger','caOpinion'];
   const wf = {};
   ['firstName','lastName','otherNames','preferredName','phone','email','espAgency','espConsultant','empStream','ndisReg','lastEmployed','empComments','licenceRestrictions','ticketsList','workLikeDislike','workStrengths','goal1yr','goal3yr','goal5yr','pwHousing','pwWork','pwRelationships','pwNiceToHave','pwOther','phTraining','phEmployment','phSupport','addNotes','signature','signDate','completedDate','brokServices','brokFeeAmt','brokContact','brokStartDate','brokNotes'].forEach(k=>{ wf[k]=g('wf-'+k); });
-  ['brokFeeType','brokStatus'].forEach(k=>{ wf[k]=g('wf-'+k); });
+  wf.brokWorker = getWorkerValue('wf-brokWorker','wf-brokWorker-new');
+  // preserve receipt data (uploaded separately)
+  if(c.wf?.brokReceipt) { wf.brokReceipt=c.wf.brokReceipt; wf.brokReceiptName=c.wf.brokReceiptName; }
   ['gender','cultural','contactMethod','licence','hasESP','hasResume','hasTransport','hasWWCC','hasTickets'].forEach(k=>{ wf[k]=r('wf-'+k); });
   caItems.forEach(k=>{ wf[k]=r('wf-'+k); });
   ['wfConsentPrograms','wfConsentAudit','wfConsentDatabase','wfConsentExternal','wfConsentPack'].forEach(k=>{ wf[k]=gb(k); });
@@ -2042,6 +2049,29 @@ function saveWF(id) {
   c.wf = wf;
   audit('Updated Work Foundations', c.fullName, id);
   saveAll(); showToast('Work Foundations saved ✓');
+}
+
+// ===== BROKERAGE RECEIPT =====
+function uploadBrokReceipt(id, input) {
+  const c = clients.find(cl=>cl.id===id); if(!c||!input.files[0]) return;
+  const file = input.files[0];
+  if(file.size > 4*1024*1024) { showToast('⚠️ File too large (max 4MB)'); return; }
+  const reader = new FileReader();
+  reader.onload = e => {
+    if(!c.wf) c.wf={};
+    c.wf.brokReceipt = e.target.result;
+    c.wf.brokReceiptName = file.name;
+    saveAll(); showToast('Receipt uploaded ✓');
+    switchProfileTab('workfoundations', id);
+  };
+  reader.readAsDataURL(file);
+}
+function clearBrokReceipt(id) {
+  const c = clients.find(cl=>cl.id===id); if(!c) return;
+  if(!confirm('Remove receipt?')) return;
+  if(c.wf) { delete c.wf.brokReceipt; delete c.wf.brokReceiptName; }
+  saveAll(); showToast('Receipt removed');
+  switchProfileTab('workfoundations', id);
 }
 
 // ===== SAVE FEEDBACK =====
