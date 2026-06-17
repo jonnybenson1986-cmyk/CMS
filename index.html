@@ -1892,11 +1892,18 @@ function renderProfileTab(tab, c, clientNotes, clientTime) {
             <a href="${wf.brokReceipt}" download="${wf.brokReceiptName||'receipt'}" class="btn btn-sm btn-outline" style="margin-left:auto">⬇️ Download</a>
             <button class="btn btn-sm" style="background:#fee2e2;color:#991b1b;border:none" onclick="clearBrokReceipt('${c.id}')">✕ Remove</button>
           </div>` : ''}
-        <label class="btn btn-outline btn-sm" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px">
-          📎 ${wf.brokReceipt ? 'Replace Receipt' : 'Upload Receipt'}
-          <input type="file" accept="image/*,.pdf" style="display:none" onchange="uploadBrokReceipt('${c.id}', this)">
-        </label>
-        <span style="font-size:11px;color:var(--muted);margin-left:8px">PDF or image</span>
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <label class="btn btn-outline btn-sm" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px">
+            📎 ${wf.brokReceipt ? 'Replace Receipt' : 'Upload Receipt'}
+            <input type="file" accept="image/*,.pdf" style="display:none" onchange="uploadBrokReceipt('${c.id}', this)">
+          </label>
+          <div ondragover="event.preventDefault();this.style.borderColor='var(--primary)';this.style.background='#f0f4ff'"
+               ondragleave="this.style.borderColor='#cbd5e1';this.style.background=''"
+               ondrop="event.preventDefault();this.style.borderColor='#cbd5e1';this.style.background='';uploadBrokReceipt('${c.id}',{files:event.dataTransfer.files})"
+               style="border:2px dashed #cbd5e1;border-radius:8px;padding:10px 18px;font-size:12px;color:var(--muted);cursor:pointer;transition:all .2s;white-space:nowrap">
+            📂 Drop PDF or image here
+          </div>
+        </div>
       </div>
     </div>
 
