@@ -794,7 +794,13 @@ function renderDashboard() {
 // ===== CLIENTS LIST =====
 function renderClients() {
   const search = document.getElementById('global-search')?.value?.toLowerCase()||'';
-  const filtered = clients.filter(c=>(c.status||'active')!=='closed').filter(c=>!search||c.fullName?.toLowerCase().includes(search)||c.clientId?.toLowerCase().includes(search)||c.community?.toLowerCase().includes(search));
+  const managerNames = ['Jon Benson','Jade Atkinson'];
+  const isManager = ['sysmanager','admin','supervisor'].includes(currentUser?.role) || managerNames.includes(currentUser?.name);
+  const myName = currentUser?.name||'';
+  const filtered = clients
+    .filter(c=>(c.status||'active')!=='closed')
+    .filter(c=> isManager || (c.assignedWorkers||[c.keyWorker]).includes(myName))
+    .filter(c=>!search||c.fullName?.toLowerCase().includes(search)||c.clientId?.toLowerCase().includes(search)||c.community?.toLowerCase().includes(search));
   return `
   <div class="card" style="padding:0;overflow:hidden">
     <div class="table-wrap">
@@ -929,6 +935,7 @@ function openClientProfile(id) {
       <button class="btn btn-outline btn-sm" onclick="openEditClientModal('${id}')">✏️ Edit</button>
       <button class="btn btn-primary btn-sm" onclick="openNoteModal('${id}')">📝 Add Note</button>
       <button class="btn btn-accent btn-sm" onclick="openTimeModal('${id}')">⏱️ Log Time</button>
+      ${['sysmanager','admin'].includes(currentUser?.role) ? `<button class="btn btn-sm" style="background:#f3e8ff;color:#6b21a8;border:1px solid #d8b4fe" onclick="openAssignWorkersModal('${id}')">👥 Assign Workers</button>` : ''}
       ${(c.status||'active')==='closed'
         ? `<button class="btn btn-sm" style="background:#d1fae5;color:#065f46" onclick="reopenClient('${id}')">🔓 Reopen</button>`
         : `<button class="btn btn-sm" style="background:#fee2e2;color:#991b1b" onclick="closeClient('${id}')">🔒 Close Client</button>`}
@@ -2651,6 +2658,27 @@ function openNewClientModal() {
   });
 }
 
+function openAssignWorkersModal(id) {
+  const c = clients.find(cl=>cl.id===id); if(!c) return;
+  const assigned = c.assignedWorkers || (c.keyWorker ? [c.keyWorker] : []);
+  const html = `
+    <p style="font-size:13px;color:var(--muted);margin-bottom:16px">Select which workers can access <strong>${c.fullName}</strong>'s file. Jon Benson and Jade Atkinson always have full access.</p>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      ${workersList.map(w=>`
+        <label style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;cursor:pointer;font-size:13px;${assigned.includes(w)?'background:#f0fdf4;border-color:#86efac':''}">
+          <input type="checkbox" class="aw-worker" value="${w}" ${assigned.includes(w)?'checked':''}
+            onchange="this.closest('label').style.background=this.checked?'#f0fdf4':'';this.closest('label').style.borderColor=this.checked?'#86efac':'var(--border)'">
+          <span>👤 ${w}</span>
+          ${c.keyWorker===w?'<span style="margin-left:auto;font-size:11px;background:#dbeafe;color:#1e40af;padding:2px 8px;border-radius:10px">Key Worker</span>':''}
+        </label>`).join('')}
+    </div>`;
+  showModal('👥 Assign Workers', html, () => {
+    c.assignedWorkers = [...document.querySelectorAll('.aw-worker:checked')].map(el=>el.value);
+    saveAll(); FSYNC.pushClients();
+    showToast('Workers assigned ✓'); return true;
+  }, '500px');
+}
+
 function openEditClientModal(id) {
   const c = clients.find(cl=>cl.id===id); if(!c) return;
   const html = clientFormHTML(c);
@@ -2719,7 +2747,14 @@ function clientFormHTML(c) {
     <div class="grid-3">
       <div class="form-group"><label>Referral Source</label><input id="cf-referralSource" value="${c.referralSource||''}"></div>
       <div class="form-group"><label>Referral Date</label><input type="date" id="cf-referralDate" value="${c.referralDate||today()}"></div>
-      <div class="form-group"><label>Key Worker</label><input id="cf-keyWorker" value="${c.keyWorker||''}"></div>
+      <div class="form-group"><label>Key Worker</label>${workerSelectHTML('cf-keyWorker','cf-keyWorker-new',c.keyWorker||currentUser?.name||'')}</div>
+      <div class="form-group"><label>Assigned Workers</label>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;padding:6px 0">
+          ${workersList.map(w=>`<label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer">
+            <input type="checkbox" class="cf-assignedWorker" value="${w}" ${(c.assignedWorkers||[c.keyWorker]).includes(w)?'checked':''}> ${w}
+          </label>`).join('')}
+        </div>
+      </div>
       <div class="form-group"><label>Risk Level</label>
         <select id="cf-riskLevel"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></div>
       <div class="form-group"><label>Status</label>
@@ -2758,7 +2793,9 @@ function collectClientForm() {
     medicare: g('cf-medicare'), crn: g('cf-crn'), ndis: g('cf-ndis'),
     gp: g('cf-gp'), housing: g('cf-housing'), employment: g('cf-employment'),
     children: g('cf-children'), healthConditions: g('cf-healthConditions'), medications: g('cf-medications'),
-    referralSource: g('cf-referralSource'), referralDate: g('cf-referralDate'), keyWorker: g('cf-keyWorker'),
+    referralSource: g('cf-referralSource'), referralDate: g('cf-referralDate'),
+    keyWorker: getWorkerValue('cf-keyWorker','cf-keyWorker-new'),
+    assignedWorkers: [...document.querySelectorAll('.cf-assignedWorker:checked')].map(el=>el.value),
     riskLevel: g('cf-riskLevel'), status: g('cf-status'),
     sewb: gc('cf-sewb'), aod: gc('cf-aod'), justice: gc('cf-justice'), cultural: gc('cf-cultural'), disability: gc('cf-disability'), workFoundations: gc('cf-workfoundations'), homeOwnership: gc('cf-homeownership'),
     referralReason: g('cf-referralReason'), goals: g('cf-goals'), strengths: g('cf-strengths'),
