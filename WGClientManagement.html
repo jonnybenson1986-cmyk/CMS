@@ -8352,7 +8352,9 @@ const ROLES = {
   reception:  { label:'Reception',      color:'#1e40af', bg:'#dbeafe', icon:'🎫', desc:'Referral holding bay, calendar, and client search — no case notes' },
 };
 
-let currentUser = DB.load('currentUser', null);
+// Always require login on page load — clear any persisted session for security
+DB.save('currentUser', null);
+let currentUser = null;
 let userProfiles = DB.load('userProfiles', []);
 function saveUserProfiles() { DB.save('userProfiles', userProfiles); }
 function saveCurrentUser(u) { currentUser = u; DB.save('currentUser', u); }
