@@ -936,7 +936,6 @@ function openClientProfile(id) {
     <div class="tab" onclick="switchProfileTab('safety','${id}')">Safety Plan</div>
     <div class="tab" onclick="switchProfileTab('goals','${id}')">🎯 Goals (${(c.goalPlan||[]).length})</div>
     <div class="tab" onclick="switchProfileTab('files','${id}')">📎 Files (${(c.attachments||[]).length})</div>
-    <div class="tab" onclick="switchProfileTab('workfoundations','${id}')">💼 Work Foundations</div>
     <div class="tab" onclick="switchProfileTab('feedback','${id}')">⭐ Feedback</div>
   </div>
   <div id="profile-tab-content">${renderProfileTab('overview', c, clientNotes, clientTime)}</div>
@@ -1873,6 +1872,29 @@ function renderProfileTab(tab, c, clientNotes, clientTime) {
         <div class="form-group"><label>Date Completed</label><input type="date" id="wf-completedDate" value="${wf.completedDate||today()}"></div>
       </div>
     </div>
+
+    <!-- BROKERAGE SERVICES -->
+    <div class="card">
+      <div class="card-header"><div class="card-title" style="color:#7c2d12">🤝 Brokerage Services</div></div>
+      <div class="grid-2">
+        <div class="form-group"><label>Brokerage Services Offered</label><input id="wf-brokServices" value="${wf.brokServices||''}" placeholder="Describe services offered"></div>
+        <div class="form-group"><label>Fee Structure</label>
+          <select id="wf-brokFeeType">
+            ${['','Fixed Fee','Hourly Rate','Per Session','No Fee','Other'].map(o=>`<option value="${o}" ${wf.brokFeeType===o?'selected':''}>${o||'— Select —'}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group"><label>Fee Amount ($)</label><input id="wf-brokFeeAmt" value="${wf.brokFeeAmt||''}" placeholder="e.g. 50.00"></div>
+        <div class="form-group"><label>Broker Name / Agency</label><input id="wf-brokContact" value="${wf.brokContact||''}" placeholder="Name or agency"></div>
+        <div class="form-group"><label>Broker Agreement Date</label><input type="date" id="wf-brokStartDate" value="${wf.brokStartDate||''}"></div>
+        <div class="form-group"><label>Agreement Status</label>
+          <select id="wf-brokStatus">
+            ${['','Pending','Active','Completed','Cancelled'].map(o=>`<option value="${o}" ${wf.brokStatus===o?'selected':''}>${o||'— Select —'}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="form-group"><label>Brokerage Notes</label><textarea id="wf-brokNotes" style="min-height:80px">${wf.brokNotes||''}</textarea></div>
+    </div>
+
     ${renderWFNotes(c)}`;
   }
 
@@ -2011,7 +2033,8 @@ function saveWF(id) {
   const gb = sel => document.getElementById(sel)?.checked||false;
   const caItems = ['caSkills','caLearn','caJobs','caHelp','caSayNo','caRights','caConvo','caAcceptCrit','caGiveCrit','caAnger','caOpinion'];
   const wf = {};
-  ['firstName','lastName','otherNames','preferredName','phone','email','espAgency','espConsultant','empStream','ndisReg','lastEmployed','empComments','licenceRestrictions','ticketsList','workLikeDislike','workStrengths','goal1yr','goal3yr','goal5yr','pwHousing','pwWork','pwRelationships','pwNiceToHave','pwOther','phTraining','phEmployment','phSupport','addNotes','signature','signDate','completedDate'].forEach(k=>{ wf[k]=g('wf-'+k); });
+  ['firstName','lastName','otherNames','preferredName','phone','email','espAgency','espConsultant','empStream','ndisReg','lastEmployed','empComments','licenceRestrictions','ticketsList','workLikeDislike','workStrengths','goal1yr','goal3yr','goal5yr','pwHousing','pwWork','pwRelationships','pwNiceToHave','pwOther','phTraining','phEmployment','phSupport','addNotes','signature','signDate','completedDate','brokServices','brokFeeAmt','brokContact','brokStartDate','brokNotes'].forEach(k=>{ wf[k]=g('wf-'+k); });
+  ['brokFeeType','brokStatus'].forEach(k=>{ wf[k]=g('wf-'+k); });
   ['gender','cultural','contactMethod','licence','hasESP','hasResume','hasTransport','hasWWCC','hasTickets'].forEach(k=>{ wf[k]=r('wf-'+k); });
   caItems.forEach(k=>{ wf[k]=r('wf-'+k); });
   ['wfConsentPrograms','wfConsentAudit','wfConsentDatabase','wfConsentExternal','wfConsentPack'].forEach(k=>{ wf[k]=gb(k); });
