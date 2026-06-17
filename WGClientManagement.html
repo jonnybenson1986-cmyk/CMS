@@ -402,15 +402,31 @@ const FSYNC = (() => {
     }
   }
 
+  // Strip large base64 receipt blobs before sending to Firestore (1MB doc limit).
+  // Receipt image data stays in localStorage only; URL-based storage can be wired
+  // in later via Firebase Storage when ready.
+  function _sanitiseClient(c) {
+    if (!c.wf?.brokReceipt) return c;
+    const copy = JSON.parse(JSON.stringify(c));
+    copy.wf.brokReceipt = '__local_only__';
+    return copy;
+  }
+
   async function pushAll() {
     if (!db) return;
     await Promise.all([
-      _batch('clients',  clients,  c=>c.id),
+      _batch('clients',  clients.map(_sanitiseClient),  c=>c.id),
       _batch('notes',    notes,    n=>n.id),
       _batch('timelogs', timeLogs, t=>t.id||t.date+'-'+t.clientId),
     ]);
   }
-  async function pushClients()  { await _batch('clients',  clients,  c=>c.id); }
+  async function pushClients()  { await _batch('clients', clients.map(_sanitiseClient), c=>c.id); }
+  async function pushBrokerage(clientId) {
+    // Push just the wf (Work Foundations + Brokerage) data for a single client.
+    const c = clients.find(cl=>cl.id===clientId); if(!db||!c) return;
+    const safe = _sanitiseClient(c);
+    col('clients').doc(clientId).set(safe, {merge:true}).catch(e=>console.warn('Brokerage sync error:',e.message));
+  }
   async function pushNotes()    { await _batch('notes',    notes,    n=>n.id); }
   async function pushReferrals(){ await _batch('referrals',referrals,r=>r.id||uid()); }
   async function pushWorkers()  { if(db) col('workersList').doc('list').set({list:workersList}).catch(()=>{}); }
@@ -522,7 +538,7 @@ const FSYNC = (() => {
     showToast('Cloud sync disconnected');
   }
 
-  return { init, isReady, pushAll, pushClients, pushNotes, pushReferrals, pushWorkers, pushTasks, pushAudit, deleteDoc, getCfg, saveCfg, showSetupModal, clearConfig };
+  return { init, isReady, pushAll, pushClients, pushNotes, pushReferrals, pushWorkers, pushTasks, pushAudit, pushBrokerage, deleteDoc, getCfg, saveCfg, showSetupModal, clearConfig };
 })();
 
 let clients = DB.load('clients', []);
@@ -2055,7 +2071,7 @@ function saveWF(id) {
   wf.coordinator = getWorkerValue('wf-coordinator','wf-coordinator-new');
   c.wf = wf;
   audit('Updated Work Foundations', c.fullName, id);
-  saveAll(); showToast('Work Foundations saved ✓');
+  saveAll(); FSYNC.pushBrokerage(id); showToast('Work Foundations saved ✓');
 }
 
 // ===== BROKERAGE RECEIPT =====
