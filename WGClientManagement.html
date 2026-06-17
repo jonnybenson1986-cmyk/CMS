@@ -8515,9 +8515,15 @@ async function submitMFACode() {
 function createFirstUser() {} // legacy — no longer used
 function autoSetRole() {}     // legacy — no longer used
 
-function logout() {
+async function logout() {
   saveCurrentUser(null);
-  location.reload();
+  DB.save('currentUser', null);
+  // Sign out of Firebase so the auth token is cleared and the login screen
+  // re-prompts for credentials rather than auto-reconnecting anonymously.
+  try {
+    if(window.firebase && firebase.apps.length) await firebase.auth().signOut();
+  } catch(e) { /* ignore */ }
+  showLoginScreen();
 }
 
 function canAccess(feature) {
