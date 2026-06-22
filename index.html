@@ -8414,31 +8414,9 @@ window._sessionIPReady = fetch('https://api.ipify.org?format=json', { cache: 'no
   .then(d => { window._sessionIP = d.ip || ''; })
   .catch(() => { window._sessionIP = 'unavailable'; });
 
-// ===== FAILED LOGIN TRACKING =====
-const _failedLogins = JSON.parse(sessionStorage.getItem('_fl') || '{}');
-const MAX_ATTEMPTS = 5;
-const LOCKOUT_MS  = 10 * 60 * 1000; // 10 minutes
-
-function _recordFailedLogin(key) {
-  const now = Date.now();
-  if (!_failedLogins[key]) _failedLogins[key] = { count: 0, since: now };
-  _failedLogins[key].count++;
-  _failedLogins[key].last = now;
-  sessionStorage.setItem('_fl', JSON.stringify(_failedLogins));
-}
-
-function _isLockedOut(key) {
-  const r = _failedLogins[key];
-  if (!r) return false;
-  if (r.count >= MAX_ATTEMPTS && (Date.now() - r.last) < LOCKOUT_MS) return true;
-  if ((Date.now() - r.last) >= LOCKOUT_MS) { delete _failedLogins[key]; sessionStorage.setItem('_fl', JSON.stringify(_failedLogins)); }
-  return false;
-}
-
-function _clearFailedLogins(key) {
-  delete _failedLogins[key];
-  sessionStorage.setItem('_fl', JSON.stringify(_failedLogins));
-}
+function _recordFailedLogin(key) {}
+function _isLockedOut(key) { return false; }
+function _clearFailedLogins(key) {}
 
 function checkLogin() {
   if(!currentUser) { showLoginScreen(); return false; }
@@ -8577,12 +8555,6 @@ async function doLogin() {
   const pass  = document.getElementById('login-pass')?.value;
   if(!email){errEl.textContent='Please enter your email address';return;}
   if(!pass) {errEl.textContent='Please enter your password';return;}
-
-  // Lockout check — 5 failures within 10 minutes blocks further attempts
-  if(_isLockedOut(email)) {
-    errEl.textContent='Too many failed attempts. Please wait 10 minutes and try again.';
-    btn.disabled=true; return;
-  }
 
   errEl.textContent='';
   btn.disabled=true; btn.textContent='Signing in…';
