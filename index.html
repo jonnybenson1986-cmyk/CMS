@@ -321,9 +321,9 @@
 <div id="modal-container"></div>
 
 <!-- Firebase SDK (compat build — loads before app script) -->
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
 <script>
 // ===== DATA LAYER =====
@@ -8610,6 +8610,11 @@ async function doLogin() {
     saveCurrentUser(u); _auditLogin(u); initApp(); return;
   }
 
+  if(typeof firebase === 'undefined') {
+    btn.disabled=false; btn.textContent='Sign In →';
+    errEl.textContent='Firebase SDK failed to load — check your internet connection and try again.';
+    return;
+  }
   try {
     if(!firebase.apps.length) firebase.initializeApp(cfg);
     window._fbLoginEmail = email;
