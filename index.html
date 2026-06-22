@@ -344,24 +344,43 @@ const FSYNC = (() => {
   async function init() {
     const cfg = getCfg();
     if (!cfg?.apiKey) return false;
+    const _log = [];
     try {
-      if (!window.firebase) return false;
+      if (!window.firebase) { _log.push('Firebase SDK not loaded'); throw new Error('Firebase SDK not loaded'); }
+      _log.push('SDK ✓');
       if (!firebase.apps.length) firebase.initializeApp(cfg);
+      _log.push('App initialised ✓');
       db = firebase.firestore();
       teamId = cfg.teamId || 'worngundidj';
+      _log.push('Firestore ✓');
       await new Promise(resolve => {
         const unsub = firebase.auth().onAuthStateChanged(user => { unsub(); resolve(user); });
       });
+      _log.push('Auth state ✓');
       if (!firebase.auth().currentUser) {
-        try { await firebase.auth().signInAnonymously(); } catch(e) { console.warn('Anon auth:', e.message); }
+        try {
+          await firebase.auth().signInAnonymously();
+          _log.push('Anon sign-in ✓');
+        } catch(e) {
+          _log.push('Anon sign-in FAILED: ' + e.message);
+          console.warn('Anon auth:', e.message);
+        }
+      } else {
+        _log.push('Already signed in ✓');
       }
       await _loadAll();
+      _log.push('Data loaded ✓');
       _startListeners();
       _showSyncBadge(true);
+      console.log('Firebase init steps:', _log.join(' → '));
       return true;
     } catch(e) {
-      console.warn('Firebase sync failed:', e.message);
+      _log.push('ERROR: ' + e.message);
+      console.warn('Firebase init failed. Steps:', _log.join(' → '));
       _showSyncBadge(false, e.message);
+      // Surface the step-by-step log in the UI for diagnosis
+      const detail = document.getElementById('sync-detail-status');
+      if (detail) detail.innerHTML = `<span style="color:#dc2626">❌ Failed at: <strong>${_log[_log.length-1]}</strong></span><br><small style="color:#6b7280">${_log.join(' → ')}</small>`;
       return false;
     }
   }
