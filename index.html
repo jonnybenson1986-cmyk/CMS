@@ -8465,8 +8465,10 @@ function loginSaveFb() {
     apiKey,
     authDomain: g('login-fb-authDomain') || `${projectId}.firebaseapp.com`,
     projectId,
-    storageBucket: `${projectId}.appspot.com`,
-    messagingSenderId: '', appId: '',
+    storageBucket: "worn-gundidj-cms.firebasestorage.app",
+    messagingSenderId: "1058581942911",
+    appId: "1:1058581942911:web:6769b34a10ccf95ea9a54a",
+    measurementId: "G-G86N7M8GHC",
     teamId: g('login-fb-teamId') || 'worngundidj',
   };
   FSYNC.saveCfg(cfg);
@@ -8543,10 +8545,10 @@ function showLoginScreen() {
             oninput="loginParseFb()"></textarea>
           <p id="login-fb-status" style="font-size:12px;min-height:16px;margin:6px 0;color:#16a34a"></p>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
-            <input id="login-fb-apiKey" placeholder="API Key *" style="padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:12px">
-            <input id="login-fb-authDomain" placeholder="Auth Domain" style="padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:12px">
-            <input id="login-fb-projectId" placeholder="Project ID *" style="padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:12px">
-            <input id="login-fb-teamId" placeholder="Team ID (e.g. worngundidj)" style="padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:12px">
+            <input id="login-fb-apiKey" value="AIzaSyB5llVjMjy0AOp9w5UlKW3FltUi8XUZj40" placeholder="API Key *" style="padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:12px">
+            <input id="login-fb-authDomain" value="worn-gundidj-cms.firebaseapp.com" placeholder="Auth Domain" style="padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:12px">
+            <input id="login-fb-projectId" value="worn-gundidj-cms" placeholder="Project ID *" style="padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:12px">
+            <input id="login-fb-teamId" value="worngundidj" placeholder="Team ID (e.g. worngundidj)" style="padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:12px">
           </div>
           <button onclick="loginSaveFb()" class="btn btn-primary" style="width:100%;padding:10px;font-size:13px;border-radius:6px">
             Save &amp; Connect
