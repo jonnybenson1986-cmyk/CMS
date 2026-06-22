@@ -1,4 +1,4 @@
-const CACHE_NAME = 'wg-cms-v2';
+const CACHE_NAME = 'wg-cms-v3';
 const ASSETS = [
   './',
   './index.html',
@@ -21,7 +21,24 @@ self.addEventListener('activate', e => {
 });
 
 self.addEventListener('fetch', e => {
+  // Only intercept same-origin navigation requests — let external scripts (Firebase CDN etc.) pass through directly
+  const url = new URL(e.request.url);
+  const isNavigation = e.request.mode === 'navigate';
+  const isSameOrigin = url.origin === self.location.origin;
+
+  if (!isSameOrigin) {
+    // External request (Firebase, ipify, etc.) — fetch directly, no cache fallback
+    e.respondWith(fetch(e.request));
+    return;
+  }
+
   e.respondWith(
-    caches.match(e.request).then(cached => cached || fetch(e.request).catch(() => caches.match('./index.html')))
+    caches.match(e.request).then(cached => {
+      if (cached) return cached;
+      return fetch(e.request).catch(() => {
+        // Only fall back to index.html for page navigations, not assets
+        if (isNavigation) return caches.match('./index.html');
+      });
+    })
   );
 });
