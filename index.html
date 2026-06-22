@@ -336,7 +336,16 @@ const DB = {
 const FSYNC = (() => {
   let db = null, teamId = null, _listeners = [];
 
-  function getCfg()     { try { return JSON.parse(localStorage.getItem('fb_cfg')||'null'); } catch { return null; } }
+  const _DEFAULT_CFG = {
+    apiKey: "AIzaSyB5llVjMjy0AOp9w5UlKW3FltUi8XUZj40",
+    authDomain: "worn-gundidj-cms.firebaseapp.com",
+    projectId: "worn-gundidj-cms",
+    storageBucket: "worn-gundidj-cms.firebasestorage.app",
+    messagingSenderId: "1058581942911",
+    appId: "1:1058581942911:web:6769b34a10ccf95ea9a54a",
+    teamId: "worngundidj",
+  };
+  function getCfg()     { try { return JSON.parse(localStorage.getItem('fb_cfg')||'null') || _DEFAULT_CFG; } catch { return _DEFAULT_CFG; } }
   function saveCfg(c)   { localStorage.setItem('fb_cfg', JSON.stringify(c)); }
   function isReady()    { return !!db; }
 
