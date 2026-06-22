@@ -8512,9 +8512,6 @@ function showLoginScreen() {
         <p id="login-error" style="color:#dc2626;font-size:13px;text-align:center;margin-top:12px;min-height:18px"></p>
         <p style="font-size:12px;color:#9ca3af;text-align:center;margin-top:16px">Set up Firebase in Settings to enable secure email/password login</p>
       `}
-      <div style="margin-top:16px;text-align:center">
-        <p id="login-fb-status" style="font-size:12px;color:#9ca3af;margin:0">☁️ Connecting to Firebase…</p>
-      </div>
     </div>
   </div>`;
   setTimeout(()=>(document.getElementById('login-email')||document.getElementById('login-user'))?.focus(),100);
@@ -9140,8 +9137,6 @@ function sanitize(str) {
 // ===== INIT =====
 // Always start at the login screen — initApp() is called by the login flow after auth
 showLoginScreen();
-// Auto-connect Firebase in the background immediately on page load
-FSYNC.init();
 
 // ===== SERVICE WORKER =====
 if ('serviceWorker' in navigator) {
