@@ -350,8 +350,15 @@ const FSYNC = (() => {
       if (!firebase.apps.length) firebase.initializeApp(cfg);
       db = firebase.firestore();
       teamId = cfg.teamId || 'wg_default';
-      // Use existing Firebase session or fall back to anonymous — never store credentials in source
-      if (!firebase.auth().currentUser) await firebase.auth().signInAnonymously();
+      // Wait for auth state to resolve, then try anonymous if not signed in
+      await new Promise(resolve => {
+        const unsub = firebase.auth().onAuthStateChanged(user => { unsub(); resolve(user); });
+      });
+      if (!firebase.auth().currentUser) {
+        try { await firebase.auth().signInAnonymously(); } catch(authErr) {
+          console.warn('Anonymous auth unavailable:', authErr.message);
+        }
+      }
       await _loadAll();
       _startListeners();
       _showSyncBadge(true);
