@@ -7542,16 +7542,19 @@ function renderSettings() {
   </div>
 
   <!-- CLOUD SYNC CARD -->
-  <div class="card" style="border-left:4px solid ${FSYNC.isReady()?'#16a34a':'#d97706'}">
+  <div class="card" id="cloud-sync-card" style="border-left:4px solid ${FSYNC.isReady()?'#16a34a':'#d97706'}">
     <div class="card-header">
-      <div class="card-title">☁️ Cloud Sync ${FSYNC.isReady()?'<span style="font-size:12px;background:#d1fae5;color:#065f46;padding:2px 10px;border-radius:12px;font-weight:700">● Connected</span>':'<span style="font-size:12px;background:#fef3c7;color:#92400e;padding:2px 10px;border-radius:12px;font-weight:700">○ Not connected</span>'}</div>
-      <button class="btn btn-primary btn-sm" onclick="FSYNC.showSetupModal()">⚙️ ${FSYNC.getCfg()?.apiKey?'Edit Config':'Set Up Sync'}</button>
+      <div class="card-title">☁️ Cloud Sync <span id="sync-status-badge" style="font-size:12px;padding:2px 10px;border-radius:12px;font-weight:700;${FSYNC.isReady()?'background:#d1fae5;color:#065f46':'background:#fef3c7;color:#92400e'}">${FSYNC.isReady()?'● Connected':'○ Not connected'}</span></div>
+      <div style="display:flex;gap:8px">
+        ${FSYNC.getCfg()?.apiKey ? `<button class="btn btn-sm btn-outline" onclick="checkFbConnection()">🔍 Test</button>` : ''}
+        <button class="btn btn-primary btn-sm" onclick="FSYNC.showSetupModal()">⚙️ ${FSYNC.getCfg()?.apiKey?'Edit Config':'Set Up Sync'}</button>
+      </div>
     </div>
+    <div id="sync-detail-status" style="font-size:12px;color:#6b7280;margin-bottom:8px;min-height:16px">${FSYNC.getCfg()?.apiKey ? (FSYNC.isReady() ? `✅ Connected to project: <strong>${FSYNC.getCfg()?.projectId}</strong> &nbsp;·&nbsp; Team: <strong>${FSYNC.getCfg()?.teamId||'worngundidj'}</strong>` : `⚠️ Config saved for <strong>${FSYNC.getCfg()?.projectId}</strong> but not yet connected — click Test to retry.`) : ''}</div>
     ${FSYNC.isReady()?`
-      <p style="font-size:13px;color:var(--muted);margin-bottom:8px">Real-time sync is active. All changes are saved to the cloud instantly and shared across all devices.</p>
       <div style="background:#f0f7f3;border-radius:8px;padding:12px;font-size:13px;margin-bottom:10px">
+        <strong>Project:</strong> <code style="background:#e0f0e8;padding:2px 8px;border-radius:4px">${FSYNC.getCfg()?.projectId}</code> &nbsp;
         <strong>Team ID:</strong> <code style="background:#e0f0e8;padding:2px 8px;border-radius:4px">${FSYNC.getCfg()?.teamId||'worngundidj'}</code>
-        &nbsp;— share this with Jon, Jade &amp; Brett so they connect to the same data.
       </div>
       <button class="btn btn-sm btn-danger" onclick="FSYNC.clearConfig()">🗑️ Disconnect Firebase</button>
     `:`
@@ -8353,6 +8356,27 @@ function checkLogin() {
   return true;
 }
 
+async function checkFbConnection() {
+  const badge  = document.getElementById('sync-status-badge');
+  const detail = document.getElementById('sync-detail-status');
+  const card   = document.getElementById('cloud-sync-card');
+  if (badge)  { badge.textContent  = '⏳ Testing…'; badge.style.background='#e5e7eb'; badge.style.color='#374151'; }
+  if (detail) { detail.innerHTML   = 'Attempting to connect to Firebase…'; }
+  const ok = await FSYNC.init();
+  const cfg = FSYNC.getCfg();
+  if (ok) {
+    if (badge)  { badge.textContent='● Connected'; badge.style.background='#d1fae5'; badge.style.color='#065f46'; }
+    if (card)   card.style.borderLeftColor = '#16a34a';
+    if (detail) detail.innerHTML = `✅ Connected to project: <strong>${cfg?.projectId}</strong> &nbsp;·&nbsp; Team: <strong>${cfg?.teamId||'worngundidj'}</strong>`;
+    showToast('☁️ Firebase connected!');
+    setTimeout(()=>showPage('settings'), 800);
+  } else {
+    if (badge)  { badge.textContent='○ Not connected'; badge.style.background='#fee2e2'; badge.style.color='#991b1b'; }
+    if (card)   card.style.borderLeftColor = '#dc2626';
+    if (detail) detail.innerHTML = `❌ Could not connect to <strong>${cfg?.projectId||'unknown'}</strong>. Check that Anonymous Auth is enabled in Firebase Console → Authentication → Sign-in method.`;
+  }
+}
+
 function inlineParseFb() {
   const raw = document.getElementById('inline-fb-paste')?.value || '';
   const extract = key => { const m = raw.match(new RegExp(`${key}\\s*:\\s*["'\`]([^"'\`]+)["'\`]`)); return m ? m[1] : ''; };
@@ -8386,7 +8410,10 @@ async function inlineConnectFb() {
   FSYNC.saveCfg(cfg);
   const ok = await FSYNC.init();
   if (ok) { showToast('☁️ Firebase connected!'); showPage('settings'); }
-  else { if (st) { st.textContent = '⚠️ Could not connect — check your config and Firebase Console'; st.style.color = '#dc2626'; } }
+  else {
+    const msg = 'Could not connect — ensure Anonymous Auth is enabled in Firebase Console → Authentication → Sign-in method, then try again.';
+    if (st) { st.textContent = '⚠️ ' + msg; st.style.color = '#dc2626'; }
+  }
 }
 
 function loginParseFb() {
