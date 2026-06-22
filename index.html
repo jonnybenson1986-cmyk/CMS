@@ -321,9 +321,6 @@
 <div id="modal-container"></div>
 
 <!-- Firebase SDK (compat build — loads before app script) -->
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
 <script>
 // ===== DATA LAYER =====
@@ -333,233 +330,24 @@ const DB = {
 };
 
 // ===== FIREBASE CLOUD SYNC =====
-const FSYNC = (() => {
-  let db = null, teamId = null, _listeners = [];
-
-  function getCfg()     { try { return JSON.parse(localStorage.getItem('fb_cfg')||'null'); } catch { return null; } }
-  function saveCfg(c)   { localStorage.setItem('fb_cfg', JSON.stringify(c)); }
-  function isReady()    { return !!db; }
-
-  function col(name) { return db.collection('teams').doc(teamId).collection(name); }
-
-  async function init() {
-    const cfg = getCfg();
-    if (!cfg?.apiKey) return false;
-    try {
-      if (!window.firebase) return false;
-      if (!firebase.apps.length) firebase.initializeApp(cfg);
-      db = firebase.firestore();
-      teamId = cfg.teamId || 'wg_default';
-      // Wait for auth state to resolve, then try anonymous if not signed in
-      await new Promise(resolve => {
-        const unsub = firebase.auth().onAuthStateChanged(user => { unsub(); resolve(user); });
-      });
-      if (!firebase.auth().currentUser) {
-        try { await firebase.auth().signInAnonymously(); } catch(authErr) {
-          console.warn('Anonymous auth unavailable:', authErr.message);
-        }
-      }
-      await _loadAll();
-      _startListeners();
-      _showSyncBadge(true);
-      const st = document.getElementById('login-fb-status');
-      if (st) { st.textContent = '☁️ Firebase connected'; st.style.color = '#16a34a'; }
-      return true;
-    } catch(e) {
-      console.warn('Firebase sync failed:', e.message);
-      _showSyncBadge(false, e.message);
-      const st = document.getElementById('login-fb-status');
-      if (st) { st.textContent = '⚠️ Firebase connection failed'; st.style.color = '#dc2626'; }
-      return false;
-    }
-  }
-
-  async function _loadAll() {
-    const [cs,ns,ts,rs,ws,wks] = await Promise.all([
-      col('clients').get(), col('notes').get(), col('timelogs').get(),
-      col('referrals').get(), col('workersList').get(), col('workflowTasks').get(),
-    ]);
-    if (!cs.empty) { clients = cs.docs.map(d=>d.data()); DB.save('clients', clients); }
-    if (!ns.empty) { notes   = ns.docs.map(d=>d.data()); DB.save('notes', notes); }
-    if (!ts.empty) { timeLogs = ts.docs.map(d=>d.data()); DB.save('timelogs', timeLogs); }
-    if (!rs.empty) { referrals = rs.docs.map(d=>d.data()); DB.save('referrals', referrals); }
-    if (!ws.empty) { const w=ws.docs[0]?.data()?.list; if(w){workersList=w;DB.save('workersList',workersList);} }
-    if (!wks.empty) { const t=wks.docs[0]?.data()?.list; if(t){workflowTasks=t;DB.save('workflowTasks',workflowTasks);} }
-  }
-
-  function _startListeners() {
-    _listeners.forEach(u=>u()); _listeners=[];
-    const refresh = () => {
-      if (['clients','dashboard','sewb','aod','justice','cultural','disability','reports','sessions'].includes(currentPage))
-        setTimeout(()=>showPage(currentPage), 50);
-    };
-    _listeners.push(col('clients').onSnapshot(snap=>{
-      if (snap.metadata.hasPendingWrites) return;
-      clients = snap.docs.map(d=>d.data()); DB.save('clients',clients); refresh();
-    }));
-    _listeners.push(col('notes').onSnapshot(snap=>{
-      if (snap.metadata.hasPendingWrites) return;
-      notes = snap.docs.map(d=>d.data()); DB.save('notes',notes);
-    }));
-    _listeners.push(col('timelogs').onSnapshot(snap=>{
-      if (snap.metadata.hasPendingWrites) return;
-      timeLogs = snap.docs.map(d=>d.data()); DB.save('timelogs',timeLogs);
-    }));
-    _listeners.push(col('referrals').onSnapshot(snap=>{
-      if (snap.metadata.hasPendingWrites) return;
-      referrals = snap.docs.map(d=>d.data()); DB.save('referrals',referrals);
-      if (currentPage==='referrals') setTimeout(()=>showPage('referrals'),50);
-    }));
-  }
-
-  async function _batch(colName, items, idFn) {
-    if (!db || !items.length) return;
-    // Firestore batch limit = 500 writes
-    for (let i=0; i<items.length; i+=400) {
-      const batch = db.batch();
-      items.slice(i,i+400).forEach(item => batch.set(col(colName).doc(idFn(item)), item));
-      await batch.commit().catch(e=>console.warn('Sync write error:', e.message));
-    }
-  }
-
-  // Strip large base64 receipt blobs before sending to Firestore (1MB doc limit).
-  // Receipt image data stays in localStorage only; URL-based storage can be wired
-  // in later via Firebase Storage when ready.
-  function _sanitiseClient(c) {
-    if (!c.wf?.brokReceipt) return c;
-    const copy = JSON.parse(JSON.stringify(c));
-    copy.wf.brokReceipt = '__local_only__';
-    return copy;
-  }
-
-  async function pushAll() {
-    if (!db) return;
-    await Promise.all([
-      _batch('clients',  clients.map(_sanitiseClient),  c=>c.id),
-      _batch('notes',    notes,    n=>n.id),
-      _batch('timelogs', timeLogs, t=>t.id||t.date+'-'+t.clientId),
-    ]);
-  }
-  async function pushClients()  { await _batch('clients', clients.map(_sanitiseClient), c=>c.id); }
-  async function pushBrokerage(clientId) {
-    // Push just the wf (Work Foundations + Brokerage) data for a single client.
-    const c = clients.find(cl=>cl.id===clientId); if(!db||!c) return;
-    const safe = _sanitiseClient(c);
-    col('clients').doc(clientId).set(safe, {merge:true}).catch(e=>console.warn('Brokerage sync error:',e.message));
-  }
-  async function pushNotes()    { await _batch('notes',    notes,    n=>n.id); }
-  async function pushReferrals(){ await _batch('referrals',referrals,r=>r.id||uid()); }
-  async function pushWorkers()  { if(db) col('workersList').doc('list').set({list:workersList}).catch(()=>{}); }
-  async function pushTasks()    { if(db) col('workflowTasks').doc('list').set({list:workflowTasks}).catch(()=>{}); }
-  async function pushAudit()    { await _batch('auditlog', auditLog, a=>a.id); }
-
-  async function deleteDoc(colName, id) {
-    if (db && id) col(colName).doc(id).delete().catch(()=>{});
-  }
-
-  function _showSyncBadge(ok, err) {
-    let badge = document.getElementById('sync-badge');
-    if (!badge) {
-      badge = document.createElement('div');
-      badge.id = 'sync-badge';
-      badge.style.cssText = 'position:fixed;bottom:16px;right:16px;padding:6px 14px;border-radius:20px;font-size:12px;font-weight:700;z-index:9999;box-shadow:0 2px 8px rgba(0,0,0,0.15);cursor:default;transition:opacity 0.5s';
-      document.body.appendChild(badge);
-    }
-    if (ok) {
-      badge.style.background='#d1fae5'; badge.style.color='#065f46';
-      badge.textContent='☁️ Cloud sync active';
-      setTimeout(()=>{badge.style.opacity='0';setTimeout(()=>badge.remove(),600);},3000);
-    } else {
-      badge.style.background='#fee2e2'; badge.style.color='#991b1b';
-      badge.title = err||'';
-      badge.textContent='☁️ Sync offline';
-    }
-  }
-
-  function showSetupModal() {
-    const cfg = getCfg()||{};
-    showModal('☁️ Firebase Cloud Sync Setup', `
-      <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:14px;margin-bottom:16px;font-size:13px;line-height:1.8">
-        <strong>How to get your Firebase config:</strong><br>
-        1. Go to <strong>console.firebase.google.com</strong> → your project<br>
-        2. Click <strong>⚙️ Project Settings</strong> → scroll to <em>Your apps</em> → click <strong>&lt;/&gt; Web</strong><br>
-        3. Copy the entire <code style="background:#dbeafe;padding:1px 5px;border-radius:3px">const firebaseConfig = { … }</code> block<br>
-        4. Paste it into the box below — fields will fill automatically
-      </div>
-
-      <div class="form-group" style="margin-bottom:6px">
-        <label style="font-weight:700">📋 Paste Firebase Config Here</label>
-        <textarea id="fb-paste" rows="8" placeholder="Paste the full firebaseConfig block from Firebase Console here, e.g.:\n\nconst firebaseConfig = {\n  apiKey: &quot;AIzaSy…&quot;,\n  authDomain: &quot;myapp.firebaseapp.com&quot;,\n  projectId: &quot;myapp&quot;,\n  …\n};"
-          style="font-family:monospace;font-size:12px;width:100%;box-sizing:border-box;resize:vertical"
-          oninput="parseFbConfig()">${cfg.apiKey ? `const firebaseConfig = {\n  apiKey: "${cfg.apiKey}",\n  authDomain: "${cfg.authDomain||''}",\n  projectId: "${cfg.projectId||''}",\n  storageBucket: "${cfg.storageBucket||''}",\n  messagingSenderId: "${cfg.messagingSenderId||''}",\n  appId: "${cfg.appId||''}"\n};` : ''}</textarea>
-        <p id="fb-parse-status" style="font-size:12px;margin-top:4px;min-height:16px;color:#16a34a"></p>
-      </div>
-
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">
-        <div class="form-group"><label>API Key *</label><input id="fb-apiKey" value="${cfg.apiKey||''}" placeholder="AIzaSy…"></div>
-        <div class="form-group"><label>Auth Domain *</label><input id="fb-authDomain" value="${cfg.authDomain||''}" placeholder="yourapp.firebaseapp.com"></div>
-        <div class="form-group"><label>Project ID *</label><input id="fb-projectId" value="${cfg.projectId||''}" placeholder="your-project-id"></div>
-        <div class="form-group"><label>Storage Bucket</label><input id="fb-storageBucket" value="${cfg.storageBucket||''}" placeholder="yourapp.appspot.com"></div>
-        <div class="form-group"><label>Messaging Sender ID</label><input id="fb-messagingSenderId" value="${cfg.messagingSenderId||''}"></div>
-        <div class="form-group"><label>App ID</label><input id="fb-appId" value="${cfg.appId||''}"></div>
-      </div>
-      <div class="form-group"><label>Team ID <span style="font-weight:400;color:var(--muted)">(shared across all staff — any short word)</span></label>
-        <input id="fb-teamId" value="${cfg.teamId||'worngundidj'}" placeholder="worngundidj"></div>
-      ${cfg.apiKey?`<div style="margin-top:4px"><button class="btn btn-sm btn-danger" onclick="FSYNC.clearConfig();closeModal()">🗑️ Disconnect Sync</button></div>`:''}
-    `, () => {
-      const g = id => document.getElementById(id)?.value?.trim()||'';
-      const apiKey = g('fb-apiKey');
-      if (!apiKey) { alert('API Key is required — paste your Firebase config above'); return false; }
-      const cfg = {
-        apiKey, authDomain: g('fb-authDomain'), projectId: g('fb-projectId'),
-        storageBucket: g('fb-storageBucket'), messagingSenderId: g('fb-messagingSenderId'),
-        appId: g('fb-appId'), teamId: g('fb-teamId')||'worngundidj',
-      };
-      saveCfg(cfg);
-      showToast('Config saved — connecting…');
-      FSYNC.init().then(ok => {
-        if (ok) { showToast('☁️ Cloud sync connected! Share your Team ID with your colleagues.'); showPage('settings'); }
-        else showToast('⚠️ Could not connect — check your config and try again.');
-      });
-      return true;
-    });
-  }
-
-  // Called on every keystroke in the paste box — extracts values into fields
-  window.parseFbConfig = function() {
-    const raw = document.getElementById('fb-paste')?.value || '';
-    const status = document.getElementById('fb-parse-status');
-    const extract = key => {
-      const m = raw.match(new RegExp(`${key}\\s*:\\s*["'\`]([^"'\`]+)["'\`]`));
-      return m ? m[1] : '';
-    };
-    const apiKey           = extract('apiKey');
-    const authDomain       = extract('authDomain');
-    const projectId        = extract('projectId');
-    const storageBucket    = extract('storageBucket');
-    const messagingSenderId= extract('messagingSenderId');
-    const appId            = extract('appId');
-    if (apiKey) {
-      document.getElementById('fb-apiKey').value            = apiKey;
-      document.getElementById('fb-authDomain').value        = authDomain;
-      document.getElementById('fb-projectId').value         = projectId;
-      document.getElementById('fb-storageBucket').value     = storageBucket;
-      document.getElementById('fb-messagingSenderId').value = messagingSenderId;
-      document.getElementById('fb-appId').value             = appId;
-      if (status) { status.textContent = '✓ Config detected — fields filled automatically'; status.style.color='#16a34a'; }
-    } else {
-      if (status && raw.length > 10) { status.textContent = '⚠️ Could not read config — make sure you pasted the full firebaseConfig block'; status.style.color='#d97706'; }
-    }
-  };
-
-  function clearConfig() {
-    localStorage.removeItem('fb_cfg');
-    db = null; _listeners.forEach(u=>u()); _listeners=[];
-    showToast('Cloud sync disconnected');
-  }
-
-  return { init, isReady, pushAll, pushClients, pushNotes, pushReferrals, pushWorkers, pushTasks, pushAudit, pushBrokerage, deleteDoc, getCfg, saveCfg, showSetupModal, clearConfig };
-})();
+// Cloud sync disabled — all data stored locally
+const FSYNC = {
+  init: async () => false,
+  isReady: () => false,
+  pushAll: async () => {},
+  pushClients: async () => {},
+  pushNotes: async () => {},
+  pushReferrals: async () => {},
+  pushWorkers: async () => {},
+  pushTasks: async () => {},
+  pushAudit: async () => {},
+  pushBrokerage: async () => {},
+  deleteDoc: async () => {},
+  getCfg: () => null,
+  saveCfg: () => {},
+  showSetupModal: () => showToast('Cloud sync is not configured.'),
+  clearConfig: () => {},
+};
 
 let clients = DB.load('clients', []);
 let notes = DB.load('notes', []);
