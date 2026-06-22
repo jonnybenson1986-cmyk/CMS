@@ -32,7 +32,8 @@
         https://identitytoolkit.googleapis.com
         https://securetoken.googleapis.com
         https://login.microsoftonline.com
-        https://graph.microsoft.com;
+        https://graph.microsoft.com
+        https://api.ipify.org;
       img-src 'self' data: https:;
       font-src 'self' data:;
       media-src 'self';
