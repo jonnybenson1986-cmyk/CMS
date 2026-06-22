@@ -321,6 +321,9 @@
 <div id="modal-container"></div>
 
 <!-- Firebase SDK (compat build — loads before app script) -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
 <script>
 // ===== DATA LAYER =====
@@ -330,24 +333,157 @@ const DB = {
 };
 
 // ===== FIREBASE CLOUD SYNC =====
-// Cloud sync disabled — all data stored locally
-const FSYNC = {
-  init: async () => false,
-  isReady: () => false,
-  pushAll: async () => {},
-  pushClients: async () => {},
-  pushNotes: async () => {},
-  pushReferrals: async () => {},
-  pushWorkers: async () => {},
-  pushTasks: async () => {},
-  pushAudit: async () => {},
-  pushBrokerage: async () => {},
-  deleteDoc: async () => {},
-  getCfg: () => null,
-  saveCfg: () => {},
-  showSetupModal: () => showToast('Cloud sync is not configured.'),
-  clearConfig: () => {},
-};
+const FSYNC = (() => {
+  let db = null, teamId = null, _listeners = [];
+
+  function getCfg()   { try { return JSON.parse(localStorage.getItem('fb_cfg')||'null'); } catch { return null; } }
+  function saveCfg(c) { localStorage.setItem('fb_cfg', JSON.stringify(c)); }
+  function isReady()  { return !!db; }
+  function col(name)  { return db.collection('teams').doc(teamId).collection(name); }
+
+  async function init() {
+    const cfg = getCfg();
+    if (!cfg?.apiKey) return false;
+    try {
+      if (!window.firebase) return false;
+      if (!firebase.apps.length) firebase.initializeApp(cfg);
+      db = firebase.firestore();
+      teamId = cfg.teamId || 'worngundidj';
+      await new Promise(resolve => {
+        const unsub = firebase.auth().onAuthStateChanged(user => { unsub(); resolve(user); });
+      });
+      if (!firebase.auth().currentUser) {
+        try { await firebase.auth().signInAnonymously(); } catch(e) { console.warn('Anon auth:', e.message); }
+      }
+      await _loadAll();
+      _startListeners();
+      _showSyncBadge(true);
+      return true;
+    } catch(e) {
+      console.warn('Firebase sync failed:', e.message);
+      _showSyncBadge(false, e.message);
+      return false;
+    }
+  }
+
+  async function _loadAll() {
+    const [cs,ns,ts,rs,ws,wks] = await Promise.all([
+      col('clients').get(), col('notes').get(), col('timelogs').get(),
+      col('referrals').get(), col('workersList').get(), col('workflowTasks').get(),
+    ]);
+    if (!cs.empty) { clients = cs.docs.map(d=>d.data()); DB.save('clients',clients); }
+    if (!ns.empty) { notes   = ns.docs.map(d=>d.data()); DB.save('notes',notes); }
+    if (!ts.empty) { timeLogs= ts.docs.map(d=>d.data()); DB.save('timelogs',timeLogs); }
+    if (!rs.empty) { referrals=rs.docs.map(d=>d.data()); DB.save('referrals',referrals); }
+    if (!ws.empty) { const w=ws.docs[0]?.data()?.list; if(w){workersList=w;DB.save('workersList',workersList);} }
+    if (!wks.empty){ const t=wks.docs[0]?.data()?.list; if(t){workflowTasks=t;DB.save('workflowTasks',workflowTasks);} }
+  }
+
+  function _startListeners() {
+    _listeners.forEach(u=>u()); _listeners=[];
+    const refresh = () => {
+      if (['clients','dashboard','sewb','aod','justice','cultural','disability','reports','sessions'].includes(currentPage))
+        setTimeout(()=>showPage(currentPage),50);
+    };
+    _listeners.push(col('clients').onSnapshot(snap=>{ if(snap.metadata.hasPendingWrites)return; clients=snap.docs.map(d=>d.data());DB.save('clients',clients);refresh(); }));
+    _listeners.push(col('notes').onSnapshot(snap=>{ if(snap.metadata.hasPendingWrites)return; notes=snap.docs.map(d=>d.data());DB.save('notes',notes); }));
+    _listeners.push(col('timelogs').onSnapshot(snap=>{ if(snap.metadata.hasPendingWrites)return; timeLogs=snap.docs.map(d=>d.data());DB.save('timelogs',timeLogs); }));
+    _listeners.push(col('referrals').onSnapshot(snap=>{ if(snap.metadata.hasPendingWrites)return; referrals=snap.docs.map(d=>d.data());DB.save('referrals',referrals); if(currentPage==='referrals')setTimeout(()=>showPage('referrals'),50); }));
+  }
+
+  async function _batch(colName, items, idFn) {
+    if (!db||!items.length) return;
+    for (let i=0;i<items.length;i+=400) {
+      const batch=db.batch();
+      items.slice(i,i+400).forEach(item=>batch.set(col(colName).doc(idFn(item)),item));
+      await batch.commit().catch(e=>console.warn('Sync write:',e.message));
+    }
+  }
+  function _sanitiseClient(c) {
+    if (!c.wf?.brokReceipt) return c;
+    const copy=JSON.parse(JSON.stringify(c)); copy.wf.brokReceipt='__local_only__'; return copy;
+  }
+
+  async function pushAll()     { if(!db)return; await Promise.all([_batch('clients',clients.map(_sanitiseClient),c=>c.id),_batch('notes',notes,n=>n.id),_batch('timelogs',timeLogs,t=>t.id||t.date+'-'+t.clientId)]); }
+  async function pushClients() { await _batch('clients',clients.map(_sanitiseClient),c=>c.id); }
+  async function pushBrokerage(clientId) { const c=clients.find(cl=>cl.id===clientId);if(!db||!c)return; col('clients').doc(clientId).set(_sanitiseClient(c),{merge:true}).catch(e=>console.warn(e.message)); }
+  async function pushNotes()    { await _batch('notes',notes,n=>n.id); }
+  async function pushReferrals(){ await _batch('referrals',referrals,r=>r.id||uid()); }
+  async function pushWorkers()  { if(db) col('workersList').doc('list').set({list:workersList}).catch(()=>{}); }
+  async function pushTasks()    { if(db) col('workflowTasks').doc('list').set({list:workflowTasks}).catch(()=>{}); }
+  async function pushAudit()    { await _batch('auditlog',auditLog,a=>a.id); }
+  async function deleteDoc(colName,id) { if(db&&id) col(colName).doc(id).delete().catch(()=>{}); }
+
+  function _showSyncBadge(ok, err) {
+    let b=document.getElementById('sync-badge');
+    if (!b) { b=document.createElement('div'); b.id='sync-badge'; b.style.cssText='position:fixed;bottom:16px;right:16px;padding:6px 14px;border-radius:20px;font-size:12px;font-weight:700;z-index:9999;box-shadow:0 2px 8px rgba(0,0,0,0.15);transition:opacity 0.5s'; document.body.appendChild(b); }
+    if (ok) { b.style.background='#d1fae5';b.style.color='#065f46';b.textContent='☁️ Cloud sync active';setTimeout(()=>{b.style.opacity='0';setTimeout(()=>b.remove(),600);},3000); }
+    else { b.style.background='#fee2e2';b.style.color='#991b1b';b.title=err||'';b.textContent='☁️ Sync offline'; }
+  }
+
+  function showSetupModal() {
+    const cfg=getCfg()||{};
+    showModal('☁️ Firebase Setup', `
+      <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:14px;margin-bottom:16px;font-size:13px;line-height:1.8">
+        <strong>How to get your Firebase config:</strong><br>
+        1. Go to <strong>console.firebase.google.com</strong> → your project<br>
+        2. Click <strong>⚙️ Project Settings → Your apps → &lt;/&gt; Web</strong><br>
+        3. Copy the <code style="background:#dbeafe;padding:1px 5px;border-radius:3px">firebaseConfig</code> block and paste below
+      </div>
+      <div class="form-group" style="margin-bottom:6px">
+        <label style="font-weight:700">📋 Paste Firebase Config</label>
+        <textarea id="fb-paste" rows="7" placeholder="const firebaseConfig = {\n  apiKey: &quot;AIzaSy…&quot;,\n  …\n};"
+          style="font-family:monospace;font-size:12px;width:100%;box-sizing:border-box;resize:vertical"
+          oninput="parseFbConfig()">${cfg.apiKey?`const firebaseConfig = {\n  apiKey: "${cfg.apiKey}",\n  authDomain: "${cfg.authDomain||''}",\n  projectId: "${cfg.projectId||''}",\n  storageBucket: "${cfg.storageBucket||''}",\n  messagingSenderId: "${cfg.messagingSenderId||''}",\n  appId: "${cfg.appId||''}"\n};`:''}</textarea>
+        <p id="fb-parse-status" style="font-size:12px;margin-top:4px;min-height:16px;color:#16a34a"></p>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">
+        <div class="form-group"><label>API Key *</label><input id="fb-apiKey" value="${cfg.apiKey||''}" placeholder="AIzaSy…"></div>
+        <div class="form-group"><label>Auth Domain *</label><input id="fb-authDomain" value="${cfg.authDomain||''}" placeholder="yourapp.firebaseapp.com"></div>
+        <div class="form-group"><label>Project ID *</label><input id="fb-projectId" value="${cfg.projectId||''}" placeholder="your-project-id"></div>
+        <div class="form-group"><label>Storage Bucket</label><input id="fb-storageBucket" value="${cfg.storageBucket||''}" placeholder="yourapp.appspot.com"></div>
+        <div class="form-group"><label>Messaging Sender ID</label><input id="fb-messagingSenderId" value="${cfg.messagingSenderId||''}"></div>
+        <div class="form-group"><label>App ID</label><input id="fb-appId" value="${cfg.appId||''}"></div>
+      </div>
+      <div class="form-group"><label>Team ID</label><input id="fb-teamId" value="${cfg.teamId||'worngundidj'}" placeholder="worngundidj"></div>
+      ${cfg.apiKey?`<button class="btn btn-sm btn-danger" style="margin-top:4px" onclick="FSYNC.clearConfig();closeModal()">🗑️ Disconnect</button>`:''}
+    `, () => {
+      const g=id=>document.getElementById(id)?.value?.trim()||'';
+      const apiKey=g('fb-apiKey');
+      if(!apiKey){alert('API Key is required');return false;}
+      const cfg={apiKey,authDomain:g('fb-authDomain'),projectId:g('fb-projectId'),storageBucket:g('fb-storageBucket'),messagingSenderId:g('fb-messagingSenderId'),appId:g('fb-appId'),teamId:g('fb-teamId')||'worngundidj'};
+      saveCfg(cfg);
+      showToast('Config saved — connecting…');
+      FSYNC.init().then(ok=>{
+        if(ok){showToast('☁️ Firebase connected! Staff accounts can now use email/password login.');showPage('settings');}
+        else showToast('⚠️ Could not connect — check your config');
+      });
+      return true;
+    });
+  }
+
+  window.parseFbConfig = function() {
+    const raw=document.getElementById('fb-paste')?.value||'';
+    const status=document.getElementById('fb-parse-status');
+    const extract=key=>{ const m=raw.match(new RegExp(`${key}\\s*:\\s*["'\`]([^"'\`]+)["'\`]`)); return m?m[1]:''; };
+    const apiKey=extract('apiKey');
+    if(apiKey){
+      ['apiKey','authDomain','projectId','storageBucket','messagingSenderId','appId'].forEach(k=>{ const el=document.getElementById('fb-'+k); if(el) el.value=extract(k); });
+      if(status){status.textContent='✓ Config detected — fields filled';status.style.color='#16a34a';}
+    } else {
+      if(status&&raw.length>10){status.textContent='⚠️ Could not read config — paste the full firebaseConfig block';status.style.color='#d97706';}
+    }
+  };
+
+  function clearConfig() {
+    localStorage.removeItem('fb_cfg');
+    db=null; _listeners.forEach(u=>u()); _listeners=[];
+    showToast('Firebase disconnected');
+    showPage('settings');
+  }
+
+  return { init, isReady, pushAll, pushClients, pushNotes, pushReferrals, pushWorkers, pushTasks, pushAudit, pushBrokerage, deleteDoc, getCfg, saveCfg, showSetupModal, clearConfig };
+})();
 
 let clients = DB.load('clients', []);
 let notes = DB.load('notes', []);
