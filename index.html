@@ -350,10 +350,8 @@ const FSYNC = (() => {
       if (!firebase.apps.length) firebase.initializeApp(cfg);
       db = firebase.firestore();
       teamId = cfg.teamId || 'wg_default';
-      await firebase.auth().signInWithEmailAndPassword(
-        window._fbLoginEmail || 'app@wg-cms.internal',
-        window._fbLoginPass  || 'anonymous_fallback_9x!'
-      ).catch(()=> firebase.auth().signInAnonymously());
+      // Use existing Firebase session or fall back to anonymous — never store credentials in source
+      if (!firebase.auth().currentUser) await firebase.auth().signInAnonymously();
       await _loadAll();
       _startListeners();
       _showSyncBadge(true);
@@ -1019,7 +1017,7 @@ function renderProfileTab(tab, c, clientNotes, clientTime) {
       ${recent.length===0?'<p style="color:var(--muted);font-size:13px">No notes yet</p>':
         recent.map(n=>`<div class="note-entry ${n.type||'general'}">
           <div class="note-meta"><span class="section-badge badge-${n.type||'general'}">${n.type||'general'}</span><span>${fmtdt(n.created)}</span><span>${n.worker||''}</span></div>
-          <div class="note-text">${n.text||''}</div>
+          <div class="note-text">${sanitize(n.text)}</div>
         </div>`).join('')
       }
     </div>`;
@@ -4097,7 +4095,7 @@ function buildFullClientReport(c, from, to) {
     clientNotes.map(n=>`<div class="note-block ${n.type||'general'}">
       <div class="note-meta"><strong class="badge badge-${n.type||'general'}">${(n.type||'general').toUpperCase()}</strong> &nbsp; ${fmtdt(n.created)} &nbsp;|&nbsp; ${n.worker||'—'} &nbsp;|&nbsp; ${n.contactType||''} ${n.duration?'| '+n.duration+' min':''}</div>
       <p>${(n.text||'').replace(/\n/g,'<br>')}</p>
-      ${n.followup?`<p style="margin-top:6px;color:#6b7280"><strong>Follow-up:</strong> ${n.followup}</p>`:''}
+      ${n.followup?`<p style="margin-top:6px;color:#6b7280"><strong>Follow-up:</strong> ${sanitize(n.followup)}</p>`:''}
     </div>`).join('')
   }
 
@@ -4338,7 +4336,7 @@ function buildNotesReport(c, from, to) {
     ${ns.map(n=>`<div class="note-block ${t}">
       <div class="note-meta">${fmtdt(n.created)} | ${n.worker||'—'} | ${n.contactType||''} ${n.duration?'| '+n.duration+' min':''}</div>
       <p>${(n.text||'').replace(/\n/g,'<br>')}</p>
-      ${n.followup?`<p style="margin-top:5px"><strong>Follow-up:</strong> ${n.followup}</p>`:''}
+      ${n.followup?`<p style="margin-top:5px"><strong>Follow-up:</strong> ${sanitize(n.followup)}</p>`:''}
     </div>`).join('')}
   `).join('')}`;
 }
@@ -5884,8 +5882,8 @@ function renderSessions() {
             ${!locked?`<button class="btn btn-sm btn-danger" onclick="deleteNote('${n.id}','')">✕</button>`:''}
           </div>
         </div>
-        <div class="session-body">${n.text||''}</div>
-        ${n.followup?`<div class="session-followup">📌 <strong>Follow-up:</strong> ${n.followup}</div>`:''}
+        <div class="session-body">${sanitize(n.text)}</div>
+        ${n.followup?`<div class="session-followup">📌 <strong>Follow-up:</strong> ${sanitize(n.followup)}</div>`:''}
       </div>`;
     }).join('')
   }
@@ -7301,7 +7299,7 @@ function renderWFNotes(c) {
       wfNotes.map(n=>`<div class="note-entry workfoundations" style="border-left-color:#d97706">
         <div class="note-meta"><span class="section-badge" style="background:#fef3c7;color:#92400e">WORK FOUNDATIONS</span><span>${fmtdt(n.created)}</span><span>${n.worker||''}</span>${n.duration?`<span>⏱️ ${n.duration} min</span>`:''}</div>
         <div class="note-text">${(n.text||'').replace(/\n/g,'<br>')}</div>
-        ${n.followup?`<div style="margin-top:6px;padding:6px 10px;background:#fef3c7;border-radius:4px;font-size:12px">📌 ${n.followup}</div>`:''}
+        ${n.followup?`<div style="margin-top:6px;padding:6px 10px;background:#fef3c7;border-radius:4px;font-size:12px">📌 ${sanitize(n.followup)}</div>`:''}
       </div>`).join('')
     }
   </div>`;
@@ -7450,10 +7448,10 @@ function renderAuditLog() {
             <div class="al-cell">
               <span style="display:inline-flex;align-items:center;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;background:${actionColour(e.action)}18;color:${actionColour(e.action)}">${e.action||'—'}</span>
             </div>
-            <div class="al-cell" style="color:var(--text)">${e.detail||'—'}</div>
+            <div class="al-cell" style="color:var(--text)">${sanitize(e.detail)||'—'}</div>
             <div class="al-cell">
               ${e.clientId
-                ? `<button class="btn-ghost" style="font-size:12px;padding:2px 6px" onclick="openClientProfile('${e.clientId}')">${e.clientName||e.clientId}</button>`
+                ? `<button class="btn-ghost" style="font-size:12px;padding:2px 6px" onclick="openClientProfile('${e.clientId}')">${sanitize(e.clientName||e.clientId)}</button>`
                 : `<span style="color:var(--muted)">—</span>`}
             </div>
           </div>`).join('')
@@ -8490,7 +8488,6 @@ async function doLogin() {
   try {
     if(!firebase.apps.length) firebase.initializeApp(cfg);
     window._fbLoginEmail = email;
-    window._fbLoginPass  = pass;
     const cred = await firebase.auth().signInWithEmailAndPassword(email, pass);
     _finishLogin(cred.user, email);
   } catch(e) {
@@ -8993,6 +8990,37 @@ function showSearchResults(query) {
     <div><div style="font-size:13px;font-weight:600">${r.label}</div><div style="font-size:11px;color:var(--muted)">${r.sub}</div></div>
   </div>`).join('');
 }
+
+// ===== HTML SANITIZER =====
+function sanitize(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// ===== IDLE AUTO-LOGOUT (15 minutes) =====
+(function setupIdleLogout() {
+  const IDLE_MS = 15 * 60 * 1000;
+  let _idleTimer = null;
+  function resetIdle() {
+    clearTimeout(_idleTimer);
+    if (!currentUser) return;
+    _idleTimer = setTimeout(() => {
+      showToast('Session expired due to inactivity. Please sign in again.', 'warning');
+      setTimeout(logout, 1500);
+    }, IDLE_MS);
+  }
+  ['mousemove','keydown','pointerdown','touchstart','scroll'].forEach(ev =>
+    document.addEventListener(ev, resetIdle, { passive: true })
+  );
+  // Re-arm when a user logs in
+  const _origSaveCU = saveCurrentUser;
+  window.saveCurrentUser = function(u) { _origSaveCU(u); if(u) resetIdle(); else clearTimeout(_idleTimer); };
+})();
 
 // ===== INIT =====
 initApp();

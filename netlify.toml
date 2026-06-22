@@ -1,0 +1,50 @@
+[[headers]]
+  for = "/*"
+  [headers.values]
+    # Prevent clickjacking
+    X-Frame-Options = "DENY"
+    # Stop browsers sniffing MIME types
+    X-Content-Type-Options = "nosniff"
+    # Only send referrer to same origin
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    # Restrict permissions
+    Permissions-Policy = "camera=(), microphone=(self), geolocation=()"
+    # Content Security Policy
+    # - default: self only
+    # - scripts: self + Firebase + MSAL CDN
+    # - connect: Firebase Firestore/Auth APIs + Microsoft login
+    # - style: self + inline (required by the single-file app)
+    # - img: self + data URIs (avatars, logos)
+    # - frame-ancestors: none (no embedding)
+    Content-Security-Policy = """
+      default-src 'self';
+      script-src 'self' 'unsafe-inline'
+        https://www.gstatic.com
+        https://www.googleapis.com
+        https://cdn.jsdelivr.net
+        https://alcdn.msauth.net;
+      style-src 'self' 'unsafe-inline';
+      connect-src 'self'
+        https://*.googleapis.com
+        https://*.firebaseio.com
+        https://*.firebase.com
+        https://firestore.googleapis.com
+        https://identitytoolkit.googleapis.com
+        https://securetoken.googleapis.com
+        https://login.microsoftonline.com
+        https://graph.microsoft.com;
+      img-src 'self' data: https:;
+      font-src 'self' data:;
+      media-src 'self';
+      worker-src 'self';
+      frame-src 'none';
+      frame-ancestors 'none';
+      form-action 'self';
+      base-uri 'self';
+    """
+
+[[headers]]
+  for = "/service-worker.js"
+  [headers.values]
+    Cache-Control = "no-cache"
+    Service-Worker-Allowed = "/"
