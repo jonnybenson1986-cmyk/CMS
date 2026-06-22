@@ -33,7 +33,11 @@
         https://securetoken.googleapis.com
         https://login.microsoftonline.com
         https://graph.microsoft.com
-        https://api.ipify.org;
+        https://api.ipify.org
+        https://*.firebasestorage.googleapis.com
+        https://www.google-analytics.com
+        https://analytics.google.com
+        https://region1.google-analytics.com;
       img-src 'self' data: https:;
       font-src 'self' data:;
       media-src 'self';
