@@ -8484,7 +8484,7 @@ function loginSaveFb() {
 }
 
 function showLoginScreen() {
-  const hasFb = !!(()=>{ try{ return JSON.parse(localStorage.getItem('fb_cfg')||'null'); }catch{return null;} })()?.apiKey;
+  const hasFb = false; // Always use dropdown login — Firebase syncs in the background
   document.getElementById('sidebar').style.display='none';
   document.getElementById('main').style.marginLeft='0';
   document.getElementById('main').innerHTML = `
