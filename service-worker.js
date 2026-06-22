@@ -1,10 +1,7 @@
-const CACHE_NAME = 'wg-cms-v1';
+const CACHE_NAME = 'wg-cms-v2';
 const ASSETS = [
   './',
   './index.html',
-  './manifest.json',
-  './icons/icon-192.png',
-  './icons/icon-512.png'
 ];
 
 self.addEventListener('install', e => {
