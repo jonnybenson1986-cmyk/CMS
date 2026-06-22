@@ -596,6 +596,7 @@ function audit(action, detail, clientId) {
     clientId: clientId || '',
     clientName: clientId ? (clients.find(c=>c.id===clientId)?.fullName || '') : '',
     page: currentPage || '',
+    ip: window._sessionIP || '',
   };
   auditLog.push(entry);
   saveAuditLog();
@@ -7387,7 +7388,7 @@ function renderAuditLog() {
 
   return `
   <style>
-    .al-row { display:grid; grid-template-columns:140px 120px 160px 1fr 1fr; gap:0; border-bottom:1px solid var(--border); font-size:12px; }
+    .al-row { display:grid; grid-template-columns:140px 120px 160px 1fr 1fr 100px; gap:0; border-bottom:1px solid var(--border); font-size:12px; }
     .al-row:hover { background:rgba(45,106,79,0.03); }
     .al-cell { padding:10px 12px; display:flex; align-items:center; }
     @media(max-width:900px){ .al-row{grid-template-columns:1fr 1fr;} .al-cell:nth-child(n+3){display:none;} }
@@ -7430,6 +7431,7 @@ function renderAuditLog() {
       <div class="al-cell">Action</div>
       <div class="al-cell">Detail</div>
       <div class="al-cell">Client</div>
+      <div class="al-cell">IP Address</div>
     </div>
 
     <!-- ROWS -->
@@ -7454,6 +7456,7 @@ function renderAuditLog() {
                 ? `<button class="btn-ghost" style="font-size:12px;padding:2px 6px" onclick="openClientProfile('${e.clientId}')">${sanitize(e.clientName||e.clientId)}</button>`
                 : `<span style="color:var(--muted)">—</span>`}
             </div>
+            <div class="al-cell" style="font-size:10px;color:var(--muted);font-family:monospace">${sanitize(e.ip||'')||'—'}</div>
           </div>`).join('')
       }
       ${filtered.length > 500 ? `<div style="padding:12px;text-align:center;color:var(--muted);font-size:12px">Showing first 500 results — use filters to narrow down</div>` : ''}
@@ -7551,19 +7554,23 @@ function renderSettings() {
           <th style="text-align:left;padding:8px 10px;border-bottom:1px solid var(--border)">Email</th>
           <th style="text-align:left;padding:8px 10px;border-bottom:1px solid var(--border)">Role</th>
           <th style="text-align:left;padding:8px 10px;border-bottom:1px solid var(--border)">Firebase</th>
+          <th style="text-align:left;padding:8px 10px;border-bottom:1px solid var(--border)">Last Login</th>
           <th style="padding:8px 10px;border-bottom:1px solid var(--border)">Actions</th>
         </tr></thead>
         <tbody>
           ${userProfiles.length===0
-            ? `<tr><td colspan="5" style="padding:14px 10px;color:var(--muted);text-align:center">No staff accounts yet. Click "Add Staff Account" to create the first one.</td></tr>`
+            ? `<tr><td colspan="6" style="padding:14px 10px;color:var(--muted);text-align:center">No staff accounts yet. Click "Add Staff Account" to create the first one.</td></tr>`
             : userProfiles.map(u=>`
             <tr style="border-bottom:1px solid var(--border)">
-              <td style="padding:8px 10px;font-weight:600">${ROLES[u.role]?.icon||'👤'} ${u.name}</td>
-              <td style="padding:8px 10px;color:var(--muted)">${u.email||'<em>no email set</em>'}</td>
+              <td style="padding:8px 10px;font-weight:600">${ROLES[u.role]?.icon||'👤'} ${sanitize(u.name)}</td>
+              <td style="padding:8px 10px;color:var(--muted)">${sanitize(u.email)||'<em>no email set</em>'}</td>
               <td style="padding:8px 10px"><span style="background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:2px 8px;font-size:11px">${ROLES[u.role]?.label||u.role}</span></td>
               <td style="padding:8px 10px">${u.firebaseUid
                 ? '<span style="color:#16a34a;font-size:12px">✓ Linked</span>'
                 : '<span style="color:#d97706;font-size:12px">○ Not linked</span>'}</td>
+              <td style="padding:8px 10px;font-size:11px;color:var(--muted)">
+                ${u.lastLoginAt ? `<span title="IP: ${sanitize(u.lastLoginIP||'unknown')}">${fmtdt(u.lastLoginAt)}<br><code style="font-size:10px">${sanitize(u.lastLoginIP||'—')}</code></span>` : '—'}
+              </td>
               <td style="padding:8px 10px;white-space:nowrap;text-align:center">
                 <button class="btn btn-sm btn-outline" style="margin-right:4px" onclick="openEditStaffModal('${u.id}')">✏️ Edit</button>
                 <button class="btn btn-sm btn-outline" style="color:#dc2626" onclick="removeStaffAccount('${u.id}')">🗑️</button>
@@ -8378,6 +8385,40 @@ let userProfiles = DB.load('userProfiles', []);
 function saveUserProfiles() { DB.save('userProfiles', userProfiles); }
 function saveCurrentUser(u) { currentUser = u; DB.save('currentUser', u); }
 
+// ===== IP CAPTURE =====
+// Fetches the user's public IP once per session for security audit logging.
+// Uses a privacy-neutral lookup (no tracking, HTTPS only).
+window._sessionIP = '';
+window._sessionIPReady = fetch('https://api.ipify.org?format=json', { cache: 'no-store' })
+  .then(r => r.json())
+  .then(d => { window._sessionIP = d.ip || ''; })
+  .catch(() => { window._sessionIP = 'unavailable'; });
+
+// ===== FAILED LOGIN TRACKING =====
+const _failedLogins = JSON.parse(sessionStorage.getItem('_fl') || '{}');
+const MAX_ATTEMPTS = 5;
+const LOCKOUT_MS  = 10 * 60 * 1000; // 10 minutes
+
+function _recordFailedLogin(key) {
+  const now = Date.now();
+  if (!_failedLogins[key]) _failedLogins[key] = { count: 0, since: now };
+  _failedLogins[key].count++;
+  _failedLogins[key].last = now;
+  sessionStorage.setItem('_fl', JSON.stringify(_failedLogins));
+}
+
+function _isLockedOut(key) {
+  const r = _failedLogins[key];
+  if (!r) return false;
+  if (r.count >= MAX_ATTEMPTS && (Date.now() - r.last) < LOCKOUT_MS) return true;
+  if ((Date.now() - r.last) >= LOCKOUT_MS) { delete _failedLogins[key]; sessionStorage.setItem('_fl', JSON.stringify(_failedLogins)); }
+  return false;
+}
+
+function _clearFailedLogins(key) {
+  delete _failedLogins[key];
+  sessionStorage.setItem('_fl', JSON.stringify(_failedLogins));
+}
 
 function checkLogin() {
   if(!currentUser) { showLoginScreen(); return false; }
@@ -8475,6 +8516,13 @@ async function doLogin() {
   const pass  = document.getElementById('login-pass')?.value;
   if(!email){errEl.textContent='Please enter your email address';return;}
   if(!pass) {errEl.textContent='Please enter your password';return;}
+
+  // Lockout check — 5 failures within 10 minutes blocks further attempts
+  if(_isLockedOut(email)) {
+    errEl.textContent='Too many failed attempts. Please wait 10 minutes and try again.';
+    btn.disabled=true; return;
+  }
+
   errEl.textContent='';
   btn.disabled=true; btn.textContent='Signing in…';
 
@@ -8482,21 +8530,22 @@ async function doLogin() {
   if(!cfg?.apiKey) {
     const u = userProfiles.find(p=>p.email===email);
     if(!u){btn.disabled=false;btn.textContent='Sign In →';errEl.textContent='Account not found.';return;}
-    saveCurrentUser(u); initApp(); return;
+    saveCurrentUser(u); _auditLogin(u); initApp(); return;
   }
 
   try {
     if(!firebase.apps.length) firebase.initializeApp(cfg);
     window._fbLoginEmail = email;
     const cred = await firebase.auth().signInWithEmailAndPassword(email, pass);
+    _clearFailedLogins(email);
     _finishLogin(cred.user, email);
   } catch(e) {
     if(e.code === 'auth/multi-factor-auth-required') {
-      // MFA required — show TOTP code entry screen
       window._mfaResolver = e.resolver;
       _showMFAScreen();
       return;
     }
+    _recordFailedLogin(email);
     btn.disabled=false; btn.textContent='Sign In →';
     const msgs = {
       'auth/user-not-found':    'No account found with that email.',
@@ -8509,6 +8558,34 @@ async function doLogin() {
   }
 }
 
+function _auditLogin(u) {
+  const entry = {
+    id: uid(), ts: now(),
+    worker: u.name || 'Unknown',
+    role: u.role || '',
+    action: 'Login',
+    detail: `Signed in from IP: ${window._sessionIP || 'resolving…'}`,
+    clientId: '', clientName: '', page: 'login',
+    ip: window._sessionIP || '',
+  };
+  // Update IP once resolved if it wasn't ready yet
+  window._sessionIPReady.then(() => {
+    entry.detail = `Signed in from IP: ${window._sessionIP}`;
+    entry.ip = window._sessionIP;
+    saveAuditLog();
+  });
+  auditLog.push(entry);
+  saveAuditLog();
+  // Persist last login metadata to user profile
+  u.lastLoginAt = now();
+  u.lastLoginIP = window._sessionIP;
+  saveUserProfiles();
+  window._sessionIPReady.then(() => {
+    u.lastLoginIP = window._sessionIP;
+    saveUserProfiles();
+  });
+}
+
 function _finishLogin(firebaseUser, email) {
   let u = userProfiles.find(p=>p.email===email);
   if(!u) {
@@ -8519,7 +8596,7 @@ function _finishLogin(firebaseUser, email) {
     u.firebaseUid = firebaseUser.uid;
     saveUserProfiles();
   }
-  saveCurrentUser(u); initApp();
+  saveCurrentUser(u); _auditLogin(u); initApp();
 }
 
 function _showMFAScreen() {
