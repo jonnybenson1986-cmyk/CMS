@@ -1,4 +1,4 @@
-const CACHE_NAME = 'wg-cms-v3';
+const CACHE_NAME = 'wg-cms-v4';
 const ASSETS = [
   './',
   './index.html',
