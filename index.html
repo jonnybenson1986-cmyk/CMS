@@ -7549,13 +7549,28 @@ function renderSettings() {
     </div>
     ${FSYNC.isReady()?`
       <p style="font-size:13px;color:var(--muted);margin-bottom:8px">Real-time sync is active. All changes are saved to the cloud instantly and shared across all devices.</p>
-      <div style="background:#f0f7f3;border-radius:8px;padding:12px;font-size:13px">
+      <div style="background:#f0f7f3;border-radius:8px;padding:12px;font-size:13px;margin-bottom:10px">
         <strong>Team ID:</strong> <code style="background:#e0f0e8;padding:2px 8px;border-radius:4px">${FSYNC.getCfg()?.teamId||'worngundidj'}</code>
         &nbsp;— share this with Jon, Jade &amp; Brett so they connect to the same data.
       </div>
+      <button class="btn btn-sm btn-danger" onclick="FSYNC.clearConfig()">🗑️ Disconnect Firebase</button>
     `:`
-      <p style="font-size:13px;color:var(--muted)">Set up Firebase to sync data across all devices and let Jon, Jade &amp; Brett access the same client records in real time. Free — takes ~5 minutes.</p>
-      <button class="btn btn-accent" style="margin-top:8px" onclick="FSYNC.showSetupModal()">☁️ Set Up Cloud Sync</button>
+      <p style="font-size:13px;color:var(--muted);margin-bottom:12px">Paste your Firebase config below to connect cloud sync. All staff will share the same client records in real time.</p>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px">
+        <label style="font-size:12px;font-weight:700;color:#374151;display:block;margin-bottom:6px">📋 Paste your Firebase config here</label>
+        <textarea id="inline-fb-paste" rows="7"
+          placeholder="const firebaseConfig = {&#10;  apiKey: &quot;AIzaSy…&quot;,&#10;  authDomain: &quot;…&quot;,&#10;  projectId: &quot;…&quot;,&#10;  storageBucket: &quot;…&quot;,&#10;  messagingSenderId: &quot;…&quot;,&#10;  appId: &quot;…&quot;&#10;};"
+          style="width:100%;box-sizing:border-box;font-family:monospace;font-size:12px;padding:10px;border:1px solid #d1d5db;border-radius:6px;resize:vertical;background:#fff"
+          oninput="inlineParseFb()"></textarea>
+        <p id="inline-fb-status" style="font-size:12px;min-height:16px;margin:6px 0 10px;color:#6b7280"></p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+          <div><label style="font-size:11px;font-weight:600;color:#6b7280">API Key *</label><input id="inline-fb-apiKey" placeholder="AIzaSy…" style="width:100%;box-sizing:border-box;padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:3px"></div>
+          <div><label style="font-size:11px;font-weight:600;color:#6b7280">Auth Domain</label><input id="inline-fb-authDomain" placeholder="yourapp.firebaseapp.com" style="width:100%;box-sizing:border-box;padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:3px"></div>
+          <div><label style="font-size:11px;font-weight:600;color:#6b7280">Project ID *</label><input id="inline-fb-projectId" placeholder="your-project-id" style="width:100%;box-sizing:border-box;padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:3px"></div>
+          <div><label style="font-size:11px;font-weight:600;color:#6b7280">Team ID</label><input id="inline-fb-teamId" value="worngundidj" placeholder="worngundidj" style="width:100%;box-sizing:border-box;padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:3px"></div>
+        </div>
+        <button class="btn btn-primary" style="width:100%;padding:11px" onclick="inlineConnectFb()">☁️ Connect to Firebase</button>
+      </div>
     `}
   </div>
 
@@ -8336,6 +8351,42 @@ function _clearFailedLogins(key) {}
 function checkLogin() {
   if(!currentUser) { showLoginScreen(); return false; }
   return true;
+}
+
+function inlineParseFb() {
+  const raw = document.getElementById('inline-fb-paste')?.value || '';
+  const extract = key => { const m = raw.match(new RegExp(`${key}\\s*:\\s*["'\`]([^"'\`]+)["'\`]`)); return m ? m[1] : ''; };
+  const apiKey = extract('apiKey');
+  if (apiKey) {
+    const set = (id, val) => { const el = document.getElementById(id); if (el && val) el.value = val; };
+    set('inline-fb-apiKey',      apiKey);
+    set('inline-fb-authDomain',  extract('authDomain'));
+    set('inline-fb-projectId',   extract('projectId'));
+    const st = document.getElementById('inline-fb-status');
+    if (st) { st.textContent = '✅ Config detected — click Connect to Firebase'; st.style.color = '#16a34a'; }
+  }
+}
+
+async function inlineConnectFb() {
+  const g = id => document.getElementById(id)?.value?.trim() || '';
+  const apiKey = g('inline-fb-apiKey');
+  const projectId = g('inline-fb-projectId');
+  const st = document.getElementById('inline-fb-status');
+  if (!apiKey) { if (st) { st.textContent = '❌ API Key is required'; st.style.color = '#dc2626'; } return; }
+  if (!projectId) { if (st) { st.textContent = '❌ Project ID is required'; st.style.color = '#dc2626'; } return; }
+  const cfg = {
+    apiKey,
+    authDomain: g('inline-fb-authDomain') || `${projectId}.firebaseapp.com`,
+    projectId,
+    storageBucket: `${projectId}.firebasestorage.app`,
+    messagingSenderId: '', appId: '',
+    teamId: g('inline-fb-teamId') || 'worngundidj',
+  };
+  if (st) { st.textContent = '⏳ Connecting…'; st.style.color = '#6b7280'; }
+  FSYNC.saveCfg(cfg);
+  const ok = await FSYNC.init();
+  if (ok) { showToast('☁️ Firebase connected!'); showPage('settings'); }
+  else { if (st) { st.textContent = '⚠️ Could not connect — check your config and Firebase Console'; st.style.color = '#dc2626'; } }
 }
 
 function loginParseFb() {
