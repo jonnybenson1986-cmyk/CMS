@@ -8432,6 +8432,42 @@ function checkLogin() {
   return true;
 }
 
+function loginParseFb() {
+  const text = document.getElementById('login-fb-paste')?.value || '';
+  const match = text.match(/\{([^}]+)\}/s);
+  if (!match) return;
+  const obj = {};
+  match[1].replace(/(\w+)\s*:\s*["']([^"']+)["']/g, (_,k,v) => { obj[k]=v; });
+  const set = (id, val) => { const el=document.getElementById(id); if(el&&val) el.value=val; };
+  set('login-fb-apiKey', obj.apiKey);
+  set('login-fb-authDomain', obj.authDomain);
+  set('login-fb-projectId', obj.projectId);
+  const st = document.getElementById('login-fb-status');
+  if(st) st.textContent = obj.apiKey ? '✅ Config parsed — click Save & Connect' : '';
+}
+
+function loginSaveFb() {
+  const g = id => document.getElementById(id)?.value?.trim()||'';
+  const apiKey = g('login-fb-apiKey');
+  if (!apiKey) { document.getElementById('login-fb-status').textContent='❌ API Key is required'; return; }
+  const projectId = g('login-fb-projectId');
+  if (!projectId) { document.getElementById('login-fb-status').textContent='❌ Project ID is required'; return; }
+  const cfg = {
+    apiKey,
+    authDomain: g('login-fb-authDomain') || `${projectId}.firebaseapp.com`,
+    projectId,
+    storageBucket: `${projectId}.appspot.com`,
+    messagingSenderId: '', appId: '',
+    teamId: g('login-fb-teamId') || 'worngundidj',
+  };
+  FSYNC.saveCfg(cfg);
+  showToast('Firebase config saved — connecting…');
+  FSYNC.init().then(ok => {
+    if (ok) { showToast('☁️ Firebase connected!'); showLoginScreen(); }
+    else showToast('⚠️ Could not connect — check your config');
+  });
+}
+
 function showLoginScreen() {
   const hasFb = !!(()=>{ try{ return JSON.parse(localStorage.getItem('fb_cfg')||'null'); }catch{return null;} })()?.apiKey;
   document.getElementById('sidebar').style.display='none';
@@ -8483,6 +8519,31 @@ function showLoginScreen() {
         <p id="login-error" style="color:#dc2626;font-size:13px;text-align:center;margin-top:12px;min-height:18px"></p>
         <p style="font-size:12px;color:#9ca3af;text-align:center;margin-top:16px">Set up Firebase in Settings to enable secure email/password login</p>
       `}
+      <div style="margin-top:20px;border-top:1px solid #e5e7eb;padding-top:16px">
+        <button onclick="(function(){var s=document.getElementById('fb-setup-panel');s.style.display=s.style.display==='none'?'block':'none';})()"
+          style="background:none;border:none;color:#6b7280;font-size:13px;cursor:pointer;width:100%;text-align:center;padding:4px">
+          ☁️ Connect to Firebase
+        </button>
+        <div id="fb-setup-panel" style="display:none;margin-top:14px">
+          <p style="font-size:12px;color:#6b7280;margin-bottom:10px">
+            Paste your <code style="background:#f3f4f6;padding:1px 4px;border-radius:3px">firebaseConfig</code> block from
+            <strong>Firebase Console → Project Settings → Your apps</strong>
+          </p>
+          <textarea id="login-fb-paste" rows="6" placeholder="const firebaseConfig = {&#10;  apiKey: &quot;AIzaSy…&quot;,&#10;  authDomain: &quot;…&quot;,&#10;  projectId: &quot;…&quot;,&#10;  …&#10;};"
+            style="width:100%;box-sizing:border-box;font-family:monospace;font-size:11px;padding:8px;border:1px solid #d1d5db;border-radius:6px;resize:vertical"
+            oninput="loginParseFb()"></textarea>
+          <p id="login-fb-status" style="font-size:12px;min-height:16px;margin:6px 0;color:#16a34a"></p>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+            <input id="login-fb-apiKey" placeholder="API Key *" style="padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:12px">
+            <input id="login-fb-authDomain" placeholder="Auth Domain" style="padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:12px">
+            <input id="login-fb-projectId" placeholder="Project ID *" style="padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:12px">
+            <input id="login-fb-teamId" placeholder="Team ID (e.g. worngundidj)" style="padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:12px">
+          </div>
+          <button onclick="loginSaveFb()" class="btn btn-primary" style="width:100%;padding:10px;font-size:13px;border-radius:6px">
+            Save &amp; Connect
+          </button>
+        </div>
+      </div>
     </div>
   </div>`;
   setTimeout(()=>(document.getElementById('login-email')||document.getElementById('login-user'))?.focus(),100);
