@@ -9100,7 +9100,8 @@ function sanitize(str) {
 })();
 
 // ===== INIT =====
-initApp();
+// Always start at the login screen — initApp() is called by the login flow after auth
+showLoginScreen();
 
 // ===== SERVICE WORKER =====
 if ('serviceWorker' in navigator) {
