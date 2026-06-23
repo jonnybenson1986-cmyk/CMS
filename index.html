@@ -221,7 +221,16 @@
     #sidebar { width: 60px; }
     #sidebar .logo h1, #sidebar .logo p, .nav-item span, .nav-section-label { display: none; }
     #main { margin-left: 60px; }
-    .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+    .grid-3 { grid-template-columns: 1fr; }
+    .grid-2, .grid-4 { grid-template-columns: 1fr 1fr; }
+    .stat-card .value { font-size: 22px; }
+  }
+  @media (max-width: 480px) {
+    #sidebar { width: 48px; }
+    #main { margin-left: 48px; }
+    .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr 1fr; }
+    .stat-card { padding: 10px 12px; }
+    .stat-card .value { font-size: 20px; }
   }
 </style>
 </head>
