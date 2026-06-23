@@ -217,20 +217,102 @@
   .progress-bar { height: 8px; background: var(--bg); border-radius: 4px; overflow: hidden; margin-top: 4px; }
   .progress-fill { height: 100%; border-radius: 4px; background: var(--primary-light); transition: width 0.3s; }
 
-  @media (max-width: 768px) {
-    #sidebar { width: 60px; }
-    #sidebar .logo h1, #sidebar .logo p, .nav-item span, .nav-section-label { display: none; }
-    #main { margin-left: 60px; }
-    .grid-3 { grid-template-columns: 1fr; }
-    .grid-2, .grid-4 { grid-template-columns: 1fr 1fr; }
-    .stat-card .value { font-size: 22px; }
+  /* ── MOBILE: drawer overlay ── */
+  #mob-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 98;
   }
-  @media (max-width: 480px) {
-    #sidebar { width: 48px; }
-    #main { margin-left: 48px; }
-    .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr 1fr; }
+  #mob-overlay.open { display: block; }
+
+  @media (max-width: 768px) {
+    /* Sidebar becomes a slide-in drawer */
+    #sidebar {
+      width: 260px !important;
+      transform: translateX(-100%);
+      transition: transform 0.25s ease;
+      z-index: 99;
+      box-shadow: 4px 0 20px rgba(0,0,0,0.3);
+    }
+    #sidebar.mob-open { transform: translateX(0); }
+
+    /* Main content fills full width */
+    #main { margin-left: 0 !important; padding-bottom: 64px; }
+
+    /* Top bar gets hamburger button */
+    #topbar { padding: 10px 14px; gap: 10px; }
+    #topbar h2 { font-size: 15px; }
+    #mob-menu-btn {
+      display: flex; align-items: center; justify-content: center;
+      width: 40px; height: 40px; background: none; border: none;
+      font-size: 22px; cursor: pointer; color: var(--text); flex-shrink: 0;
+      border-radius: 8px; padding: 0;
+    }
+    #mob-menu-btn:active { background: var(--border); }
+
+    /* Content padding */
+    #content { padding: 14px; }
+
+    /* Grids */
+    .grid-3 { grid-template-columns: 1fr; }
+    .grid-2, .grid-4 { grid-template-columns: 1fr 1fr; gap: 10px; }
+
+    /* Stat cards */
     .stat-card { padding: 10px 12px; }
     .stat-card .value { font-size: 20px; }
+    .stat-card .label { font-size: 10px; }
+
+    /* Cards */
+    .card { padding: 14px; margin-bottom: 12px; }
+    .card-header { flex-wrap: wrap; gap: 8px; }
+
+    /* Tables: horizontal scroll */
+    .table-wrap, table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    table { min-width: 480px; }
+
+    /* Modals: full-screen on mobile */
+    .modal-overlay { padding: 0 !important; align-items: flex-end !important; }
+    .modal {
+      border-radius: 16px 16px 0 0 !important;
+      width: 100% !important;
+      max-width: 100% !important;
+      max-height: 92vh;
+      display: flex; flex-direction: column;
+    }
+    .modal-body { max-height: 70vh !important; }
+    .modal-footer { flex-wrap: wrap; gap: 8px; }
+    .modal-footer .btn { flex: 1; min-width: 120px; justify-content: center; }
+
+    /* Buttons: easier to tap */
+    .btn { min-height: 40px; padding: 8px 14px; font-size: 13px; }
+    .btn-sm { min-height: 34px; }
+
+    /* Forms */
+    input, select, textarea { font-size: 16px !important; } /* prevents iOS auto-zoom */
+
+    /* Hide non-essential topbar actions text on mobile */
+    #topbar .actions .btn span { display: none; }
+
+    /* Bottom navigation bar */
+    #mob-bottomnav {
+      display: flex; position: fixed; bottom: 0; left: 0; right: 0; height: 60px;
+      background: var(--primary); z-index: 97;
+      box-shadow: 0 -2px 12px rgba(0,0,0,0.2);
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+    .mob-tab {
+      flex: 1; display: flex; flex-direction: column; align-items: center;
+      justify-content: center; gap: 2px; cursor: pointer;
+      color: rgba(255,255,255,0.6); font-size: 9px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.3px; border: none;
+      background: none; padding: 4px 2px; -webkit-tap-highlight-color: transparent;
+    }
+    .mob-tab .t-icon { font-size: 20px; line-height: 1; }
+    .mob-tab.active { color: #fff; }
+    .mob-tab.active .t-icon { filter: drop-shadow(0 0 4px rgba(255,255,255,0.4)); }
+    .mob-tab:active { background: rgba(255,255,255,0.1); }
+  }
+
+  @media (min-width: 769px) {
+    #mob-menu-btn, #mob-bottomnav, #mob-overlay { display: none !important; }
   }
 </style>
 </head>
@@ -309,22 +391,45 @@
   </div>
 </nav>
 
+<!-- MOBILE: drawer overlay (tap to close) -->
+<div id="mob-overlay" onclick="closeMobMenu()"></div>
+
 <!-- MAIN -->
 <div id="main">
   <div id="topbar">
+    <button id="mob-menu-btn" onclick="toggleMobMenu()" aria-label="Menu">☰</button>
     <h2 id="page-title">Dashboard</h2>
     <div class="actions">
       <div class="search-bar hidden" id="global-search-wrap">
         <span class="search-icon">🔍</span>
         <input type="text" placeholder="Search everything…" id="global-search" oninput="showSearchResults(this.value)" style="width:220px" onblur="setTimeout(()=>{const d=document.getElementById('search-results-dropdown');if(d)d.innerHTML=''},200)">
       </div>
-      <button class="btn btn-primary" id="top-action-btn" onclick="openNewClientModal()">➕ New Client</button>
+      <button class="btn btn-primary" id="top-action-btn" onclick="openNewClientModal()">➕ <span>New Client</span></button>
     </div>
   </div>
   <div id="content">
     <!-- Pages injected here -->
   </div>
 </div>
+
+<!-- MOBILE BOTTOM NAV -->
+<nav id="mob-bottomnav">
+  <button class="mob-tab active" id="mobtab-dashboard" onclick="showPage('dashboard');setMobTab('dashboard')">
+    <span class="t-icon">📊</span>Dashboard
+  </button>
+  <button class="mob-tab" id="mobtab-clients" onclick="showPage('clients');setMobTab('clients')">
+    <span class="t-icon">👥</span>Clients
+  </button>
+  <button class="mob-tab" id="mobtab-referrals" onclick="showPage('referrals');setMobTab('referrals')">
+    <span class="t-icon">📥</span>Referrals
+  </button>
+  <button class="mob-tab" id="mobtab-sessions" onclick="showPage('sessions');setMobTab('sessions')">
+    <span class="t-icon">⏱️</span>Time
+  </button>
+  <button class="mob-tab" id="mobtab-more" onclick="toggleMobMenu()">
+    <span class="t-icon">☰</span>More
+  </button>
+</nav>
 
 <!-- MODAL CONTAINER -->
 <div id="modal-container"></div>
@@ -686,6 +791,7 @@ let currentPage = 'dashboard';
 
 function showPage(page) {
   currentPage = page;
+  setMobTab(page);
   document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
   const items = document.querySelectorAll('.nav-item');
   const titles = { dashboard:'Dashboard', referrals:'Referral Holding Bay', clients:'Clients', sessions:'Session Log', walkins:'Walk-in Register', sewb:'SEWB Program', aod:'AOD Program', justice:'Justice Program', cultural:'Cultural Strengthening', disability:'Disability Program', reports:'Reports', calendar:'Calendar', auditlog:'Audit Log', settings:'Settings' };
@@ -9271,6 +9377,32 @@ localStorage.removeItem('fb_cfg');
 showLoginScreen();
 // Auto-connect Firebase on load using the built-in config
 FSYNC.init().then(ok => { if (ok) showLoginScreen(); }); // re-render login to switch to Firebase email mode if connected
+
+// ===== MOBILE NAV =====
+function toggleMobMenu() {
+  const sb = document.getElementById('sidebar');
+  const ov = document.getElementById('mob-overlay');
+  const open = sb.classList.toggle('mob-open');
+  ov.classList.toggle('open', open);
+  document.body.style.overflow = open ? 'hidden' : '';
+}
+function closeMobMenu() {
+  document.getElementById('sidebar')?.classList.remove('mob-open');
+  document.getElementById('mob-overlay')?.classList.remove('open');
+  document.body.style.overflow = '';
+}
+function setMobTab(page) {
+  document.querySelectorAll('.mob-tab').forEach(t => t.classList.remove('active'));
+  const el = document.getElementById('mobtab-' + page);
+  if (el) el.classList.add('active');
+}
+
+// Close drawer when a nav item is tapped (mobile)
+document.querySelectorAll('#sidebar .nav-item').forEach(item => {
+  item.addEventListener('click', () => {
+    if (window.innerWidth <= 768) closeMobMenu();
+  });
+});
 
 // ===== SERVICE WORKER =====
 if ('serviceWorker' in navigator) {
