@@ -9275,24 +9275,12 @@ FSYNC.init().then(ok => { if (ok) showLoginScreen(); }); // re-render login to s
 // ===== SERVICE WORKER =====
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./service-worker.js').then(reg => {
-      // When a new SW is waiting, show an update banner
-      const onWaiting = () => {
-        const banner = document.createElement('div');
-        banner.id = 'sw-update-banner';
-        banner.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:#2d6a4f;color:#fff;padding:12px 20px;display:flex;align-items:center;justify-content:space-between;z-index:9999;font-size:14px;font-weight:600;box-shadow:0 -2px 8px rgba(0,0,0,0.2)';
-        banner.innerHTML = `<span>🔄 A new version of the CMS is available</span><button onclick="(()=>{navigator.serviceWorker.controller?.postMessage({type:'SKIP_WAITING'});location.reload();})()" style="background:#fff;color:#2d6a4f;border:none;padding:7px 16px;border-radius:6px;font-weight:700;cursor:pointer;font-size:13px">Update Now</button>`;
-        document.body.appendChild(banner);
-      };
-      if (reg.waiting) onWaiting();
-      reg.addEventListener('updatefound', () => {
-        reg.installing?.addEventListener('statechange', e => {
-          if (e.target.state === 'installed' && navigator.serviceWorker.controller) onWaiting();
-        });
-      });
-      // When new SW takes control, reload automatically
-      navigator.serviceWorker.addEventListener('controllerchange', () => location.reload());
-    }).catch(() => {});
+    navigator.serviceWorker.register('./service-worker.js')
+      .then(() => {
+        // When the new SW takes control (skipWaiting + claim), reload to get fresh page
+        navigator.serviceWorker.addEventListener('controllerchange', () => location.reload());
+      })
+      .catch(() => {});
   });
 }
 </script>
