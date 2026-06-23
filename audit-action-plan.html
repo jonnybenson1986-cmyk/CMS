@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Worn Gundidj CMS — System Audit Action Plan</title>
+<style>
+  @media print {
+    body { margin: 0; }
+    .no-print { display: none; }
+    .page-break { page-break-before: always; }
+    h1, h2, h3 { page-break-after: avoid; }
+    tr, li { page-break-inside: avoid; }
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: Arial, sans-serif;
+    font-size: 13px;
+    color: #1a1a1a;
+    background: #f5f5f5;
+    padding: 20px;
+  }
+
+  .page {
+    background: #fff;
+    max-width: 210mm;
+    margin: 0 auto 30px;
+    padding: 25mm 20mm;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.12);
+  }
+
+  /* HEADER */
+  .header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    border-bottom: 3px solid #2d6a4f;
+    padding-bottom: 14px;
+    margin-bottom: 20px;
+  }
+  .header-left h1 {
+    font-size: 20px;
+    color: #2d6a4f;
+    font-weight: 700;
+    margin-bottom: 3px;
+  }
+  .header-left p {
+    font-size: 12px;
+    color: #555;
+  }
+  .header-right {
+    text-align: right;
+    font-size: 11px;
+    color: #666;
+  }
+  .header-right .date {
+    font-size: 13px;
+    font-weight: 700;
+    color: #2d6a4f;
+  }
+
+  /* SUMMARY BOXES */
+  .summary-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    margin-bottom: 22px;
+  }
+  .summary-box {
+    border-radius: 8px;
+    padding: 12px 14px;
+    text-align: center;
+  }
+  .summary-box .num {
+    font-size: 26px;
+    font-weight: 800;
+    display: block;
+  }
+  .summary-box .lbl {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+  .box-green  { background: #d1fae5; color: #065f46; }
+  .box-orange { background: #fef3c7; color: #92400e; }
+  .box-red    { background: #fee2e2; color: #991b1b; }
+  .box-blue   { background: #dbeafe; color: #1e40af; }
+
+  /* SECTION */
+  .section { margin-bottom: 22px; }
+  .section-title {
+    font-size: 13px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: #fff;
+    background: #2d6a4f;
+    padding: 6px 12px;
+    border-radius: 4px;
+    margin-bottom: 10px;
+  }
+
+  /* TABLE */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  th {
+    background: #f0fdf4;
+    color: #2d6a4f;
+    font-weight: 700;
+    text-align: left;
+    padding: 7px 10px;
+    border: 1px solid #d1fae5;
+    font-size: 11px;
+    text-transform: uppercase;
+  }
+  td {
+    padding: 7px 10px;
+    border: 1px solid #e5e7eb;
+    vertical-align: top;
+    line-height: 1.45;
+  }
+  tr:nth-child(even) td { background: #fafafa; }
+
+  .status-done    { color: #065f46; font-weight: 700; }
+  .status-partial { color: #92400e; font-weight: 700; }
+  .status-todo    { color: #991b1b; font-weight: 700; }
+
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+  .badge-done    { background: #d1fae5; color: #065f46; }
+  .badge-partial { background: #fef3c7; color: #92400e; }
+  .badge-todo    { background: #fee2e2; color: #991b1b; }
+  .badge-high    { background: #fee2e2; color: #991b1b; }
+  .badge-med     { background: #fef3c7; color: #92400e; }
+  .badge-low     { background: #dbeafe; color: #1e40af; }
+
+  /* TODO CHECKLIST */
+  .checklist { list-style: none; }
+  .checklist li {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 8px 10px;
+    border-bottom: 1px solid #f0f0f0;
+    line-height: 1.4;
+  }
+  .checklist li:last-child { border-bottom: none; }
+  .checkbox {
+    width: 16px;
+    height: 16px;
+    border: 2px solid #2d6a4f;
+    border-radius: 3px;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+  .checkbox.checked {
+    background: #2d6a4f;
+    position: relative;
+  }
+  .checkbox.checked::after {
+    content: '✓';
+    color: #fff;
+    font-size: 11px;
+    position: absolute;
+    top: -1px;
+    left: 2px;
+  }
+  .item-text { flex: 1; }
+  .item-text strong { display: block; font-size: 12px; }
+  .item-text span { font-size: 11px; color: #555; }
+
+  /* FOOTER */
+  .footer {
+    border-top: 1px solid #e5e7eb;
+    margin-top: 20px;
+    padding-top: 10px;
+    font-size: 10px;
+    color: #888;
+    display: flex;
+    justify-content: space-between;
+  }
+
+  /* PRINT BUTTON */
+  .no-print {
+    text-align: center;
+    margin-bottom: 20px;
+  }
+  .print-btn {
+    background: #2d6a4f;
+    color: #fff;
+    border: none;
+    padding: 10px 28px;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .print-btn:hover { background: #1e4d38; }
+</style>
+</head>
+<body>
+
+<div class="no-print">
+  <button class="print-btn" onclick="window.print()">🖨️ Print / Save as PDF</button>
+</div>
+
+<!-- PAGE 1 -->
+<div class="page">
+
+  <div class="header">
+    <div class="header-left">
+      <h1>Worn Gundidj Aboriginal Co-Operative</h1>
+      <p>Client Management System (CMS) — System Audit Action Plan</p>
+    </div>
+    <div class="header-right">
+      <div class="date">June 2026</div>
+      <div>Prepared by: JB</div>
+      <div>Reference: WG_System_Audit_JB</div>
+    </div>
+  </div>
+
+  <!-- SUMMARY -->
+  <div class="summary-row">
+    <div class="summary-box box-green">
+      <span class="num">9</span>
+      <span class="lbl">Completed</span>
+    </div>
+    <div class="summary-box box-orange">
+      <span class="num">4</span>
+      <span class="lbl">In Progress</span>
+    </div>
+    <div class="summary-box box-red">
+      <span class="num">7</span>
+      <span class="lbl">Still To Do</span>
+    </div>
+    <div class="summary-box box-blue">
+      <span class="num">20</span>
+      <span class="lbl">Total Items</span>
+    </div>
+  </div>
+
+  <!-- IMPROVEMENTS MADE -->
+  <div class="section">
+    <div class="section-title">✅ Improvements Made Since Last Audit</div>
+    <table>
+      <thead>
+        <tr>
+          <th style="width:40%">What Was Done</th>
+          <th style="width:35%">Why It Matters</th>
+          <th style="width:25%">Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>CMS app built as a PWA</strong><br>Installable on iPhone, Android and desktop</td>
+          <td>Staff can use it like a real app without needing an App Store</td>
+          <td><span class="badge badge-done">✅ Done</span></td>
+        </tr>
+        <tr>
+          <td><strong>Client records management</strong><br>Add, edit, view client profiles with risk flags</td>
+          <td>Replaces paper files and spreadsheets</td>
+          <td><span class="badge badge-done">✅ Done</span></td>
+        </tr>
+        <tr>
+          <td><strong>Case notes system</strong><br>Log notes per client with date/worker/category</td>
+          <td>Complete case history in one place</td>
+          <td><span class="badge badge-done">✅ Done</span></td>
+        </tr>
+        <tr>
+          <td><strong>Time logging</strong><br>Track hours spent per client and worker</td>
+          <td>Supports funding body reporting requirements</td>
+          <td><span class="badge badge-done">✅ Done</span></td>
+        </tr>
+        <tr>
+          <td><strong>SEWB domains tracking</strong><br>Social &amp; Emotional Wellbeing across 9 domains</td>
+          <td>Culturally appropriate framework for client support</td>
+          <td><span class="badge badge-done">✅ Done</span></td>
+        </tr>
+        <tr>
+          <td><strong>Australian Privacy Principles (APP 1–13)</strong><br>Full privacy policy added to the app</td>
+          <td>Legal compliance under the Privacy Act 1988</td>
+          <td><span class="badge badge-done">✅ Done</span></td>
+        </tr>
+        <tr>
+          <td><strong>Security headers (CSP, X-Frame etc.)</strong><br>Configured in Netlify hosting</td>
+          <td>Protects against clickjacking and data injection attacks</td>
+          <td><span class="badge badge-done">✅ Done</span></td>
+        </tr>
+        <tr>
+          <td><strong>Mobile responsive layout</strong><br>Dashboard displays correctly in portrait on phones</td>
+          <td>Staff can use the app on their phone in the field</td>
+          <td><span class="badge badge-done">✅ Done</span></td>
+        </tr>
+        <tr>
+          <td><strong>Firebase cloud sync wiring</strong><br>Settings panel to connect Firebase and sync data</td>
+          <td>All staff share the same live client records</td>
+          <td><span class="badge badge-partial">⚠️ In Progress</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="footer">
+    <span>Worn Gundidj Aboriginal Co-Operative — CONFIDENTIAL</span>
+    <span>Page 1 of 2</span>
+  </div>
+</div>
+
+<!-- PAGE 2 -->
+<div class="page page-break">
+
+  <div class="header">
+    <div class="header-left">
+      <h1>Worn Gundidj CMS — Action Plan</h1>
+      <p>Outstanding items and next steps</p>
+    </div>
+    <div class="header-right">
+      <div class="date">June 2026</div>
+    </div>
+  </div>
+
+  <!-- TO DO LIST -->
+  <div class="section">
+    <div class="section-title">📋 To-Do List — What Still Needs to Be Done</div>
+    <ul class="checklist">
+
+      <li>
+        <div class="checkbox"></div>
+        <div class="item-text">
+          <strong>Fix Firebase cloud sync connection <span class="badge badge-high">HIGH</span></strong>
+          <span>Go to Firebase Console → cms-wgac-317ce → Authentication → Sign-in method → Enable Anonymous and Email/Password. Then paste config in Settings → Cloud Sync and click Connect.</span>
+        </div>
+      </li>
+
+      <li>
+        <div class="checkbox"></div>
+        <div class="item-text">
+          <strong>Create staff accounts in Firebase <span class="badge badge-high">HIGH</span></strong>
+          <span>In Firebase Console → Authentication → Users → Add user for each staff member (name + email + password). Then they can log in to the CMS with their email.</span>
+        </div>
+      </li>
+
+      <li>
+        <div class="checkbox"></div>
+        <div class="item-text">
+          <strong>Create Firestore database <span class="badge badge-high">HIGH</span></strong>
+          <span>In Firebase Console → Firestore Database → Create database → Start in production mode → Choose a region close to Australia (australia-southeast1).</span>
+        </div>
+      </li>
+
+      <li>
+        <div class="checkbox"></div>
+        <div class="item-text">
+          <strong>Test sync across two devices <span class="badge badge-high">HIGH</span></strong>
+          <span>Once Firebase is connected, add a client on one device and check it appears on another. This confirms real-time sync is working.</span>
+        </div>
+      </li>
+
+      <li>
+        <div class="checkbox"></div>
+        <div class="item-text">
+          <strong>Enter existing client records into the CMS <span class="badge badge-med">MEDIUM</span></strong>
+          <span>Transfer active client information from paper files or spreadsheets into the CMS client profiles. Prioritise active/high-risk clients first.</span>
+        </div>
+      </li>
+
+      <li>
+        <div class="checkbox"></div>
+        <div class="item-text">
+          <strong>Train all staff on how to use the app <span class="badge badge-med">MEDIUM</span></strong>
+          <span>Run a 30-minute walkthrough: logging in, adding a client, writing a case note, logging time. Each staff member should install the app on their phone.</span>
+        </div>
+      </li>
+
+      <li>
+        <div class="checkbox"></div>
+        <div class="item-text">
+          <strong>Install the app on all staff phones <span class="badge badge-med">MEDIUM</span></strong>
+          <span>iPhone: Open the site in Safari → Share button → Add to Home Screen. Android: Open in Chrome → three-dot menu → Add to Home Screen.</span>
+        </div>
+      </li>
+
+      <li>
+        <div class="checkbox"></div>
+        <div class="item-text">
+          <strong>Set up Firestore security rules <span class="badge badge-med">MEDIUM</span></strong>
+          <span>In Firebase Console → Firestore → Rules — restrict read/write so only authenticated staff (not the public) can access client data. This is a legal requirement under the Privacy Act.</span>
+        </div>
+      </li>
+
+      <li>
+        <div class="checkbox"></div>
+        <div class="item-text">
+          <strong>Confirm data backup process <span class="badge badge-med">MEDIUM</span></strong>
+          <span>Firebase automatically backs up data, but a process should be documented. Decide how often data is exported (e.g. monthly) and who is responsible.</span>
+        </div>
+      </li>
+
+      <li>
+        <div class="checkbox"></div>
+        <div class="item-text">
+          <strong>Review what client information is collected <span class="badge badge-med">MEDIUM</span></strong>
+          <span>Under APP 3 (collection), only collect what is needed. Review each field in the client form and remove or make optional anything not required for service delivery.</span>
+        </div>
+      </li>
+
+      <li>
+        <div class="checkbox"></div>
+        <div class="item-text">
+          <strong>Document who has access to the system <span class="badge badge-low">LOW</span></strong>
+          <span>Maintain a register of staff who have CMS access. Remove access promptly when staff leave. Review quarterly.</span>
+        </div>
+      </li>
+
+    </ul>
+  </div>
+
+  <!-- IN PROGRESS -->
+  <div class="section">
+    <div class="section-title">⚠️ Currently In Progress</div>
+    <table>
+      <thead>
+        <tr>
+          <th style="width:45%">Item</th>
+          <th style="width:35%">Current Status</th>
+          <th style="width:20%">Priority</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Firebase SDK loading fix</strong></td>
+          <td>Code deployed — waiting for browser cache to update on user devices</td>
+          <td><span class="badge badge-high">HIGH</span></td>
+        </tr>
+        <tr>
+          <td><strong>Mobile portrait layout</strong></td>
+          <td>Dashboard 2×2 grid fix deployed — verify on phone after next refresh</td>
+          <td><span class="badge badge-med">MEDIUM</span></td>
+        </tr>
+        <tr>
+          <td><strong>Firebase email/password login</strong></td>
+          <td>Code ready — requires Firebase Auth to be enabled first</td>
+          <td><span class="badge badge-high">HIGH</span></td>
+        </tr>
+        <tr>
+          <td><strong>Real-time data sync across staff</strong></td>
+          <td>Firestore listeners coded — requires database to be created in Firebase</td>
+          <td><span class="badge badge-high">HIGH</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- NOTES -->
+  <div class="section">
+    <div class="section-title">📝 Notes</div>
+    <table>
+      <tbody>
+        <tr>
+          <td style="width:30%"><strong>Firebase Project</strong></td>
+          <td>cms-wgac-317ce (new project — use this one, not worn-gundidj-cms)</td>
+        </tr>
+        <tr>
+          <td><strong>CMS Website</strong></td>
+          <td>candid-trifle-167698.netlify.app</td>
+        </tr>
+        <tr>
+          <td><strong>Next Review</strong></td>
+          <td>September 2026 — check all to-do items above are completed</td>
+        </tr>
+        <tr>
+          <td><strong>Privacy Officer</strong></td>
+          <td>Nominate a staff member responsible for privacy compliance (required under APP 1)</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="footer">
+    <span>Worn Gundidj Aboriginal Co-Operative — CONFIDENTIAL — Not for distribution</span>
+    <span>Page 2 of 2</span>
+  </div>
+
+</div>
+
+</body>
+</html>
