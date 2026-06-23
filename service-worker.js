@@ -1,11 +1,8 @@
-const CACHE_NAME = 'wg-cms-v10';
+const CACHE_NAME = 'wg-cms-v11';
 
 self.addEventListener('install', e => {
-  // Don't skipWaiting automatically — let the update banner trigger it
-});
-
-self.addEventListener('message', e => {
-  if (e.data?.type === 'SKIP_WAITING') self.skipWaiting();
+  // Take control immediately — don't wait for old SW to finish
+  self.skipWaiting();
 });
 
 self.addEventListener('activate', e => {
@@ -14,6 +11,7 @@ self.addEventListener('activate', e => {
       Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
     )
   );
+  // Take control of all open tabs immediately
   self.clients.claim();
 });
 
@@ -22,13 +20,13 @@ self.addEventListener('fetch', e => {
   const isNavigation = e.request.mode === 'navigate';
   const isSameOrigin = url.origin === self.location.origin;
 
-  // External requests (Firebase CDN etc.) — always fetch directly
+  // External requests (Firebase CDN etc.) — always fetch directly, never cache
   if (!isSameOrigin) {
     e.respondWith(fetch(e.request));
     return;
   }
 
-  // index.html — always network-first so users always get the latest version
+  // index.html and navigations — always network-first so updates are instant
   if (isNavigation || url.pathname === '/' || url.pathname.endsWith('index.html')) {
     e.respondWith(
       fetch(e.request).catch(() => caches.match('./index.html'))
@@ -36,7 +34,13 @@ self.addEventListener('fetch', e => {
     return;
   }
 
-  // Other same-origin assets — cache first, then network
+  // service-worker.js itself — always network
+  if (url.pathname.endsWith('service-worker.js')) {
+    e.respondWith(fetch(e.request));
+    return;
+  }
+
+  // Other same-origin assets — cache first, network fallback
   e.respondWith(
     caches.match(e.request).then(cached => {
       if (cached) return cached;
