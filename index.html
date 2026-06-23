@@ -336,7 +336,18 @@ const DB = {
 const FSYNC = (() => {
   let db = null, teamId = null, _listeners = [];
 
-  function getCfg()   { try { return JSON.parse(localStorage.getItem('fb_cfg')||'null'); } catch { return null; } }
+  const _DEFAULT_CFG = {
+    apiKey: "AIzaSyBGkVnW8m4QpOkuwW5tAwcun4AzXsQ4sQU",
+    authDomain: "cms-wgac-317ce.firebaseapp.com",
+    databaseURL: "https://cms-wgac-317ce-default-rtdb.firebaseio.com",
+    projectId: "cms-wgac-317ce",
+    storageBucket: "cms-wgac-317ce.firebasestorage.app",
+    messagingSenderId: "793869275670",
+    appId: "1:793869275670:web:1c275cbda5472b5396db37",
+    measurementId: "G-4PDG6DJN0N",
+    teamId: "worngundidj",
+  };
+  function getCfg()   { try { return JSON.parse(localStorage.getItem('fb_cfg')||'null') || _DEFAULT_CFG; } catch { return _DEFAULT_CFG; } }
   function saveCfg(c) { localStorage.setItem('fb_cfg', JSON.stringify(c)); }
   function isReady()  { return !!db; }
   function col(name)  { return db.collection('teams').doc(teamId).collection(name); }
@@ -9214,6 +9225,8 @@ function sanitize(str) {
 // ===== INIT =====
 // Always start at the login screen — initApp() is called by the login flow after auth
 showLoginScreen();
+// Auto-connect Firebase on load using the built-in config
+FSYNC.init().then(ok => { if (ok) showLoginScreen(); }); // re-render login to switch to Firebase email mode if connected
 
 // ===== SERVICE WORKER =====
 if ('serviceWorker' in navigator) {
