@@ -346,17 +346,19 @@ const FSYNC = (() => {
   let db = null, teamId = null, _listeners = [];
 
   const _DEFAULT_CFG = {
-    apiKey: "AIzaSyB5llVjMjy0AOp9w5UlKW3FltUi8XUZj40",
-    authDomain: "worn-gundidj-cms.firebaseapp.com",
-    projectId: "worn-gundidj-cms",
-    storageBucket: "worn-gundidj-cms.firebasestorage.app",
-    messagingSenderId: "1058581942911",
-    appId: "1:1058581942911:web:6769b34a10ccf95ea9a54a",
-    measurementId: "G-G86N7M8GHC",
+    apiKey: "AIzaSyBGkVnW8m4QpOkuwW5tAwcun4AzXsQ4sQU",
+    authDomain: "cms-wgac-317ce.firebaseapp.com",
+    databaseURL: "https://cms-wgac-317ce-default-rtdb.firebaseio.com",
+    projectId: "cms-wgac-317ce",
+    storageBucket: "cms-wgac-317ce.firebasestorage.app",
+    messagingSenderId: "793869275670",
+    appId: "1:793869275670:web:1c275cbda5472b5396db37",
+    measurementId: "G-4PDG6DJN0N",
     teamId: "worngundidj",
   };
-  function getCfg()   { try { return JSON.parse(localStorage.getItem('fb_cfg')||'null') || _DEFAULT_CFG; } catch { return _DEFAULT_CFG; } }
-  function saveCfg(c) { localStorage.setItem('fb_cfg', JSON.stringify(c)); }
+  // Always use the built-in config — ignore any old config saved in localStorage
+  function getCfg()   { return _DEFAULT_CFG; }
+  function saveCfg(c) { /* config is hardcoded — no-op */ }
   function isReady()  { return !!db; }
   function col(name)  { return db.collection('teams').doc(teamId).collection(name); }
 
@@ -9263,6 +9265,8 @@ function sanitize(str) {
 })();
 
 // ===== INIT =====
+// Clear any old Firebase config saved in localStorage so the hardcoded config always wins
+localStorage.removeItem('fb_cfg');
 // Always start at the login screen — initApp() is called by the login flow after auth
 showLoginScreen();
 // Auto-connect Firebase on load using the built-in config
