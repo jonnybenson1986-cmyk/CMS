@@ -399,7 +399,8 @@ const FSYNC = (() => {
           await firebase.auth().signInAnonymously();
           _log.push('Anon sign-in ✓');
         } catch(e) {
-          _log.push('Anon sign-in FAILED: ' + e.message);
+          // Anon auth failure is non-fatal — Firestore may still work if security rules allow
+          _log.push('Anon sign-in skipped: ' + e.message);
           console.warn('Anon auth:', e.message);
         }
       } else {
@@ -415,9 +416,24 @@ const FSYNC = (() => {
       _log.push('ERROR: ' + e.message);
       console.warn('Firebase init failed. Steps:', _log.join(' → '));
       _showSyncBadge(false, e.message);
-      // Surface the step-by-step log in the UI for diagnosis
+      // Give plain-English guidance based on error type
+      const msg = e.message || '';
+      let guidance = '';
+      if (msg.includes('SDK not loaded')) {
+        guidance = '⚠️ Could not load Firebase. Check your internet connection and refresh the page.';
+      } else if (msg.includes('auth/operation-not-allowed') || msg.includes('OPERATION_NOT_ALLOWED')) {
+        guidance = '⚠️ <strong>Anonymous sign-in is not enabled.</strong> Go to <a href="https://console.firebase.google.com" target="_blank">Firebase Console</a> → your project → Authentication → Sign-in method → Anonymous → Enable it.';
+      } else if (msg.includes('NOT_FOUND') || msg.includes('not-found') || msg.includes('does not exist')) {
+        guidance = '⚠️ <strong>Firestore database not created yet.</strong> Go to <a href="https://console.firebase.google.com" target="_blank">Firebase Console</a> → your project → Firestore Database → Create database → Start in production mode → Choose <strong>australia-southeast1</strong> region.';
+      } else if (msg.includes('permission-denied') || msg.includes('PERMISSION_DENIED')) {
+        guidance = '⚠️ <strong>Permission denied.</strong> Firestore security rules are blocking access. Go to Firebase Console → Firestore → Rules and allow authenticated users to read/write.';
+      } else if (msg.includes('invalid-api-key') || msg.includes('API_KEY')) {
+        guidance = '⚠️ <strong>Invalid API Key.</strong> Check your Firebase config — the API Key may be incorrect. Edit Config and re-paste your Firebase settings.';
+      } else {
+        guidance = `⚠️ Connection failed: ${msg}`;
+      }
       const detail = document.getElementById('sync-detail-status');
-      if (detail) detail.innerHTML = `<span style="color:#dc2626">❌ Failed at: <strong>${_log[_log.length-1]}</strong></span><br><small style="color:#6b7280">${_log.join(' → ')}</small>`;
+      if (detail) detail.innerHTML = `<div style="color:#dc2626;margin-bottom:6px">❌ Failed at step: <strong>${_log[_log.length-1]}</strong></div><div style="font-size:12px;color:#374151;line-height:1.6">${guidance}</div><details style="margin-top:6px"><summary style="font-size:11px;color:#6b7280;cursor:pointer">Technical detail</summary><small style="color:#9ca3af">${_log.join(' → ')}</small></details>`;
       return false;
     }
   }
@@ -8542,8 +8558,7 @@ async function inlineConnectFb() {
   const ok = await FSYNC.init();
   if (ok) { showToast('☁️ Firebase connected!'); showPage('settings'); }
   else {
-    const msg = 'Could not connect — ensure Anonymous Auth is enabled in Firebase Console → Authentication → Sign-in method, then try again.';
-    if (st) { st.textContent = '⚠️ ' + msg; st.style.color = '#dc2626'; }
+    if (st) { st.innerHTML = '⚠️ Check the error detail above — it will tell you exactly what to fix in Firebase Console.'; st.style.color = '#dc2626'; }
   }
 }
 
@@ -9257,7 +9272,24 @@ FSYNC.init().then(ok => { if (ok) showLoginScreen(); }); // re-render login to s
 // ===== SERVICE WORKER =====
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./service-worker.js').catch(() => {});
+    navigator.serviceWorker.register('./service-worker.js').then(reg => {
+      // When a new SW is waiting, show an update banner
+      const onWaiting = () => {
+        const banner = document.createElement('div');
+        banner.id = 'sw-update-banner';
+        banner.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:#2d6a4f;color:#fff;padding:12px 20px;display:flex;align-items:center;justify-content:space-between;z-index:9999;font-size:14px;font-weight:600;box-shadow:0 -2px 8px rgba(0,0,0,0.2)';
+        banner.innerHTML = `<span>🔄 A new version of the CMS is available</span><button onclick="(()=>{navigator.serviceWorker.controller?.postMessage({type:'SKIP_WAITING'});location.reload();})()" style="background:#fff;color:#2d6a4f;border:none;padding:7px 16px;border-radius:6px;font-weight:700;cursor:pointer;font-size:13px">Update Now</button>`;
+        document.body.appendChild(banner);
+      };
+      if (reg.waiting) onWaiting();
+      reg.addEventListener('updatefound', () => {
+        reg.installing?.addEventListener('statechange', e => {
+          if (e.target.state === 'installed' && navigator.serviceWorker.controller) onWaiting();
+        });
+      });
+      // When new SW takes control, reload automatically
+      navigator.serviceWorker.addEventListener('controllerchange', () => location.reload());
+    }).catch(() => {});
   });
 }
 </script>

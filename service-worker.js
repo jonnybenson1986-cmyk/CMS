@@ -1,7 +1,11 @@
-const CACHE_NAME = 'wg-cms-v9';
+const CACHE_NAME = 'wg-cms-v10';
 
 self.addEventListener('install', e => {
-  self.skipWaiting();
+  // Don't skipWaiting automatically — let the update banner trigger it
+});
+
+self.addEventListener('message', e => {
+  if (e.data?.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('activate', e => {
