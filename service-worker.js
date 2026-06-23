@@ -1,14 +1,11 @@
-const CACHE_NAME = 'wg-cms-v8';
-const ASSETS = [
-  './',
-  './index.html',
-];
+const CACHE_NAME = 'wg-cms-v10';
 
 self.addEventListener('install', e => {
-  e.waitUntil(
-    caches.open(CACHE_NAME).then(cache => cache.addAll(ASSETS))
-  );
-  self.skipWaiting();
+  // Don't skipWaiting automatically — let the update banner trigger it
+});
+
+self.addEventListener('message', e => {
+  if (e.data?.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('activate', e => {
@@ -21,23 +18,32 @@ self.addEventListener('activate', e => {
 });
 
 self.addEventListener('fetch', e => {
-  // Only intercept same-origin navigation requests — let external scripts (Firebase CDN etc.) pass through directly
   const url = new URL(e.request.url);
   const isNavigation = e.request.mode === 'navigate';
   const isSameOrigin = url.origin === self.location.origin;
 
+  // External requests (Firebase CDN etc.) — always fetch directly
   if (!isSameOrigin) {
-    // External request (Firebase, ipify, etc.) — fetch directly, no cache fallback
     e.respondWith(fetch(e.request));
     return;
   }
 
+  // index.html — always network-first so users always get the latest version
+  if (isNavigation || url.pathname === '/' || url.pathname.endsWith('index.html')) {
+    e.respondWith(
+      fetch(e.request).catch(() => caches.match('./index.html'))
+    );
+    return;
+  }
+
+  // Other same-origin assets — cache first, then network
   e.respondWith(
     caches.match(e.request).then(cached => {
       if (cached) return cached;
-      return fetch(e.request).catch(() => {
-        // Only fall back to index.html for page navigations, not assets
-        if (isNavigation) return caches.match('./index.html');
+      return fetch(e.request).then(resp => {
+        const clone = resp.clone();
+        caches.open(CACHE_NAME).then(c => c.put(e.request, clone));
+        return resp;
       });
     })
   );
