@@ -7596,6 +7596,28 @@ function renderSettings() {
     `}
   </div>
 
+  <!-- PRIVACY POLICY CARD -->
+  <div class="card" style="border-left:4px solid #7c3aed">
+    <div class="card-header">
+      <div class="card-title">🔒 Privacy &amp; Compliance (Australian Privacy Principles)</div>
+      <button class="btn btn-sm btn-primary" onclick="showPrivacyPolicy()">View Privacy Policy</button>
+    </div>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:10px">
+      This system handles sensitive personal information and is subject to the <em>Privacy Act 1988</em> (Cth) and all 13 Australian Privacy Principles.
+    </p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px">
+      <div style="background:#f0fdf4;border-radius:6px;padding:10px"><strong>✅ APP 1</strong> — Privacy policy available</div>
+      <div style="background:#f0fdf4;border-radius:6px;padding:10px"><strong>✅ APP 3</strong> — Collect only what's necessary</div>
+      <div style="background:#f0fdf4;border-radius:6px;padding:10px"><strong>✅ APP 6</strong> — No secondary use without consent</div>
+      <div style="background:#f0fdf4;border-radius:6px;padding:10px"><strong>✅ APP 11</strong> — Role-based access &amp; audit log</div>
+      <div style="background:${FSYNC.isReady()?'#fef9ec':'#f0fdf4'};border-radius:6px;padding:10px"><strong>${FSYNC.isReady()?'⚠️':'✅'} APP 8</strong> — ${FSYNC.isReady()?'Cloud Sync sends data to USA (Google Firebase) — disclosed in privacy policy':'No overseas disclosure (local only)'}</div>
+      <div style="background:#f0fdf4;border-radius:6px;padding:10px"><strong>✅ APP 12/13</strong> — Data access &amp; correction on request</div>
+    </div>
+    ${FSYNC.isReady()?`<p style="font-size:11px;color:#92400e;background:#fef3c7;border-radius:6px;padding:8px 12px;margin-top:10px">
+      <strong>Cross-border disclosure (APP 8):</strong> Cloud Sync is enabled. Personal information is stored on Google Firebase servers in the USA. This is disclosed in the Privacy Policy available on the login screen.
+    </p>`:''}
+  </div>
+
   <!-- OUTLOOK SYNC CARD -->
   <div class="card" style="border-left:4px solid #0078d4">
     <div class="card-header">
@@ -8375,6 +8397,59 @@ function checkLogin() {
   return true;
 }
 
+function showPrivacyPolicy() {
+  showModal('🔒 Privacy Policy — Worn Gundidj Aboriginal Co-Operative', `
+    <div style="font-size:13px;line-height:1.8;color:#374151;max-height:70vh;overflow-y:auto;padding-right:8px">
+      <p style="background:#fef3c7;border:1px solid #fde68a;border-radius:6px;padding:10px 14px;margin-bottom:16px;font-size:12px">
+        This policy is made available free of charge in compliance with <strong>Australian Privacy Principle 1.5</strong>.
+        Last updated: ${new Date().toLocaleDateString('en-AU',{day:'numeric',month:'long',year:'numeric'})}.
+      </p>
+
+      <h3 style="color:var(--primary);margin:16px 0 6px">1. About This Policy (APP 1)</h3>
+      <p>Worn Gundidj Aboriginal Co-Operative Ltd ("Worn Gundidj", "we", "us") is committed to managing personal information in an open and transparent way in accordance with the <em>Privacy Act 1988</em> (Cth) and the Australian Privacy Principles (APPs).</p>
+
+      <h3 style="color:var(--primary);margin:16px 0 6px">2. What Information We Collect (APP 3 &amp; 5)</h3>
+      <p>We collect personal information necessary to provide social and emotional wellbeing, AOD, justice, disability, cultural strengthening, and FPHO services, including:</p>
+      <ul style="margin:8px 0 8px 20px">
+        <li>Full name, date of birth, gender, contact details</li>
+        <li>Cultural background and language</li>
+        <li>Health, disability, and wellbeing information (sensitive information)</li>
+        <li>Case notes, referrals, and service records</li>
+        <li>Staff login credentials and audit logs</li>
+        <li>Device IP address (for security audit purposes)</li>
+      </ul>
+      <p>Sensitive information (health, cultural, disability) is only collected with the individual's consent and where reasonably necessary for service delivery.</p>
+
+      <h3 style="color:var(--primary);margin:16px 0 6px">3. How We Collect Information (APP 3.5 &amp; 3.6)</h3>
+      <p>Information is collected directly from individuals or, where impracticable, from referral sources, family members, or other service providers with the individual's consent. All collection is by lawful and fair means.</p>
+
+      <h3 style="color:var(--primary);margin:16px 0 6px">4. Purpose of Collection (APP 6)</h3>
+      <p>Personal information is used solely to deliver and coordinate services, maintain case records, meet reporting obligations to funding bodies, and ensure staff accountability through audit logs. Information will not be used for direct marketing.</p>
+
+      <h3 style="color:var(--primary);margin:16px 0 6px">5. Storage &amp; Security (APP 11)</h3>
+      <p>Data is stored in your browser's local storage and, when Cloud Sync is enabled, in <strong>Google Firebase Firestore</strong> (Google LLC, USA). We take reasonable steps to protect information from misuse, loss, and unauthorised access through role-based access controls, session timeouts, and audit logging.</p>
+
+      <h3 style="color:var(--primary);margin:16px 0 6px">6. Overseas Disclosure (APP 8)</h3>
+      <p style="background:#fef9ec;border-left:3px solid #f59e0b;padding:8px 12px;border-radius:4px">
+        <strong>⚠️ When Cloud Sync is enabled</strong>, personal information is transmitted to and stored on Google Firebase servers located in the <strong>United States of America</strong>. Google LLC is subject to US law including the Cloud Act. By enabling Cloud Sync, you acknowledge this cross-border disclosure. Google's privacy protections are described at <em>policies.google.com/privacy</em>.
+      </p>
+
+      <h3 style="color:var(--primary);margin:16px 0 6px">7. Access &amp; Correction (APP 12 &amp; 13)</h3>
+      <p>Individuals have the right to access personal information held about them and to request corrections. Requests should be directed to the System Manager. We will respond within 30 days. Access may be refused on limited grounds set out in APP 12.3.</p>
+
+      <h3 style="color:var(--primary);margin:16px 0 6px">8. Complaints (APP 1.2)</h3>
+      <p>Complaints about handling of personal information can be directed to the System Manager in the first instance. If unresolved, complaints may be made to the <strong>Office of the Australian Information Commissioner (OAIC)</strong> at <em>oaic.gov.au</em> or by phone on 1300 363 992.</p>
+
+      <h3 style="color:var(--primary);margin:16px 0 6px">9. Data Retention (APP 11.2)</h3>
+      <p>Personal information is retained for as long as required to deliver services and meet legal obligations. When no longer required, information is destroyed or de-identified.</p>
+
+      <h3 style="color:var(--primary);margin:16px 0 6px">10. Contact</h3>
+      <p>Worn Gundidj Aboriginal Co-Operative Ltd<br>
+      For privacy enquiries contact the System Manager via the CMS or at the organisation's registered address.</p>
+    </div>
+  `, null, '680px');
+}
+
 async function checkFbConnection() {
   const badge  = document.getElementById('sync-status-badge');
   const detail = document.getElementById('sync-detail-status');
@@ -8474,18 +8549,22 @@ function loginSaveFb() {
 }
 
 function showLoginScreen() {
-  const hasFb = false; // Always use dropdown login — Firebase syncs in the background
+  const fbReady = FSYNC.isReady();
+  const hasFbCfg = !!FSYNC.getCfg()?.apiKey;
+  // Use Firebase email/password login when Firebase is connected, otherwise dropdown
+  const useFirebase = fbReady;
   document.getElementById('sidebar').style.display='none';
   document.getElementById('main').style.marginLeft='0';
   document.getElementById('main').innerHTML = `
   <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--primary);padding:20px">
     <div style="background:#fff;border-radius:16px;padding:40px;width:100%;max-width:420px;box-shadow:0 20px 60px rgba(0,0,0,0.3)">
-      <div style="text-align:center;margin-bottom:28px">
+      <div style="text-align:center;margin-bottom:24px">
         <img src="${document.querySelector('#sidebar img')?.src||''}" alt="WG" style="height:60px;margin-bottom:12px">
         <h1 style="font-size:20px;font-weight:700;color:var(--primary)">Worn Gundidj CMS</h1>
-        <p style="font-size:13px;color:#6b7280;margin-top:4px">${hasFb ? 'Sign in with your staff account' : 'Select your name to sign in'}</p>
+        <p style="font-size:13px;color:#6b7280;margin-top:4px">${useFirebase ? 'Sign in with your staff account' : 'Select your name to sign in'}</p>
+        ${useFirebase ? '<p style="font-size:11px;background:#d1fae5;color:#065f46;border-radius:6px;padding:4px 10px;margin-top:6px;display:inline-block">☁️ Secure login via Firebase</p>' : ''}
       </div>
-      ${hasFb ? `
+      ${useFirebase ? `
         <div class="form-group" style="margin-bottom:14px">
           <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:5px">Email Address</label>
           <input type="email" id="login-email" placeholder="you@worngundidj.org.au"
@@ -8500,7 +8579,7 @@ function showLoginScreen() {
         </div>
         <button class="btn btn-primary" id="login-btn" style="width:100%;padding:13px;font-size:15px;border-radius:8px" onclick="doLogin()">Sign In →</button>
         <p id="login-error" style="color:#dc2626;font-size:13px;text-align:center;margin-top:12px;min-height:18px"></p>
-        <p style="font-size:12px;color:#9ca3af;text-align:center;margin-top:16px">Contact your system manager to create or reset your account</p>
+        <p style="font-size:12px;color:#9ca3af;text-align:center;margin-top:12px">Contact your system manager to create or reset your account</p>
       ` : `
         <div class="form-group" style="margin-bottom:20px">
           <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:8px">Select Your Name</label>
@@ -8522,17 +8601,57 @@ function showLoginScreen() {
         </div>
         <button class="btn btn-primary" id="login-btn" style="width:100%;padding:13px;font-size:15px;border-radius:8px" onclick="doLogin()">Sign In →</button>
         <p id="login-error" style="color:#dc2626;font-size:13px;text-align:center;margin-top:12px;min-height:18px"></p>
-        <p style="font-size:12px;color:#9ca3af;text-align:center;margin-top:16px">Contact your system manager if your name is not listed</p>
+        <p style="font-size:12px;color:#9ca3af;text-align:center;margin-top:12px">Contact your system manager if your name is not listed</p>
       `}
+      <div style="margin-top:20px;padding-top:16px;border-top:1px solid #f3f4f6;text-align:center">
+        <button onclick="showPrivacyPolicy()" style="background:none;border:none;color:#9ca3af;font-size:11px;cursor:pointer;text-decoration:underline">Privacy Policy (Australian Privacy Principles)</button>
+      </div>
     </div>
   </div>`;
   setTimeout(()=>(document.getElementById('login-email')||document.getElementById('login-user'))?.focus(),100);
 }
 
-function doLogin() {
+async function doLogin() {
   const errEl = document.getElementById('login-error');
+
+  // Firebase email/password login
+  if (FSYNC.isReady() && document.getElementById('login-email')) {
+    const email = document.getElementById('login-email')?.value?.trim();
+    const pass  = document.getElementById('login-pass')?.value;
+    const btn   = document.getElementById('login-btn');
+    if (!email) { errEl.textContent='Please enter your email address'; return; }
+    if (!pass)  { errEl.textContent='Please enter your password'; return; }
+    errEl.textContent=''; btn.disabled=true; btn.textContent='Signing in…';
+    try {
+      const cfg = FSYNC.getCfg();
+      if (!firebase.apps.length) firebase.initializeApp(cfg);
+      const cred = await firebase.auth().signInWithEmailAndPassword(email, pass);
+      // Match Firebase user to local profile or create one
+      let u = userProfiles.find(p=>p.email===email||p.firebaseUid===cred.user.uid);
+      if (!u) {
+        u = { id: cred.user.uid, name: cred.user.displayName||email.split('@')[0], email, role:'worker', firebaseUid: cred.user.uid };
+        userProfiles.push(u); saveUserProfiles();
+      } else {
+        u.firebaseUid = cred.user.uid;
+      }
+      saveCurrentUser(u); _auditLogin(u); initApp();
+    } catch(e) {
+      btn.disabled=false; btn.textContent='Sign In →';
+      const msgs = {
+        'auth/user-not-found':    'No account found with that email.',
+        'auth/wrong-password':    'Incorrect password.',
+        'auth/invalid-email':     'Please enter a valid email address.',
+        'auth/too-many-requests': 'Too many attempts — please wait a few minutes.',
+        'auth/invalid-credential':'Email or password is incorrect.',
+      };
+      errEl.textContent = msgs[e.code] || ('Error: ' + e.message);
+    }
+    return;
+  }
+
+  // Dropdown login (local / no Firebase)
   const val = document.getElementById('login-user')?.value;
-  if(!val){errEl.textContent='Please select your name';return;}
+  if (!val) { errEl.textContent='Please select your name'; return; }
   const presets = {
     '__new_jon':    {name:'Jon Benson',    role:'sysmanager'},
     '__new_jade':   {name:'Jade Atkinson', role:'worker'},
@@ -8546,11 +8665,8 @@ function doLogin() {
     '__new_sean':   {name:'Sean Bloom',    role:'reception'},
   };
   let u = userProfiles.find(p=>p.id===val);
-  if(!u && presets[val]) {
-    u = {id:uid(), ...presets[val]};
-    userProfiles.push(u); saveUserProfiles();
-  }
-  if(!u){errEl.textContent='Worker not found';return;}
+  if (!u && presets[val]) { u={id:uid(),...presets[val]}; userProfiles.push(u); saveUserProfiles(); }
+  if (!u) { errEl.textContent='Worker not found'; return; }
   saveCurrentUser(u); _auditLogin(u); initApp();
 }
 
