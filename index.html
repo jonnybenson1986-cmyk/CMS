@@ -3618,6 +3618,41 @@ function renderReportsPage() {
     </div>
   </div>
 
+  <!-- SECTION: SEWB OFFICIAL FUNDING REPORTS -->
+  <div class="card no-print" style="margin-bottom:20px;border-left:4px solid var(--primary)">
+    <div class="card-header"><div class="card-title">🏛️ SEWB Official Funding Reports</div></div>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:6px">Completed <strong>episodes of care</strong> for SEWB, AOD and Justice clients — for official funding acquittal.</p>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:16px">Episode criteria: <strong>12 weeks</strong> engaged with the program <strong>and</strong> a minimum of <strong>5 client contacts</strong> (program-tagged or general case notes).</p>
+    <div class="grid-3">
+      <div class="report-card" onclick="generateFundingReport('sewb')">
+        <div class="rc-icon">💚</div>
+        <div class="rc-title">SEWB Funding Report</div>
+        <div class="rc-desc">SEWB completed episodes of care — 12 weeks + 5 contacts</div>
+        <span class="rc-badge" style="background:#d1fae5;color:#065f46">${fundingProgramStats('sewb').totalEpisodes} episodes</span>
+      </div>
+      <div class="report-card" onclick="generateFundingReport('aod')">
+        <div class="rc-icon">🔴</div>
+        <div class="rc-title">AOD Funding Report</div>
+        <div class="rc-desc">AOD completed episodes of care — 12 weeks + 5 contacts</div>
+        <span class="rc-badge" style="background:#fee2e2;color:#991b1b">${fundingProgramStats('aod').totalEpisodes} episodes</span>
+      </div>
+      <div class="report-card" onclick="generateFundingReport('justice')">
+        <div class="rc-icon">⚖️</div>
+        <div class="rc-title">Justice Funding Report</div>
+        <div class="rc-desc">Justice completed episodes of care — 12 weeks + 5 contacts</div>
+        <span class="rc-badge" style="background:#dbeafe;color:#1e40af">${fundingProgramStats('justice').totalEpisodes} episodes</span>
+      </div>
+    </div>
+    <div style="margin-top:12px">
+      <div class="report-card" onclick="generateFundingReport('all')" style="border:2px solid var(--primary);background:linear-gradient(135deg,#f0fdf4,#eff6ff)">
+        <div class="rc-icon">🏛️</div>
+        <div class="rc-title" style="color:var(--primary)">All Programs Funding Report</div>
+        <div class="rc-desc">Combined SEWB + AOD + Justice episodes of care for funding acquittal</div>
+        <span class="rc-badge" style="background:var(--primary);color:#fff">${fundingProgramStats('sewb').totalEpisodes+fundingProgramStats('aod').totalEpisodes+fundingProgramStats('justice').totalEpisodes} total episodes</span>
+      </div>
+    </div>
+  </div>
+
   <!-- BULK CLIENT IMPORT -->
   <div class="card no-print" style="margin-bottom:20px" id="bulk-import-card">
     <div class="card-header">
@@ -4504,6 +4539,112 @@ function generateProgramReport(type) {
   else if(type==='activity') openReport(buildActivityReport(from, to));
   else if(type==='risk') openReport(buildRiskRegister());
   else if(type==='goals') openReport(buildGoalsReport());
+}
+
+// ===== EPISODE OF CARE — OFFICIAL FUNDING REPORTS =====
+// A completed "episode of care" = a 12-week (84-day) period of engagement with
+// a program containing a minimum of 5 recorded client contacts. Contacts are
+// case notes tagged to the program OR general. A client may accrue multiple consecutive,
+// non-overlapping episodes; an unfinished window is reported as "in progress".
+const EOC_WEEKS = 12;
+const EOC_MIN_CONTACTS = 5;
+const EOC_DAYS = EOC_WEEKS * 7;
+const FUNDING_PROGRAMS = {
+  sewb:    { label:'SEWB',    badge:'background:#d1fae5;color:#065f46' },
+  aod:     { label:'AOD',     badge:'background:#fee2e2;color:#991b1b' },
+  justice: { label:'Justice', badge:'background:#dbeafe;color:#1e40af' },
+};
+
+// Per-client episode breakdown for one program
+function clientEpisodeStats(clientId, program) {
+  const dates = notes
+    .filter(n => { const t = n.type||'general'; return n.clientId===clientId && (t===program || t==='general') && n.created; })
+    .map(n => new Date(n.created).getTime())
+    .filter(t => !isNaN(t))
+    .sort((a,b)=>a-b);
+  let completeEpisodes = 0, winStart = null, winCount = 0;
+  for (let i=0; i<dates.length; i++) {
+    if (winStart===null) { winStart = dates[i]; winCount = 0; }
+    winCount++;
+    const weeks = (dates[i]-winStart)/(7*86400000);
+    if (weeks >= EOC_WEEKS && winCount >= EOC_MIN_CONTACTS) {
+      completeEpisodes++; winStart = null; winCount = 0;
+    }
+  }
+  // Remaining unfinished window = current in-progress episode
+  let openContacts = 0, openWeeks = 0;
+  if (winStart!==null && winCount>0) {
+    openContacts = winCount;
+    openWeeks = (dates[dates.length-1]-winStart)/(7*86400000);
+  }
+  const firstContact = dates.length ? dates[0] : null;
+  const lastContact  = dates.length ? dates[dates.length-1] : null;
+  const totalWeeks   = (firstContact && lastContact) ? (lastContact-firstContact)/(7*86400000) : 0;
+  return { totalContacts: dates.length, completeEpisodes, openContacts, openWeeks, firstContact, lastContact, totalWeeks };
+}
+
+// Program-level rollup
+function fundingProgramStats(program) {
+  const cl = clients.filter(c=>c[program]);
+  let totalEpisodes=0, clientsWithEpisode=0, totalContacts=0;
+  const rows = cl.map(c=>{
+    const s = clientEpisodeStats(c.id, program);
+    totalEpisodes += s.completeEpisodes;
+    totalContacts += s.totalContacts;
+    if (s.completeEpisodes>0) clientsWithEpisode++;
+    return { client:c, ...s };
+  });
+  return { program, clients:cl, rows, totalEpisodes, clientsWithEpisode, totalContacts };
+}
+
+function generateFundingReport(program) { openReport(buildFundingReport(program)); }
+
+function buildFundingReport(program) {
+  const progs = program==='all' ? ['sewb','aod','justice'] : [program];
+  const title = program==='all'
+    ? 'SEWB Official Funding Report — All Programs'
+    : `${FUNDING_PROGRAMS[program]?.label||program} Official Funding Report`;
+  const allStats = progs.map(p=>fundingProgramStats(p));
+  const grandEpisodes = allStats.reduce((a,s)=>a+s.totalEpisodes,0);
+  const grandClients  = allStats.reduce((a,s)=>a+s.clients.length,0);
+  const grandWithEp   = allStats.reduce((a,s)=>a+s.clientsWithEpisode,0);
+
+  let body = reportHeader(title, `Completed Episodes of Care · Criteria: ${EOC_WEEKS} weeks engaged + minimum ${EOC_MIN_CONTACTS} client contacts`);
+  body += `<div class="stat-row">
+    <div class="stat-box"><div class="sv">${grandEpisodes}</div><div class="sl">Complete Episodes of Care</div></div>
+    <div class="stat-box"><div class="sv">${grandWithEp}</div><div class="sl">Clients with ≥1 Episode</div></div>
+    <div class="stat-box"><div class="sv">${grandClients}</div><div class="sl">Total Program Clients</div></div>
+    <div class="stat-box"><div class="sv">${grandClients?Math.round(grandWithEp/grandClients*100):0}%</div><div class="sl">Completion Rate</div></div>
+  </div>`;
+  body += `<div style="background:#f0f7f3;border:1px solid #cde5d8;border-radius:6px;padding:10px 14px;font-size:11px;margin-bottom:16px;line-height:1.6">
+    <strong>Episode of Care — definition.</strong> A completed episode is a period of <strong>${EOC_WEEKS} weeks (${EOC_DAYS} days)</strong> of engagement with the program containing a minimum of <strong>${EOC_MIN_CONTACTS} recorded client contacts</strong> (case notes tagged to the program <em>or</em> general). A client may accrue multiple consecutive episodes; a window that has not yet reached both thresholds is shown as <em>in&nbsp;progress</em>.
+  </div>`;
+
+  allStats.forEach(s=>{
+    const meta = FUNDING_PROGRAMS[s.program] || { label:s.program };
+    body += `<h2>${meta.label} — ${s.totalEpisodes} Complete Episode${s.totalEpisodes!==1?'s':''} of Care (${s.clients.length} client${s.clients.length!==1?'s':''})</h2>`;
+    body += `<table><tr><th>Client</th><th>First Contact</th><th>Last Contact</th><th>Weeks Engaged</th><th>Contacts</th><th>Complete Episodes</th><th>Current Window</th><th>Status</th></tr>`;
+    const sorted = [...s.rows].sort((a,b)=> b.completeEpisodes-a.completeEpisodes || b.totalContacts-a.totalContacts);
+    body += (sorted.map(r=>{
+      const complete = r.completeEpisodes>0;
+      const openInfo = r.openContacts ? `${r.openContacts}/${EOC_MIN_CONTACTS} contacts · ${r.openWeeks.toFixed(1)}/${EOC_WEEKS} wks` : '—';
+      const statusBadge = complete
+        ? `<span class="badge badge-low">✓ ${r.completeEpisodes} episode${r.completeEpisodes!==1?'s':''}</span>`
+        : `<span class="badge badge-medium">In progress</span>`;
+      return `<tr>
+        <td>${r.client.fullName||'—'}</td>
+        <td>${r.firstContact?fmt(new Date(r.firstContact).toISOString()):'—'}</td>
+        <td>${r.lastContact?fmt(new Date(r.lastContact).toISOString()):'—'}</td>
+        <td>${r.totalWeeks?r.totalWeeks.toFixed(1):'0'}</td>
+        <td>${r.totalContacts}</td>
+        <td style="text-align:center;font-weight:700">${r.completeEpisodes}</td>
+        <td style="font-size:10px">${openInfo}</td>
+        <td>${statusBadge}</td>
+      </tr>`;
+    }).join('')) || `<tr><td colspan="8">No clients in this program</td></tr>`;
+    body += `</table>`;
+  });
+  return body;
 }
 
 function buildDisabilityProgramReport(from, to) {
@@ -6968,7 +7109,7 @@ function renderHomeOwnership() {
           <div class="avatar" style="background:var(--primary);width:38px;height:38px;font-size:14px">${initials(a.primaryFirstName+' '+a.primaryLastName)}</div>
           <div style="flex:1;min-width:160px">
             <div style="font-weight:700;font-size:14px">${a.primaryFirstName||''} ${a.primaryLastName||''}</div>
-            <div style="font-size:12px;color:var(--muted)">${a.purchaseSuburb||'Suburb not specified'} &bull; ${a.coApplicantCount||0} co-applicant(s) &bull; Created ${fmt(a.created)}</div>
+            <div style="font-size:12px;color:var(--muted)">${a.purchaseSuburb||'Suburb not specified'} &bull; ${a.coApplicantCount||0} co-applicant(s) &bull; Created ${fmt(a.created)}${(a.attachments||[]).length?` &bull; 📎 ${a.attachments.length} doc${a.attachments.length!==1?'s':''}`:''}</div>
           </div>
           <span style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:12px;${statusStyle[a.status]||statusStyle.draft}">${(a.status||'draft').toUpperCase()}</span>
           <div style="display:flex;gap:8px">
@@ -6991,6 +7132,9 @@ function openFPHOForm(id) {
   const existing = id ? fphoApplications.find(a=>a.id===id) : null;
   const a = existing || {};
   const coCount = a.coApplicantCount || 0;
+  // Working copy of attachments for this editing session — persisted to the
+  // application record on Save.
+  _fphoAttachments = (a.attachments || []).map(f => ({...f}));
 
   const applicantBlock = (prefix, label, required=true, showAtsi=true) => `
     <div class="coapplicant-block">
@@ -7200,6 +7344,23 @@ function openFPHOForm(id) {
       </div>
     </div>
 
+    <!-- SUPPORTING DOCUMENTS -->
+    <div class="fpho-section-title">Supporting Documents</div>
+    <div class="fpho-field">
+      <label>Attach documents — proof of income, COA forms, pre-approval, ID, etc.</label>
+      <div id="fpho-attach-list" style="display:grid;gap:8px;margin-bottom:10px"></div>
+      <div id="fpho-dropzone" style="border:2px dashed var(--border);border-radius:10px;padding:28px;text-align:center;color:var(--muted);cursor:pointer;transition:all 0.2s"
+        onclick="document.getElementById('fpho-file-input').click()"
+        ondragover="event.preventDefault();this.style.borderColor='var(--primary)';this.style.background='rgba(45,106,79,0.05)'"
+        ondragleave="this.style.borderColor='var(--border)';this.style.background=''"
+        ondrop="fphoHandleDrop(event)">
+        <div style="font-size:28px;margin-bottom:6px">📂</div>
+        <p style="font-size:13px;font-weight:600">Drag &amp; drop files here, or click to browse</p>
+        <p style="font-size:12px;margin-top:4px">Proof of income · COA forms · Pre-approval · ID — PDF, Word, Excel, images</p>
+      </div>
+      <input type="file" id="fpho-file-input" multiple accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.txt,.xlsx,.xls" style="display:none" onchange="fphoHandleFiles(this)">
+    </div>
+
     <!-- WORKER NOTES -->
     <div class="fpho-section-title">Worker Notes</div>
     <div class="fpho-field"><label>Internal notes (not printed on application)</label>
@@ -7282,6 +7443,7 @@ function openFPHOForm(id) {
       decl2: document.getElementById('decl-2')?.checked||false,
       decl3: document.getElementById('decl-3')?.checked||false,
       workerNotes: document.getElementById('fpho-notes')?.value||'',
+      attachments: _fphoAttachments.map(f=>({...f})),
       updatedBy: currentUser?.name||'', updatedAt: now(),
     };
 
@@ -7298,8 +7460,67 @@ function openFPHOForm(id) {
     return true;
   }, '900px');
 
-  // Calculate total income on load
-  setTimeout(()=>fphoCalcTotalIncome(),100);
+  // Calculate total income on load and render any existing attachments
+  setTimeout(()=>{ fphoCalcTotalIncome(); fphoRenderAttachments(); },100);
+}
+
+// ===== FPHO SUPPORTING DOCUMENTS =====
+let _fphoAttachments = [];
+function fphoRenderAttachments() {
+  const box = document.getElementById('fpho-attach-list'); if(!box) return;
+  if(!_fphoAttachments.length) { box.innerHTML=''; return; }
+  box.innerHTML = _fphoAttachments.map((f,i)=>`
+    <div style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid var(--border);border-radius:8px;background:#fafaf8">
+      <div style="font-size:24px">${fileIcon(f.type)}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${sanitize(f.name)}</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">${formatBytes(f.size)} · ${fmt(f.uploadedAt)} · ${sanitize(f.uploadedBy||'—')}</div>
+      </div>
+      <div style="display:flex;gap:6px;flex-shrink:0">
+        ${(f.type==='application/pdf'||(f.type||'').startsWith('image/'))?`<button type="button" class="btn btn-sm btn-outline" onclick="fphoPreviewAttachment(${i})">👁 View</button>`:''}
+        <button type="button" class="btn btn-sm btn-outline" onclick="fphoDownloadAttachment(${i})">⬇</button>
+        <button type="button" class="btn btn-sm btn-danger" onclick="fphoRemoveAttachment(${i})">✕</button>
+      </div>
+    </div>`).join('');
+}
+function fphoHandleFiles(input) {
+  const files = Array.from(input.files); if(!files.length) return;
+  let loaded=0;
+  files.forEach(file=>{
+    const reader=new FileReader();
+    reader.onload=e=>{
+      const totalSize=_fphoAttachments.reduce((a,f)=>a+(f.size||0),0)+file.size;
+      if(totalSize>8*1024*1024){ showToast('⚠️ Storage limit — total attachments must stay under 8 MB'); return; }
+      _fphoAttachments.push({id:uid(),name:file.name,type:file.type,size:file.size,data:e.target.result,uploadedAt:today(),uploadedBy:currentUser?.name||DB.load('workerName','')});
+      loaded++; if(loaded===files.length){ fphoRenderAttachments(); showToast(`${files.length} file${files.length!==1?'s':''} attached`); }
+    };
+    reader.readAsDataURL(file);
+  });
+  input.value='';
+}
+function fphoHandleDrop(event) {
+  event.preventDefault(); event.currentTarget.style.borderColor='var(--border)'; event.currentTarget.style.background='';
+  fphoHandleFiles({files:event.dataTransfer.files});
+}
+function fphoRemoveAttachment(idx) {
+  if(!confirm('Remove this document?')) return;
+  _fphoAttachments.splice(idx,1); fphoRenderAttachments();
+}
+function fphoDownloadAttachment(idx) {
+  const f=_fphoAttachments[idx]; if(!f) return;
+  const a=document.createElement('a'); a.href=f.data; a.download=f.name; a.click();
+}
+function fphoPreviewAttachment(idx) {
+  const f=_fphoAttachments[idx]; if(!f) return;
+  // Open in a new tab rather than a nested modal (which would replace the form).
+  try {
+    const parts=f.data.split(','); const bin=atob(parts[1]); const arr=new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i);
+    const url=URL.createObjectURL(new Blob([arr],{type:f.type||'application/octet-stream'}));
+    window.open(url,'_blank');
+  } catch(e) {
+    const a=document.createElement('a'); a.href=f.data; a.target='_blank'; a.click();
+  }
 }
 
 function fphoCalcTotalIncome() {
