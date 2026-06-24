@@ -7779,11 +7779,11 @@ function renderSettings() {
       <div style="background:#f0fdf4;border-radius:6px;padding:10px"><strong>✅ APP 3</strong> — Collect only what's necessary</div>
       <div style="background:#f0fdf4;border-radius:6px;padding:10px"><strong>✅ APP 6</strong> — No secondary use without consent</div>
       <div style="background:#f0fdf4;border-radius:6px;padding:10px"><strong>✅ APP 11</strong> — Role-based access &amp; audit log</div>
-      <div style="background:${FSYNC.isReady()?'#fef9ec':'#f0fdf4'};border-radius:6px;padding:10px"><strong>${FSYNC.isReady()?'⚠️':'✅'} APP 8</strong> — ${FSYNC.isReady()?'Cloud Sync sends data to USA (Google Firebase) — disclosed in privacy policy':'No overseas disclosure (local only)'}</div>
+      <div style="background:#f0fdf4;border-radius:6px;padding:10px"><strong>✅ APP 8</strong> — ${FSYNC.isReady()?'No overseas disclosure — Cloud Sync data stored in Australia (Sydney)':'No overseas disclosure (local only)'}</div>
       <div style="background:#f0fdf4;border-radius:6px;padding:10px"><strong>✅ APP 12/13</strong> — Data access &amp; correction on request</div>
     </div>
-    ${FSYNC.isReady()?`<p style="font-size:11px;color:#92400e;background:#fef3c7;border-radius:6px;padding:8px 12px;margin-top:10px">
-      <strong>Cross-border disclosure (APP 8):</strong> Cloud Sync is enabled. Personal information is stored on Google Firebase servers in the USA. This is disclosed in the Privacy Policy available on the login screen.
+    ${FSYNC.isReady()?`<p style="font-size:11px;color:#065f46;background:#d1fae5;border-radius:6px;padding:8px 12px;margin-top:10px">
+      <strong>Data location (APP 8):</strong> Cloud Sync is enabled. Personal information is stored on Google Firebase servers located in <strong>Australia (Sydney — australia-southeast1)</strong>, so there is no cross-border disclosure. This is disclosed in the Privacy Policy available on the login screen.
     </p>`:''}
   </div>
 
@@ -8596,11 +8596,11 @@ function showPrivacyPolicy() {
       <p>Personal information is used solely to deliver and coordinate services, maintain case records, meet reporting obligations to funding bodies, and ensure staff accountability through audit logs. Information will not be used for direct marketing.</p>
 
       <h3 style="color:var(--primary);margin:16px 0 6px">5. Storage &amp; Security (APP 11)</h3>
-      <p>Data is stored in your browser's local storage and, when Cloud Sync is enabled, in <strong>Google Firebase Firestore</strong> (Google LLC, USA). We take reasonable steps to protect information from misuse, loss, and unauthorised access through role-based access controls, session timeouts, and audit logging.</p>
+      <p>Data is stored in your browser's local storage and, when Cloud Sync is enabled, in <strong>Google Firebase Firestore</strong> hosted in the <strong>Australia (Sydney) region (australia-southeast1)</strong>. We take reasonable steps to protect information from misuse, loss, and unauthorised access through role-based access controls, session timeouts, and audit logging.</p>
 
       <h3 style="color:var(--primary);margin:16px 0 6px">6. Overseas Disclosure (APP 8)</h3>
-      <p style="background:#fef9ec;border-left:3px solid #f59e0b;padding:8px 12px;border-radius:4px">
-        <strong>⚠️ When Cloud Sync is enabled</strong>, personal information is transmitted to and stored on Google Firebase servers located in the <strong>United States of America</strong>. Google LLC is subject to US law including the Cloud Act. By enabling Cloud Sync, you acknowledge this cross-border disclosure. Google's privacy protections are described at <em>policies.google.com/privacy</em>.
+      <p style="background:#d1fae5;border-left:3px solid #10b981;padding:8px 12px;border-radius:4px">
+        <strong>✅ When Cloud Sync is enabled</strong>, personal information is transmitted to and stored on Google Firebase servers located in <strong>Australia (Sydney region, australia-southeast1)</strong>. Data is not stored overseas, so there is no cross-border disclosure under APP 8. Google's privacy protections are described at <em>policies.google.com/privacy</em>.
       </p>
 
       <h3 style="color:var(--primary);margin:16px 0 6px">7. Access &amp; Correction (APP 12 &amp; 13)</h3>
