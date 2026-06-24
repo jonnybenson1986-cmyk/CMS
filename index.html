@@ -3618,6 +3618,41 @@ function renderReportsPage() {
     </div>
   </div>
 
+  <!-- SECTION: SEWB OFFICIAL FUNDING REPORTS -->
+  <div class="card no-print" style="margin-bottom:20px;border-left:4px solid var(--primary)">
+    <div class="card-header"><div class="card-title">🏛️ SEWB Official Funding Reports</div></div>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:6px">Completed <strong>episodes of care</strong> for SEWB, AOD and Justice clients — for official funding acquittal.</p>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:16px">Episode criteria: <strong>12 weeks</strong> engaged with the program <strong>and</strong> a minimum of <strong>5 client contacts</strong> (program-tagged case notes).</p>
+    <div class="grid-3">
+      <div class="report-card" onclick="generateFundingReport('sewb')">
+        <div class="rc-icon">💚</div>
+        <div class="rc-title">SEWB Funding Report</div>
+        <div class="rc-desc">SEWB completed episodes of care — 12 weeks + 5 contacts</div>
+        <span class="rc-badge" style="background:#d1fae5;color:#065f46">${fundingProgramStats('sewb').totalEpisodes} episodes</span>
+      </div>
+      <div class="report-card" onclick="generateFundingReport('aod')">
+        <div class="rc-icon">🔴</div>
+        <div class="rc-title">AOD Funding Report</div>
+        <div class="rc-desc">AOD completed episodes of care — 12 weeks + 5 contacts</div>
+        <span class="rc-badge" style="background:#fee2e2;color:#991b1b">${fundingProgramStats('aod').totalEpisodes} episodes</span>
+      </div>
+      <div class="report-card" onclick="generateFundingReport('justice')">
+        <div class="rc-icon">⚖️</div>
+        <div class="rc-title">Justice Funding Report</div>
+        <div class="rc-desc">Justice completed episodes of care — 12 weeks + 5 contacts</div>
+        <span class="rc-badge" style="background:#dbeafe;color:#1e40af">${fundingProgramStats('justice').totalEpisodes} episodes</span>
+      </div>
+    </div>
+    <div style="margin-top:12px">
+      <div class="report-card" onclick="generateFundingReport('all')" style="border:2px solid var(--primary);background:linear-gradient(135deg,#f0fdf4,#eff6ff)">
+        <div class="rc-icon">🏛️</div>
+        <div class="rc-title" style="color:var(--primary)">All Programs Funding Report</div>
+        <div class="rc-desc">Combined SEWB + AOD + Justice episodes of care for funding acquittal</div>
+        <span class="rc-badge" style="background:var(--primary);color:#fff">${fundingProgramStats('sewb').totalEpisodes+fundingProgramStats('aod').totalEpisodes+fundingProgramStats('justice').totalEpisodes} total episodes</span>
+      </div>
+    </div>
+  </div>
+
   <!-- BULK CLIENT IMPORT -->
   <div class="card no-print" style="margin-bottom:20px" id="bulk-import-card">
     <div class="card-header">
@@ -4504,6 +4539,112 @@ function generateProgramReport(type) {
   else if(type==='activity') openReport(buildActivityReport(from, to));
   else if(type==='risk') openReport(buildRiskRegister());
   else if(type==='goals') openReport(buildGoalsReport());
+}
+
+// ===== EPISODE OF CARE — OFFICIAL FUNDING REPORTS =====
+// A completed "episode of care" = a 12-week (84-day) period of engagement with
+// a program containing a minimum of 5 recorded client contacts. Contacts are
+// case notes tagged to the program. A client may accrue multiple consecutive,
+// non-overlapping episodes; an unfinished window is reported as "in progress".
+const EOC_WEEKS = 12;
+const EOC_MIN_CONTACTS = 5;
+const EOC_DAYS = EOC_WEEKS * 7;
+const FUNDING_PROGRAMS = {
+  sewb:    { label:'SEWB',    badge:'background:#d1fae5;color:#065f46' },
+  aod:     { label:'AOD',     badge:'background:#fee2e2;color:#991b1b' },
+  justice: { label:'Justice', badge:'background:#dbeafe;color:#1e40af' },
+};
+
+// Per-client episode breakdown for one program
+function clientEpisodeStats(clientId, program) {
+  const dates = notes
+    .filter(n => n.clientId===clientId && (n.type||'general')===program && n.created)
+    .map(n => new Date(n.created).getTime())
+    .filter(t => !isNaN(t))
+    .sort((a,b)=>a-b);
+  let completeEpisodes = 0, winStart = null, winCount = 0;
+  for (let i=0; i<dates.length; i++) {
+    if (winStart===null) { winStart = dates[i]; winCount = 0; }
+    winCount++;
+    const weeks = (dates[i]-winStart)/(7*86400000);
+    if (weeks >= EOC_WEEKS && winCount >= EOC_MIN_CONTACTS) {
+      completeEpisodes++; winStart = null; winCount = 0;
+    }
+  }
+  // Remaining unfinished window = current in-progress episode
+  let openContacts = 0, openWeeks = 0;
+  if (winStart!==null && winCount>0) {
+    openContacts = winCount;
+    openWeeks = (dates[dates.length-1]-winStart)/(7*86400000);
+  }
+  const firstContact = dates.length ? dates[0] : null;
+  const lastContact  = dates.length ? dates[dates.length-1] : null;
+  const totalWeeks   = (firstContact && lastContact) ? (lastContact-firstContact)/(7*86400000) : 0;
+  return { totalContacts: dates.length, completeEpisodes, openContacts, openWeeks, firstContact, lastContact, totalWeeks };
+}
+
+// Program-level rollup
+function fundingProgramStats(program) {
+  const cl = clients.filter(c=>c[program]);
+  let totalEpisodes=0, clientsWithEpisode=0, totalContacts=0;
+  const rows = cl.map(c=>{
+    const s = clientEpisodeStats(c.id, program);
+    totalEpisodes += s.completeEpisodes;
+    totalContacts += s.totalContacts;
+    if (s.completeEpisodes>0) clientsWithEpisode++;
+    return { client:c, ...s };
+  });
+  return { program, clients:cl, rows, totalEpisodes, clientsWithEpisode, totalContacts };
+}
+
+function generateFundingReport(program) { openReport(buildFundingReport(program)); }
+
+function buildFundingReport(program) {
+  const progs = program==='all' ? ['sewb','aod','justice'] : [program];
+  const title = program==='all'
+    ? 'SEWB Official Funding Report — All Programs'
+    : `${FUNDING_PROGRAMS[program]?.label||program} Official Funding Report`;
+  const allStats = progs.map(p=>fundingProgramStats(p));
+  const grandEpisodes = allStats.reduce((a,s)=>a+s.totalEpisodes,0);
+  const grandClients  = allStats.reduce((a,s)=>a+s.clients.length,0);
+  const grandWithEp   = allStats.reduce((a,s)=>a+s.clientsWithEpisode,0);
+
+  let body = reportHeader(title, `Completed Episodes of Care · Criteria: ${EOC_WEEKS} weeks engaged + minimum ${EOC_MIN_CONTACTS} client contacts`);
+  body += `<div class="stat-row">
+    <div class="stat-box"><div class="sv">${grandEpisodes}</div><div class="sl">Complete Episodes of Care</div></div>
+    <div class="stat-box"><div class="sv">${grandWithEp}</div><div class="sl">Clients with ≥1 Episode</div></div>
+    <div class="stat-box"><div class="sv">${grandClients}</div><div class="sl">Total Program Clients</div></div>
+    <div class="stat-box"><div class="sv">${grandClients?Math.round(grandWithEp/grandClients*100):0}%</div><div class="sl">Completion Rate</div></div>
+  </div>`;
+  body += `<div style="background:#f0f7f3;border:1px solid #cde5d8;border-radius:6px;padding:10px 14px;font-size:11px;margin-bottom:16px;line-height:1.6">
+    <strong>Episode of Care — definition.</strong> A completed episode is a period of <strong>${EOC_WEEKS} weeks (${EOC_DAYS} days)</strong> of engagement with the program containing a minimum of <strong>${EOC_MIN_CONTACTS} recorded client contacts</strong> (case notes tagged to the program). A client may accrue multiple consecutive episodes; a window that has not yet reached both thresholds is shown as <em>in&nbsp;progress</em>.
+  </div>`;
+
+  allStats.forEach(s=>{
+    const meta = FUNDING_PROGRAMS[s.program] || { label:s.program };
+    body += `<h2>${meta.label} — ${s.totalEpisodes} Complete Episode${s.totalEpisodes!==1?'s':''} of Care (${s.clients.length} client${s.clients.length!==1?'s':''})</h2>`;
+    body += `<table><tr><th>Client</th><th>First Contact</th><th>Last Contact</th><th>Weeks Engaged</th><th>Contacts</th><th>Complete Episodes</th><th>Current Window</th><th>Status</th></tr>`;
+    const sorted = [...s.rows].sort((a,b)=> b.completeEpisodes-a.completeEpisodes || b.totalContacts-a.totalContacts);
+    body += (sorted.map(r=>{
+      const complete = r.completeEpisodes>0;
+      const openInfo = r.openContacts ? `${r.openContacts}/${EOC_MIN_CONTACTS} contacts · ${r.openWeeks.toFixed(1)}/${EOC_WEEKS} wks` : '—';
+      const statusBadge = complete
+        ? `<span class="badge badge-low">✓ ${r.completeEpisodes} episode${r.completeEpisodes!==1?'s':''}</span>`
+        : `<span class="badge badge-medium">In progress</span>`;
+      return `<tr>
+        <td>${r.client.fullName||'—'}</td>
+        <td>${r.firstContact?fmt(new Date(r.firstContact).toISOString()):'—'}</td>
+        <td>${r.lastContact?fmt(new Date(r.lastContact).toISOString()):'—'}</td>
+        <td>${r.totalWeeks?r.totalWeeks.toFixed(1):'0'}</td>
+        <td>${r.totalContacts}</td>
+        <td style="text-align:center;font-weight:700">${r.completeEpisodes}</td>
+        <td style="font-size:10px">${openInfo}</td>
+        <td>${statusBadge}</td>
+      </tr>`;
+    }).join('')) || `<tr><td colspan="8">No clients in this program</td></tr>`;
+    body += `</table>`;
+  });
+  return body;
 }
 
 function buildDisabilityProgramReport(from, to) {
