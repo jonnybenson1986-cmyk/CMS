@@ -314,6 +314,15 @@
   @media (min-width: 769px) {
     #mob-menu-btn, #mob-bottomnav, #mob-overlay { display: none !important; }
   }
+
+  /* Hide app chrome until the user has authenticated. This guarantees the
+     login screen is the first (and only) thing painted on load, with no flash
+     of the dashboard before the app script runs showLoginScreen(). */
+  body:not(.app-authed) #sidebar,
+  body:not(.app-authed) #topbar,
+  body:not(.app-authed) #mob-bottomnav,
+  body:not(.app-authed) #mob-menu-btn { display: none !important; }
+  body:not(.app-authed) #main { margin-left: 0 !important; }
 </style>
 </head>
 <body>
@@ -8708,6 +8717,8 @@ function loginSaveFb() {
 }
 
 function showLoginScreen() {
+  // Hide the app chrome so only the login screen is visible until authenticated.
+  document.body.classList.remove('app-authed');
   const fbReady = FSYNC.isReady();
   const hasFbCfg = !!FSYNC.getCfg()?.apiKey;
   // Use Firebase email/password login when Firebase is connected, otherwise dropdown
@@ -9020,6 +9031,8 @@ function _observeVoice() {
 }
 
 function initApp() {
+  // Reveal the app chrome (sidebar, topbar, mobile nav) now that the user is authenticated.
+  document.body.classList.add('app-authed');
   const sidebar = document.getElementById('sidebar');
   const main = document.getElementById('main');
 
