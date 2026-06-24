@@ -3622,7 +3622,7 @@ function renderReportsPage() {
   <div class="card no-print" style="margin-bottom:20px;border-left:4px solid var(--primary)">
     <div class="card-header"><div class="card-title">🏛️ SEWB Official Funding Reports</div></div>
     <p style="font-size:13px;color:var(--muted);margin-bottom:6px">Completed <strong>episodes of care</strong> for SEWB, AOD and Justice clients — for official funding acquittal.</p>
-    <p style="font-size:12px;color:var(--muted);margin-bottom:16px">Episode criteria: <strong>12 weeks</strong> engaged with the program <strong>and</strong> a minimum of <strong>5 client contacts</strong> (program-tagged case notes).</p>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:16px">Episode criteria: <strong>12 weeks</strong> engaged with the program <strong>and</strong> a minimum of <strong>5 client contacts</strong> (program-tagged or general case notes).</p>
     <div class="grid-3">
       <div class="report-card" onclick="generateFundingReport('sewb')">
         <div class="rc-icon">💚</div>
@@ -4544,7 +4544,7 @@ function generateProgramReport(type) {
 // ===== EPISODE OF CARE — OFFICIAL FUNDING REPORTS =====
 // A completed "episode of care" = a 12-week (84-day) period of engagement with
 // a program containing a minimum of 5 recorded client contacts. Contacts are
-// case notes tagged to the program. A client may accrue multiple consecutive,
+// case notes tagged to the program OR general. A client may accrue multiple consecutive,
 // non-overlapping episodes; an unfinished window is reported as "in progress".
 const EOC_WEEKS = 12;
 const EOC_MIN_CONTACTS = 5;
@@ -4558,7 +4558,7 @@ const FUNDING_PROGRAMS = {
 // Per-client episode breakdown for one program
 function clientEpisodeStats(clientId, program) {
   const dates = notes
-    .filter(n => n.clientId===clientId && (n.type||'general')===program && n.created)
+    .filter(n => { const t = n.type||'general'; return n.clientId===clientId && (t===program || t==='general') && n.created; })
     .map(n => new Date(n.created).getTime())
     .filter(t => !isNaN(t))
     .sort((a,b)=>a-b);
@@ -4617,7 +4617,7 @@ function buildFundingReport(program) {
     <div class="stat-box"><div class="sv">${grandClients?Math.round(grandWithEp/grandClients*100):0}%</div><div class="sl">Completion Rate</div></div>
   </div>`;
   body += `<div style="background:#f0f7f3;border:1px solid #cde5d8;border-radius:6px;padding:10px 14px;font-size:11px;margin-bottom:16px;line-height:1.6">
-    <strong>Episode of Care — definition.</strong> A completed episode is a period of <strong>${EOC_WEEKS} weeks (${EOC_DAYS} days)</strong> of engagement with the program containing a minimum of <strong>${EOC_MIN_CONTACTS} recorded client contacts</strong> (case notes tagged to the program). A client may accrue multiple consecutive episodes; a window that has not yet reached both thresholds is shown as <em>in&nbsp;progress</em>.
+    <strong>Episode of Care — definition.</strong> A completed episode is a period of <strong>${EOC_WEEKS} weeks (${EOC_DAYS} days)</strong> of engagement with the program containing a minimum of <strong>${EOC_MIN_CONTACTS} recorded client contacts</strong> (case notes tagged to the program <em>or</em> general). A client may accrue multiple consecutive episodes; a window that has not yet reached both thresholds is shown as <em>in&nbsp;progress</em>.
   </div>`;
 
   allStats.forEach(s=>{
