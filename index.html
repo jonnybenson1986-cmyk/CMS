@@ -6968,7 +6968,7 @@ function renderHomeOwnership() {
           <div class="avatar" style="background:var(--primary);width:38px;height:38px;font-size:14px">${initials(a.primaryFirstName+' '+a.primaryLastName)}</div>
           <div style="flex:1;min-width:160px">
             <div style="font-weight:700;font-size:14px">${a.primaryFirstName||''} ${a.primaryLastName||''}</div>
-            <div style="font-size:12px;color:var(--muted)">${a.purchaseSuburb||'Suburb not specified'} &bull; ${a.coApplicantCount||0} co-applicant(s) &bull; Created ${fmt(a.created)}</div>
+            <div style="font-size:12px;color:var(--muted)">${a.purchaseSuburb||'Suburb not specified'} &bull; ${a.coApplicantCount||0} co-applicant(s) &bull; Created ${fmt(a.created)}${(a.attachments||[]).length?` &bull; 📎 ${a.attachments.length} doc${a.attachments.length!==1?'s':''}`:''}</div>
           </div>
           <span style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:12px;${statusStyle[a.status]||statusStyle.draft}">${(a.status||'draft').toUpperCase()}</span>
           <div style="display:flex;gap:8px">
@@ -6991,6 +6991,9 @@ function openFPHOForm(id) {
   const existing = id ? fphoApplications.find(a=>a.id===id) : null;
   const a = existing || {};
   const coCount = a.coApplicantCount || 0;
+  // Working copy of attachments for this editing session — persisted to the
+  // application record on Save.
+  _fphoAttachments = (a.attachments || []).map(f => ({...f}));
 
   const applicantBlock = (prefix, label, required=true, showAtsi=true) => `
     <div class="coapplicant-block">
@@ -7200,6 +7203,23 @@ function openFPHOForm(id) {
       </div>
     </div>
 
+    <!-- SUPPORTING DOCUMENTS -->
+    <div class="fpho-section-title">Supporting Documents</div>
+    <div class="fpho-field">
+      <label>Attach documents — proof of income, COA forms, pre-approval, ID, etc.</label>
+      <div id="fpho-attach-list" style="display:grid;gap:8px;margin-bottom:10px"></div>
+      <div id="fpho-dropzone" style="border:2px dashed var(--border);border-radius:10px;padding:28px;text-align:center;color:var(--muted);cursor:pointer;transition:all 0.2s"
+        onclick="document.getElementById('fpho-file-input').click()"
+        ondragover="event.preventDefault();this.style.borderColor='var(--primary)';this.style.background='rgba(45,106,79,0.05)'"
+        ondragleave="this.style.borderColor='var(--border)';this.style.background=''"
+        ondrop="fphoHandleDrop(event)">
+        <div style="font-size:28px;margin-bottom:6px">📂</div>
+        <p style="font-size:13px;font-weight:600">Drag &amp; drop files here, or click to browse</p>
+        <p style="font-size:12px;margin-top:4px">Proof of income · COA forms · Pre-approval · ID — PDF, Word, Excel, images</p>
+      </div>
+      <input type="file" id="fpho-file-input" multiple accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.txt,.xlsx,.xls" style="display:none" onchange="fphoHandleFiles(this)">
+    </div>
+
     <!-- WORKER NOTES -->
     <div class="fpho-section-title">Worker Notes</div>
     <div class="fpho-field"><label>Internal notes (not printed on application)</label>
@@ -7282,6 +7302,7 @@ function openFPHOForm(id) {
       decl2: document.getElementById('decl-2')?.checked||false,
       decl3: document.getElementById('decl-3')?.checked||false,
       workerNotes: document.getElementById('fpho-notes')?.value||'',
+      attachments: _fphoAttachments.map(f=>({...f})),
       updatedBy: currentUser?.name||'', updatedAt: now(),
     };
 
@@ -7298,8 +7319,67 @@ function openFPHOForm(id) {
     return true;
   }, '900px');
 
-  // Calculate total income on load
-  setTimeout(()=>fphoCalcTotalIncome(),100);
+  // Calculate total income on load and render any existing attachments
+  setTimeout(()=>{ fphoCalcTotalIncome(); fphoRenderAttachments(); },100);
+}
+
+// ===== FPHO SUPPORTING DOCUMENTS =====
+let _fphoAttachments = [];
+function fphoRenderAttachments() {
+  const box = document.getElementById('fpho-attach-list'); if(!box) return;
+  if(!_fphoAttachments.length) { box.innerHTML=''; return; }
+  box.innerHTML = _fphoAttachments.map((f,i)=>`
+    <div style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid var(--border);border-radius:8px;background:#fafaf8">
+      <div style="font-size:24px">${fileIcon(f.type)}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${sanitize(f.name)}</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">${formatBytes(f.size)} · ${fmt(f.uploadedAt)} · ${sanitize(f.uploadedBy||'—')}</div>
+      </div>
+      <div style="display:flex;gap:6px;flex-shrink:0">
+        ${(f.type==='application/pdf'||(f.type||'').startsWith('image/'))?`<button type="button" class="btn btn-sm btn-outline" onclick="fphoPreviewAttachment(${i})">👁 View</button>`:''}
+        <button type="button" class="btn btn-sm btn-outline" onclick="fphoDownloadAttachment(${i})">⬇</button>
+        <button type="button" class="btn btn-sm btn-danger" onclick="fphoRemoveAttachment(${i})">✕</button>
+      </div>
+    </div>`).join('');
+}
+function fphoHandleFiles(input) {
+  const files = Array.from(input.files); if(!files.length) return;
+  let loaded=0;
+  files.forEach(file=>{
+    const reader=new FileReader();
+    reader.onload=e=>{
+      const totalSize=_fphoAttachments.reduce((a,f)=>a+(f.size||0),0)+file.size;
+      if(totalSize>8*1024*1024){ showToast('⚠️ Storage limit — total attachments must stay under 8 MB'); return; }
+      _fphoAttachments.push({id:uid(),name:file.name,type:file.type,size:file.size,data:e.target.result,uploadedAt:today(),uploadedBy:currentUser?.name||DB.load('workerName','')});
+      loaded++; if(loaded===files.length){ fphoRenderAttachments(); showToast(`${files.length} file${files.length!==1?'s':''} attached`); }
+    };
+    reader.readAsDataURL(file);
+  });
+  input.value='';
+}
+function fphoHandleDrop(event) {
+  event.preventDefault(); event.currentTarget.style.borderColor='var(--border)'; event.currentTarget.style.background='';
+  fphoHandleFiles({files:event.dataTransfer.files});
+}
+function fphoRemoveAttachment(idx) {
+  if(!confirm('Remove this document?')) return;
+  _fphoAttachments.splice(idx,1); fphoRenderAttachments();
+}
+function fphoDownloadAttachment(idx) {
+  const f=_fphoAttachments[idx]; if(!f) return;
+  const a=document.createElement('a'); a.href=f.data; a.download=f.name; a.click();
+}
+function fphoPreviewAttachment(idx) {
+  const f=_fphoAttachments[idx]; if(!f) return;
+  // Open in a new tab rather than a nested modal (which would replace the form).
+  try {
+    const parts=f.data.split(','); const bin=atob(parts[1]); const arr=new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i);
+    const url=URL.createObjectURL(new Blob([arr],{type:f.type||'application/octet-stream'}));
+    window.open(url,'_blank');
+  } catch(e) {
+    const a=document.createElement('a'); a.href=f.data; a.target='_blank'; a.click();
+  }
 }
 
 function fphoCalcTotalIncome() {
