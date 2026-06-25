@@ -6265,11 +6265,12 @@ function searchSessions(q) {
 // ============================================================
 function openSessionModal(clientId, defaultType) {
   const clientOpts = clients.map(c=>`<option value="${c.id}" ${c.id===clientId?'selected':''}>${c.fullName}</option>`).join('');
+  const ndisOpts = NDIS_CATALOGUE.map(i=>`<option value="${i.c} — ${(i.n||'').replace(/"/g,'')} (${i.u}) — ${ndisMoney(i.p)}">`).join('');
   const html = `
   <div class="grid-2" style="margin-bottom:4px">
     <div class="form-group"><label>Client *</label><select id="sm-client">${clientOpts}</select></div>
     <div class="form-group"><label>Session Type</label>
-      <select id="sm-type">
+      <select id="sm-type" onchange="smToggleNDIS()">
         ${['general','sewb','aod','justice','cultural','disability','workfoundations'].map(t=>`<option value="${t}" ${t===(defaultType||'general')?'selected':''}>${t==='workfoundations'?'WORK FOUNDATIONS':t.toUpperCase()}</option>`).join('')}
       </select>
     </div>
@@ -6290,6 +6291,20 @@ function openSessionModal(clientId, defaultType) {
     <div class="form-group"><label>Worker</label>
       ${workerSelectHTML('sm-worker','sm-worker-new', DB.load('workerName',''))}
     </div>
+  </div>
+
+  <div id="sm-ndis-block" style="display:${defaultType==='disability'?'block':'none'};background:#faf5ff;border:1px solid #e9d5ff;border-radius:8px;padding:12px;margin-bottom:14px">
+    <div style="font-weight:600;font-size:13px;color:#6b21a8;margin-bottom:4px">🧾 Bill to NDIS Plan <span style="font-weight:400;color:var(--muted)">(optional)</span></div>
+    <p style="font-size:11px;color:var(--muted);margin-bottom:10px">Pick an NDIS support item to charge this session to the client's plan. Leave blank to log the note without billing.</p>
+    <div class="form-group"><label>NDIS Support Item</label>
+      <input id="sm-ndis-item" list="sm-ndis-list" placeholder="Type a code or service name…" autocomplete="off" oninput="smNdisPreview()" style="width:100%">
+      <datalist id="sm-ndis-list">${ndisOpts}</datalist>
+    </div>
+    <div class="grid-2">
+      <div class="form-group"><label>Quantity / Units</label><input type="number" min="0" step="0.01" id="sm-ndis-qty" value="1" oninput="smNdisPreview()"></div>
+      <div class="form-group"><label>Budget Category</label><select id="sm-ndis-cat">${['Core','Capacity Building','Capital'].map(x=>`<option>${x}</option>`).join('')}</select></div>
+    </div>
+    <div id="sm-ndis-total" style="font-size:13px;font-weight:600;color:#6b21a8;text-align:center;padding:6px;background:#fff;border-radius:6px">No item selected</div>
   </div>
 
   <div class="form-group">
@@ -6342,6 +6357,29 @@ function openSessionModal(clientId, defaultType) {
       created:noteDate, duration:mins, worker, text, followup, followupDate };
     notes.push(n);
 
+    // Bill to NDIS plan if a support item was chosen on a disability session
+    let billedMsg = '';
+    if(type==='disability') {
+      const raw = document.getElementById('sm-ndis-item')?.value||'';
+      const item = ndisFindItem(raw.split(' — ')[0].trim());
+      if(item) {
+        const qty = parseFloat(document.getElementById('sm-ndis-qty')?.value)||0;
+        if(qty>0) {
+          const cl = clients.find(c=>c.id===clientId);
+          if(cl){
+            cl.dis = cl.dis || {}; cl.dis.claims = cl.dis.claims || [];
+            cl.dis.claims.push({ id:uid(), code:item.c, name:item.n, unit:item.u, price:item.p,
+              qty, total:Math.round(item.p*qty*100)/100, date:noteDateStr,
+              provider:worker, category:document.getElementById('sm-ndis-cat')?.value||ndisCategoryForCode(item.c),
+              note:'From session note', noteId:n.id, billedBy:currentUser?.name||'', billedAt:now() });
+            cl.disability = true;
+            billedMsg = ' + billed '+ndisMoney(item.p*qty)+' to NDIS';
+            audit('NDIS item billed (session)', `${item.c} × ${qty} = ${ndisMoney(item.p*qty)}`, clientId);
+          }
+        }
+      }
+    }
+
     // Create time log entry linked to note
     if(mins>0) {
       const noteD = new Date(noteDate);
@@ -6371,8 +6409,29 @@ function openSessionModal(clientId, defaultType) {
     }
 
     audit('Logged session', `${(n.type||'general').toUpperCase()} — ${n.contactType||''} ${mins>0?'('+mins+' min)':''}`, clientId);
-    saveAll(); showToast(`Session logged${mins>0?' + '+mins+' min time':''}`); return true;
+    saveAll(); showToast(`Session logged${mins>0?' + '+mins+' min time':''}${billedMsg}`); return true;
   }, '720px');
+}
+
+// Show/hide the NDIS billing block when the session type is disability
+function smToggleNDIS(){
+  const block = document.getElementById('sm-ndis-block');
+  if(block) block.style.display = (document.getElementById('sm-type')?.value==='disability') ? 'block' : 'none';
+}
+// Live total + auto-category for the session-note NDIS billing block
+function smNdisPreview(){
+  const raw = document.getElementById('sm-ndis-item')?.value||'';
+  const item = ndisFindItem(raw.split(' — ')[0].trim());
+  const qty = parseFloat(document.getElementById('sm-ndis-qty')?.value)||0;
+  const cat = document.getElementById('sm-ndis-cat');
+  const tot = document.getElementById('sm-ndis-total');
+  if(item){
+    if(cat && cat.dataset.lastcode!==item.c){ cat.value = ndisCategoryForCode(item.c); cat.dataset.lastcode = item.c; }
+    if(tot) tot.innerHTML = `${sanitize(item.n)} — <strong>${ndisMoney(item.p)}</strong>/${sanitize(item.u)} × ${qty} = <strong>${ndisMoney(item.p*qty)}</strong>`;
+  } else {
+    if(tot) tot.textContent = 'No item selected';
+    if(cat) cat.dataset.lastcode = '';
+  }
 }
 
 // Keep backward compat
