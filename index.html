@@ -4473,8 +4473,39 @@ function buildDisabilityClientReport(c) {
   </table>
   <div class="field-row"><div class="field"><label>Support Plan</label><p>${dis.supportPlan||'—'}</p></div></div>
   <div class="field-row"><div class="field"><label>Funded Supports</label><p>${dis.fundedSupports||'—'}</p></div></div>
+  ${buildNDISFundingReportSection(c)}
   <h3>Disability Notes (${disNotes.length})</h3>
   ${disNotes.map(n=>`<div class="note-block"><div class="note-meta">${fmtdt(n.created)} | ${n.worker||'—'}</div><p>${(n.text||'').replace(/\n/g,'<br>')}</p></div>`).join('')||'<p>None</p>'}`;
+}
+
+// NDIS funding summary + claims + supports for the printed disability report
+function buildNDISFundingReportSection(c){
+  const f = ndisClientFunding(c);
+  const supports = c.dis?.supports || [];
+  if(f.total===0 && f.claims.length===0 && supports.length===0) return '';
+  const claims = [...f.claims].sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+  let html = `<h2>💰 NDIS Funding Summary</h2>
+  <table>
+    <tr><th>Budget Category</th><th>Funded</th><th>Billed</th><th>Remaining</th><th>Used</th></tr>
+    ${f.cats.map(ct=>`<tr><td>${ct.label}</td><td>${ndisMoney(ct.budget)}</td><td>${ndisMoney(ct.spent)}</td><td>${ndisMoney(ct.remaining)}</td><td>${ct.pct}%</td></tr>`).join('')}
+    <tr style="font-weight:700"><td>TOTAL</td><td>${ndisMoney(f.total)}</td><td>${ndisMoney(f.spent)}</td><td>${ndisMoney(f.remaining)}</td><td>${f.total>0?Math.round(f.spent/f.total*100):0}%</td></tr>
+  </table>`;
+  if(claims.length){
+    html += `<h3>Billed Claims (${claims.length})</h3>
+    <table>
+      <tr><th>Date</th><th>Support Item</th><th>Code</th><th>Category</th><th>Unit Price</th><th>Qty</th><th>Total</th><th>Provider</th></tr>
+      ${claims.map(cl=>`<tr><td>${fmt(cl.date)}</td><td>${(cl.name||'').slice(0,42)}</td><td style="font-family:monospace;font-size:10px">${cl.code||''}</td><td>${cl.category||'Core'}</td><td>${ndisMoney(cl.price)}</td><td>${cl.qty}</td><td>${ndisMoney(cl.total)}</td><td>${cl.provider||'—'}</td></tr>`).join('')}
+      <tr style="font-weight:700"><td colspan="6" style="text-align:right">Total billed:</td><td>${ndisMoney(f.spent)}</td><td></td></tr>
+    </table>`;
+  }
+  if(supports.length){
+    html += `<h2>🤝 Client Supports &amp; Providers</h2>
+    <table>
+      <tr><th>Name</th><th>Role</th><th>Organisation</th><th>Phone</th><th>Email</th><th>Frequency</th></tr>
+      ${supports.map(s=>`<tr><td>${s.name||'—'}</td><td>${s.role||'—'}</td><td>${s.org||'—'}</td><td>${s.phone||'—'}</td><td>${s.email||'—'}</td><td>${s.freq||'—'}</td></tr>`).join('')}
+    </table>`;
+  }
+  return html;
 }
 
 // ---- WORK FOUNDATIONS CLIENT REPORT ----
@@ -4711,12 +4742,16 @@ function buildDisabilityProgramReport(from, to) {
   const ndisCount = dc.filter(c=>c.dis?.ndisNum||c.ndis).length;
   const dspCount  = dc.filter(c=>c.dis?.dsp==='Yes').length;
   const byType = {}; dc.forEach(c=>{ const k=c.dis?.primary||'Unknown'; byType[k]=(byType[k]||0)+1; });
+  const fundT = dc.reduce((a,c)=>{ const f=ndisClientFunding(c); a.total+=f.total; a.spent+=f.spent; return a; }, {total:0,spent:0});
   return reportHeader('Disability Program Report', from, to) + `
   <h2>Summary</h2>
   <table><tr><td><strong>Total Disability Clients</strong></td><td>${dc.length}</td></tr>
   <tr><td>With NDIS Number</td><td>${ndisCount}</td></tr>
   <tr><td>Receiving DSP</td><td>${dspCount}</td></tr>
-  <tr><td>Session Notes (period)</td><td>${rptNotes.length}</td></tr></table>
+  <tr><td>Session Notes (period)</td><td>${rptNotes.length}</td></tr>
+  <tr><td>NDIS Funds — Total Allocated</td><td>${ndisMoney(fundT.total)}</td></tr>
+  <tr><td>NDIS Funds — Billed</td><td>${ndisMoney(fundT.spent)}</td></tr>
+  <tr><td>NDIS Funds — Remaining</td><td>${ndisMoney(fundT.total-fundT.spent)}</td></tr></table>
   <h2>Clients by Disability Type</h2>
   <table><tr><th>Type</th><th>Count</th></tr>${Object.entries(byType).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<tr><td>${k}</td><td>${v}</td></tr>`).join('')}</table>
   <h2>Client Details</h2>
@@ -6529,14 +6564,36 @@ const NDIS_SUPPORT_ROLES = ['Support Worker','Occupational Therapist (OT)','Phys
 // Money formatter
 function ndisMoney(n){ return '$'+(Number(n)||0).toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2}); }
 
-// Funding rollup for a client: total budget, spent (sum of claims), remaining
+// Map an NDIS support-item code to its budget category from the leading support
+// category number: 01-04 = Core, 05-06 = Capital, 07+ = Capacity Building.
+function ndisCategoryForCode(code){
+  const n = parseInt((code||'').slice(0,2),10);
+  if(n===5||n===6) return 'Capital';
+  if(n>=7) return 'Capacity Building';
+  return 'Core';
+}
+
+// Funding rollup for a client: per-category budget/spent/remaining + totals.
+// NDIS budgets are category-specific (Core, Capacity Building, Capital), so
+// each claim's category determines which budget it draws down.
 function ndisClientFunding(c){
   const b = c.dis?.budget || {};
-  const core = Number(b.core)||0, capBuild = Number(b.capBuild)||0, capital = Number(b.capital)||0;
-  const total = core + capBuild + capital;
   const claims = c.dis?.claims || [];
-  const spent = claims.reduce((a,cl)=>a+(Number(cl.total)||0),0);
-  return { core, capBuild, capital, total, spent, remaining: total-spent, claims };
+  const cats = [
+    { key:'Core',              label:'Core Supports',     budget:Number(b.core)||0 },
+    { key:'Capacity Building', label:'Capacity Building', budget:Number(b.capBuild)||0 },
+    { key:'Capital',           label:'Capital',           budget:Number(b.capital)||0 },
+  ];
+  const spentByCat = { Core:0, 'Capacity Building':0, Capital:0 };
+  claims.forEach(cl=>{
+    const k = spentByCat.hasOwnProperty(cl.category) ? cl.category : 'Core'; // default legacy/blank to Core
+    spentByCat[k] += Number(cl.total)||0;
+  });
+  cats.forEach(ct=>{ ct.spent = spentByCat[ct.key]; ct.remaining = ct.budget - ct.spent; ct.pct = ct.budget>0 ? Math.min(100, Math.round(ct.spent/ct.budget*100)) : 0; });
+  const total = cats.reduce((a,ct)=>a+ct.budget,0);
+  const spent = cats.reduce((a,ct)=>a+ct.spent,0);
+  return { cats, total, spent, remaining: total-spent, claims,
+    core:cats[0].budget, capBuild:cats[1].budget, capital:cats[2].budget };
 }
 
 function renderNDISFundingCards(c){
@@ -6566,10 +6623,23 @@ function renderNDISFundingCards(c){
       <div class="stat-card" style="flex:1;min-width:140px"><div class="label">Remaining</div><div class="value" style="font-size:20px;color:${f.remaining<0?'#dc2626':'#16a34a'}">${ndisMoney(f.remaining)}</div></div>
       <div class="stat-card" style="flex:1;min-width:140px"><div class="label">Used</div><div class="value" style="font-size:20px">${pct}%</div></div>
     </div>
-    <div style="height:14px;background:#eee;border-radius:8px;overflow:hidden">
-      <div style="height:100%;width:${pct}%;background:${barColor};transition:width .3s"></div>
+    <div style="font-weight:600;font-size:13px;color:var(--primary);margin:4px 0 8px">Budget by Category</div>
+    <div style="display:grid;gap:12px">
+      ${f.cats.map(ct=>{
+        const cb = ct.pct>=100||ct.remaining<0 ? '#dc2626' : ct.pct>=80 ? '#d97706' : '#16a34a';
+        return `<div>
+          <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+            <span style="font-weight:600">${ct.label}</span>
+            <span><span style="color:#d97706">${ndisMoney(ct.spent)}</span> of ${ndisMoney(ct.budget)} · <span style="color:${ct.remaining<0?'#dc2626':'#16a34a'};font-weight:600">${ndisMoney(ct.remaining)} left</span></span>
+          </div>
+          <div style="height:10px;background:#eee;border-radius:6px;overflow:hidden">
+            <div style="height:100%;width:${ct.pct}%;background:${cb};transition:width .3s"></div>
+          </div>
+          ${ct.remaining<0?`<div style="color:#dc2626;font-size:11px;font-weight:600;margin-top:2px">⚠️ Over by ${ndisMoney(-ct.remaining)}</div>`:''}
+        </div>`;
+      }).join('')}
     </div>
-    ${f.remaining<0?`<p style="color:#dc2626;font-size:12px;font-weight:600;margin-top:8px">⚠️ This client is over budget by ${ndisMoney(-f.remaining)}.</p>`:''}
+    ${f.remaining<0?`<p style="color:#dc2626;font-size:12px;font-weight:600;margin-top:10px">⚠️ This client is over their total plan budget by ${ndisMoney(-f.remaining)}.</p>`:''}
   </div>
 
   <!-- NDIS BILLING / CLAIMS -->
@@ -6580,12 +6650,13 @@ function renderNDISFundingCards(c){
     </div>
     ${claims.length===0?'<p style="color:var(--muted);font-size:13px">No claims billed yet. Click <strong>Bill NDIS Item</strong> to charge a support against this plan.</p>':`
     <div class="table-wrap"><table>
-      <thead><tr><th>Date</th><th>Support Item</th><th>Code</th><th>Unit Price</th><th>Qty</th><th>Total</th><th>Provider</th><th></th></tr></thead>
+      <thead><tr><th>Date</th><th>Support Item</th><th>Code</th><th>Category</th><th>Unit Price</th><th>Qty</th><th>Total</th><th>Provider</th><th></th></tr></thead>
       <tbody>
         ${claims.map(cl=>`<tr>
           <td style="font-size:12px;white-space:nowrap">${fmt(cl.date)}</td>
           <td style="font-size:12px">${sanitize((cl.name||'').slice(0,46))}</td>
           <td style="font-size:11px;font-family:monospace">${sanitize(cl.code||'')}</td>
+          <td style="font-size:11px">${sanitize(cl.category||'Core')}</td>
           <td style="font-size:12px;white-space:nowrap">${ndisMoney(cl.price)}${cl.unit?`<span style="color:var(--muted)">/${sanitize(cl.unit)}</span>`:''}</td>
           <td style="font-size:12px">${cl.qty}</td>
           <td style="font-size:12px;font-weight:600;white-space:nowrap">${ndisMoney(cl.total)}</td>
@@ -6593,7 +6664,7 @@ function renderNDISFundingCards(c){
           <td><button class="btn btn-sm btn-danger" onclick="deleteNDISClaim('${c.id}','${cl.id}')">✕</button></td>
         </tr>`).join('')}
       </tbody>
-      <tfoot><tr><td colspan="5" style="text-align:right;font-weight:700">Total billed:</td><td style="font-weight:700">${ndisMoney(f.spent)}</td><td colspan="2"></td></tr></tfoot>
+      <tfoot><tr><td colspan="6" style="text-align:right;font-weight:700">Total billed:</td><td style="font-weight:700">${ndisMoney(f.spent)}</td><td colspan="2"></td></tr></tfoot>
     </table></div>`}
   </div>
 
@@ -6644,6 +6715,7 @@ function saveNDISBudget(id){
 // ----- Billing modal -----
 function openNDISBillModal(id){
   const c=clients.find(cl=>cl.id===id); if(!c) return;
+  window._ndisBillCtx = id;
   const opts = NDIS_CATALOGUE.map(i=>`<option value="${i.c} — ${(i.n||'').replace(/"/g,'')} (${i.u}) — ${ndisMoney(i.p)}">`).join('');
   const html = `
     <div class="form-group"><label>Search &amp; select NDIS support item *</label>
@@ -6655,10 +6727,11 @@ function openNDISBillModal(id){
       <div class="form-group"><label>Quantity / Units *</label><input type="number" min="0" step="0.01" id="ndisbill-qty" value="1" oninput="ndisBillPreview()"></div>
       <div class="form-group"><label>Date of Service</label><input type="date" id="ndisbill-date" value="${today()}"></div>
       <div class="form-group"><label>Provider / Worker</label><input id="ndisbill-provider" placeholder="Who delivered this support"></div>
-      <div class="form-group"><label>Budget Category</label><select id="ndisbill-cat">${['Core','Capacity Building','Capital'].map(x=>`<option>${x}</option>`).join('')}</select></div>
+      <div class="form-group"><label>Budget Category</label><select id="ndisbill-cat" onchange="ndisBillPreview()">${['Core','Capacity Building','Capital'].map(x=>`<option>${x}</option>`).join('')}</select></div>
     </div>
     <div class="form-group"><label>Note (optional)</label><input id="ndisbill-note" placeholder="Reference, invoice no., comment"></div>
-    <div id="ndisbill-total" style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:12px;font-size:15px;font-weight:700;color:#065f46;text-align:center">Total: $0.00</div>`;
+    <div id="ndisbill-total" style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:12px;font-size:15px;font-weight:700;color:#065f46;text-align:center">Total: $0.00</div>
+    <div id="ndisbill-balance" style="font-size:12px;color:var(--muted);text-align:center;margin-top:6px"></div>`;
   showModal('🧾 Bill NDIS Item', html, () => {
     const raw = document.getElementById('ndisbill-item')?.value||'';
     const code = raw.split(' — ')[0].trim();
@@ -6690,12 +6763,28 @@ function ndisBillPreview(){
   const qty = parseFloat(document.getElementById('ndisbill-qty')?.value)||0;
   const meta = document.getElementById('ndisbill-itemmeta');
   const tot = document.getElementById('ndisbill-total');
+  const bal = document.getElementById('ndisbill-balance');
+  const catSel = document.getElementById('ndisbill-cat');
   if(item){
+    // Auto-pick the budget category for this item (when the code changes)
+    if(catSel && catSel.dataset.lastcode !== item.c){ catSel.value = ndisCategoryForCode(item.c); catSel.dataset.lastcode = item.c; }
     if(meta) meta.innerHTML = `✓ <strong>${sanitize(item.n)}</strong> — ${ndisMoney(item.p)} per ${sanitize(item.u)}`;
     if(tot) tot.textContent = `Total: ${ndisMoney(item.p*qty)}`;
+    // Live category balance from the client's funding
+    const c = clients.find(cl=>cl.id===window._ndisBillCtx);
+    if(bal && c){
+      const cat = catSel?.value || ndisCategoryForCode(item.c);
+      const ct = ndisClientFunding(c).cats.find(x=>x.key===cat);
+      if(ct){
+        const after = ct.remaining - item.p*qty;
+        bal.innerHTML = `${sanitize(cat)} remaining: <strong>${ndisMoney(ct.remaining)}</strong> → after this claim: <strong style="color:${after<0?'#dc2626':'#16a34a'}">${ndisMoney(after)}</strong>`;
+      } else bal.textContent='';
+    }
   } else {
     if(meta) meta.textContent = '';
     if(tot) tot.textContent = 'Total: $0.00';
+    if(bal) bal.textContent = '';
+    if(catSel) catSel.dataset.lastcode = '';
   }
 }
 function deleteNDISClaim(id, claimId){
