@@ -443,10 +443,11 @@
 <!-- MODAL CONTAINER -->
 <div id="modal-container"></div>
 
-<!-- Firebase SDK (compat build — loads before app script) -->
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<!-- Firebase SDK (compat build — self-hosted so it never depends on an external
+     CDN being reachable; the app script has a CDN fallback if these 404) -->
+<script src="vendor/firebase/firebase-app-compat.js"></script>
+<script src="vendor/firebase/firebase-firestore-compat.js"></script>
+<script src="vendor/firebase/firebase-auth-compat.js"></script>
 <script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
 <script>
 // ===== DATA LAYER =====
@@ -500,9 +501,9 @@ const FSYNC = (() => {
     if (window.firebase && firebase.firestore && firebase.auth) return true;
     const ver = '9.23.0';
     const bases = [
-      `https://www.gstatic.com/firebasejs/${ver}/`,
-      `https://cdn.jsdelivr.net/npm/firebase@${ver}/`,
-      `https://cdnjs.cloudflare.com/ajax/libs/firebase/${ver}/`,
+      'vendor/firebase/',                                       // self-hosted (same origin) — most reliable, CSP 'self'
+      `https://www.gstatic.com/firebasejs/${ver}/`,             // CSP-allowed CDN fallback
+      `https://cdn.jsdelivr.net/npm/firebase@${ver}/`,          // CSP-allowed CDN fallback
     ];
     const files = ['firebase-app-compat.js', 'firebase-firestore-compat.js', 'firebase-auth-compat.js'];
     for (const base of bases) {

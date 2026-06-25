@@ -1,4 +1,4 @@
-const CACHE_NAME = 'wg-cms-v25';
+const CACHE_NAME = 'wg-cms-v26';
 
 self.addEventListener('install', e => {
   // Take control immediately — don't wait for old SW to finish
@@ -20,11 +20,12 @@ self.addEventListener('fetch', e => {
   const isNavigation = e.request.mode === 'navigate';
   const isSameOrigin = url.origin === self.location.origin;
 
-  // External requests (Firebase CDN etc.) — always fetch directly, never cache
-  if (!isSameOrigin) {
-    e.respondWith(fetch(e.request));
-    return;
-  }
+  // External requests (Firebase SDK CDN, Firestore, auth, etc.) — DO NOT touch.
+  // Let the browser handle them natively. Intercepting cross-origin requests
+  // here adds a failure point and can race during SW updates, which was
+  // breaking the Firebase SDK from loading. Returning without respondWith
+  // means the request bypasses the service worker entirely.
+  if (!isSameOrigin) return;
 
   // index.html and navigations — always network-first so updates are instant
   if (isNavigation || url.pathname === '/' || url.pathname.endsWith('index.html')) {
