@@ -478,11 +478,38 @@ const FSYNC = (() => {
 
   function _loadScript(src) {
     return new Promise((resolve, reject) => {
-      if (document.querySelector(`script[src="${src}"]`)) return resolve();
       const s = document.createElement('script');
-      s.src = src; s.onload = resolve; s.onerror = reject;
+      s.src = src; s.async = false;
+      s.onload = resolve;
+      s.onerror = () => { s.remove(); reject(new Error('load failed: ' + src)); };
       document.head.appendChild(s);
     });
+  }
+
+  // Load the Firebase compat SDK, trying multiple CDNs in case one is blocked
+  // or unreachable (gstatic is sometimes blocked on school/corporate networks).
+  async function _ensureFirebase(_log) {
+    if (window.firebase && firebase.firestore && firebase.auth) return true;
+    const ver = '9.23.0';
+    const bases = [
+      `https://www.gstatic.com/firebasejs/${ver}/`,
+      `https://cdn.jsdelivr.net/npm/firebase@${ver}/`,
+      `https://cdnjs.cloudflare.com/ajax/libs/firebase/${ver}/`,
+    ];
+    const files = ['firebase-app-compat.js', 'firebase-firestore-compat.js', 'firebase-auth-compat.js'];
+    for (const base of bases) {
+      try {
+        for (const f of files) await _loadScript(base + f);
+        if (window.firebase && firebase.firestore && firebase.auth) {
+          _log && _log.push('SDK via ' + (base.split('/')[2]));
+          return true;
+        }
+      } catch (e) {
+        _log && _log.push('CDN failed: ' + (base.split('/')[2]));
+        // try the next CDN
+      }
+    }
+    return !!(window.firebase && firebase.firestore && firebase.auth);
   }
 
   async function init() {
@@ -490,14 +517,11 @@ const FSYNC = (() => {
     if (!cfg?.apiKey) return false;
     const _log = [];
     try {
-      if (!window.firebase) {
+      if (!window.firebase || !firebase.firestore || !firebase.auth) {
         _log.push('Loading SDK…');
-        const base = 'https://www.gstatic.com/firebasejs/9.23.0/';
-        await _loadScript(base + 'firebase-app-compat.js');
-        await _loadScript(base + 'firebase-firestore-compat.js');
-        await _loadScript(base + 'firebase-auth-compat.js');
+        await _ensureFirebase(_log);
       }
-      if (!window.firebase) { _log.push('Firebase SDK not loaded'); throw new Error('Firebase SDK not loaded'); }
+      if (!window.firebase || !firebase.firestore || !firebase.auth) { _log.push('Firebase SDK not loaded'); throw new Error('Firebase SDK not loaded'); }
       _log.push('SDK ✓');
       if (firebase.apps.length) { try { await firebase.app().delete(); } catch(e){} }
       firebase.initializeApp(cfg);
@@ -9638,8 +9662,16 @@ function sanitize(str) {
 localStorage.removeItem('fb_cfg');
 // Always start at the login screen — initApp() is called by the login flow after auth
 showLoginScreen();
-// Auto-connect Firebase on load using the built-in config
-FSYNC.init().then(ok => { if (ok) showLoginScreen(); }); // re-render login to switch to Firebase email mode if connected
+// Auto-connect Firebase on load using the built-in config. Retry a few times
+// with backoff so a slow network or a temporarily-blocked CDN doesn't leave
+// Cloud Sync stuck "Not connected" — it should always connect on its own.
+(function autoConnectFirebase(attempt) {
+  attempt = attempt || 1;
+  FSYNC.init().then(ok => {
+    if (ok) { showLoginScreen(); return; } // re-render login in Firebase email mode
+    if (attempt < 5) setTimeout(() => autoConnectFirebase(attempt + 1), attempt * 2000);
+  });
+})();
 
 // Brand the browser tab / installed-app icon with the real Worn Gundidj logo.
 // The static <link> icons are a generic placeholder; here we render the actual
