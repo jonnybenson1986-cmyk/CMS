@@ -2283,9 +2283,11 @@ function printWorkFoundations(id) {
   const w = window.open('','_blank');
   const caItems = [['caSkills','You feel you have skills to offer'],['caLearn','You can learn what you need to'],['caJobs','You believe there are attainable jobs out there to suit you'],['caHelp','You can ask for help'],['caSayNo','Saying No'],['caRights','You feel confident stating your rights and needs'],['caConvo','You can start and keep a conversation going'],['caAcceptCrit','You can accept criticism'],['caGiveCrit','You can give constructive criticism'],['caAnger','Express anger or frustration in a healthy way'],['caOpinion','You can express your opinion']];
   const ratingOpts = ['Strongly Agree','Agree','Neutral','Disagree','Strongly Disagree'];
+  const brand089 = printBrandHeader('#7c2d12');
   w.document.write(`<!DOCTYPE html><html><head><title>Form 089 — ${c.fullName}</title>
-  <style>body{font-family:Arial,sans-serif;font-size:11px;color:#111;padding:20px}h1{font-size:16px;background:#7c2d12;color:#fff;padding:10px 16px;border-radius:4px}h2{font-size:13px;background:#fef3c7;padding:6px 10px;margin:14px 0 6px;border-left:4px solid #d97706}table{width:100%;border-collapse:collapse;margin-bottom:12px}th{background:#7c2d12;color:#fff;padding:6px 8px;font-size:10px;text-align:center}td{padding:6px 8px;border:1px solid #ddd;font-size:10px}td:first-child{text-align:left}tr:nth-child(even)td{background:#fafafa}.field{display:flex;gap:8px;margin-bottom:6px}.label{font-weight:bold;width:200px;flex-shrink:0}.footer{margin-top:24px;padding-top:10px;border-top:1px solid #ddd;font-size:9px;color:#999;display:flex;justify-content:space-between}</style>
+  <style>body{font-family:Arial,sans-serif;font-size:11px;color:#111;padding:20px;-webkit-print-color-adjust:exact;print-color-adjust:exact}h1{font-size:16px;background:#7c2d12;color:#fff;padding:10px 16px;border-radius:4px}h2{font-size:13px;background:#fef3c7;padding:6px 10px;margin:14px 0 6px;border-left:4px solid #d97706}table{width:100%;border-collapse:collapse;margin-bottom:12px}th{background:#7c2d12;color:#fff;padding:6px 8px;font-size:10px;text-align:center}td{padding:6px 8px;border:1px solid #ddd;font-size:10px}td:first-child{text-align:left}tr:nth-child(even)td{background:#fafafa}.field{display:flex;gap:8px;margin-bottom:6px}.label{font-weight:bold;width:200px;flex-shrink:0}.footer{margin-top:24px;padding-top:10px;border-top:1px solid #ddd;font-size:9px;color:#999;display:flex;justify-content:space-between}${brand089.css}</style>
   </head><body>
+  ${brand089.html}
   <h1>Worn Gundidj — Employment Intake Referral Form (Form 089)</h1>
   <p>Client: <strong>${c.fullName}</strong> &nbsp;|&nbsp; Date: ${fmt(wf.completedDate||today())} &nbsp;|&nbsp; Coordinator: ${wf.coordinator||'—'}</p>
   <h2>Personal Details</h2>
@@ -2320,9 +2322,11 @@ function printFeedback(id) {
   const c = clients.find(cl=>cl.id===id); if(!c) return;
   const fb = c.feedback||{};
   const w = window.open('','_blank');
+  const brandFb = printBrandHeader('#1a3a2a');
   w.document.write(`<!DOCTYPE html><html><head><title>SEWB Feedback — ${c.fullName}</title>
-  <style>body{font-family:Arial,sans-serif;font-size:11px;color:#111;padding:20px}h1{font-size:16px;background:#1a3a2a;color:#fff;padding:10px 16px;border-radius:4px}h2{font-size:12px;background:#d1fae5;padding:5px 10px;margin:12px 0 6px;border-left:4px solid #2d6a4f}.field{display:flex;gap:8px;margin-bottom:5px}.label{font-weight:bold;width:280px;flex-shrink:0}.footer{margin-top:24px;padding-top:10px;border-top:1px solid #ddd;font-size:9px;color:#999}</style>
+  <style>body{font-family:Arial,sans-serif;font-size:11px;color:#111;padding:20px;-webkit-print-color-adjust:exact;print-color-adjust:exact}h1{font-size:16px;background:#1a3a2a;color:#fff;padding:10px 16px;border-radius:4px}h2{font-size:12px;background:#d1fae5;padding:5px 10px;margin:12px 0 6px;border-left:4px solid #2d6a4f}.field{display:flex;gap:8px;margin-bottom:5px}.label{font-weight:bold;width:280px;flex-shrink:0}.footer{margin-top:24px;padding-top:10px;border-top:1px solid #ddd;font-size:9px;color:#999}${brandFb.css}</style>
   </head><body>
+  ${brandFb.html}
   <h1>Worn Gundidj SEWB Feedback Form</h1>
   <p>Client: <strong>${c.fullName}</strong> &nbsp;|&nbsp; Date: ${fmt(fb.date)} &nbsp;|&nbsp; Worker: ${fb.worker||'—'}</p>
   <h2>About This Feedback</h2>
@@ -2540,9 +2544,11 @@ function saveIntake(id, quiet=false) {
 function printIntake(id) {
   const c = clients.find(cl=>cl.id===id); if(!c) return;
   const win = window.open('','_blank');
+  const brandIntake = printBrandHeader('#1a3a2a');
   win.document.write(`<html><head><title>WG Intake — ${c.fullName}</title>
-  <style>body{font-family:Arial,sans-serif;font-size:12px;padding:20px;color:#111}h2{font-size:16px;margin:16px 0 6px}h3{font-size:13px;margin:12px 0 4px;color:#2d6a4f}table{width:100%;border-collapse:collapse}td{padding:5px 8px;border:1px solid #ddd;vertical-align:top}td:first-child{font-weight:bold;width:35%;background:#f9f9f9}.chk{display:inline-block;width:12px;height:12px;border:1px solid #666;margin-right:4px}</style>
+  <style>body{font-family:Arial,sans-serif;font-size:12px;padding:20px;color:#111;-webkit-print-color-adjust:exact;print-color-adjust:exact}h2{font-size:16px;margin:16px 0 6px}h3{font-size:13px;margin:12px 0 4px;color:#2d6a4f}table{width:100%;border-collapse:collapse}td{padding:5px 8px;border:1px solid #ddd;vertical-align:top}td:first-child{font-weight:bold;width:35%;background:#f9f9f9}.chk{display:inline-block;width:12px;height:12px;border:1px solid #666;margin-right:4px}${brandIntake.css}</style>
   </head><body>
+  ${brandIntake.html}
   <h1 style="font-size:20px;color:#1a3a2a">Worn Gundidj — Client Intake Form</h1>
   <p style="color:#666">Printed: ${new Date().toLocaleDateString('en-AU')} &bull; Client: ${c.fullName}</p>
   <hr>
@@ -3902,9 +3908,24 @@ function reportStyles() {
   </style>`;
 }
 
+// Shared org logo (from the sidebar emblem) for reports and printed documents
+function orgLogoSrc() { return document.querySelector('#sidebar img')?.src || ''; }
+
+// Branded masthead for standalone printed documents (Form 089, intake, FPHO…).
+// Returns { css, html } themed to the document's accent colour.
+function printBrandHeader(themeColor) {
+  const org = DB.load('orgName','Worn Gundidj Aboriginal Co-Operative');
+  const logo = orgLogoSrc();
+  const c = themeColor || '#1a3a2a';
+  return {
+    css: `.doc-brand{display:flex;align-items:center;gap:14px;margin-bottom:16px;padding-bottom:12px;border-bottom:3px solid ${c}}.doc-brand img{height:52px;width:auto}.doc-brand .o{font-size:15px;font-weight:700;color:${c}}.doc-brand .a{font-size:10px;color:#666;line-height:1.5;margin-top:2px}`,
+    html: `<div class="doc-brand">${logo?`<img src="${logo}" alt="${org}">`:''}<div><div class="o">${org}</div><div class="a">1-3 Rooneys Rd, Warrnambool VIC 3280 &nbsp;·&nbsp; 03 5561 5315 &nbsp;·&nbsp; admin@worngundidj.org.au</div></div></div>`
+  };
+}
+
 function reportHeader(title, subtitle, clientName) {
   const org = DB.load('orgName','Worn Gundidj Aboriginal Co-Operative');
-  const logo = document.querySelector('#sidebar img')?.src || '';
+  const logo = orgLogoSrc();
   return `
   <div class="header">
     <div class="header-brand">
@@ -7571,9 +7592,10 @@ function printFPHO(id) {
   };
 
   const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>FPHO Application — ${a.primaryFirstName} ${a.primaryLastName}</title>
-  <style>body{font-family:Arial,sans-serif;margin:0;padding:20px;color:#222}@page{margin:20mm}tr:nth-child(even){background:#f9f9f9}.badge{display:inline-block;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700}</style>
+  <style>body{font-family:Arial,sans-serif;margin:0;padding:20px;color:#222;-webkit-print-color-adjust:exact;print-color-adjust:exact}@page{margin:20mm}tr:nth-child(even){background:#f9f9f9}.badge{display:inline-block;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700}</style>
   </head><body>
   <div style="text-align:center;margin-bottom:24px;padding:20px;background:linear-gradient(135deg,#1a3a2a,#2d6a4f);color:#fff;border-radius:8px">
+    ${orgLogoSrc()?`<div style="display:inline-flex;background:#fff;border-radius:8px;padding:8px 12px;margin-bottom:12px"><img src="${orgLogoSrc()}" alt="Worn Gundidj" style="height:46px;width:auto"></div>`:''}
     <div style="font-size:22px;font-weight:800">First Peoples Home Ownership Program</div>
     <div style="font-size:14px;margin-top:4px">Application Form — Homes Victoria</div>
     <div style="font-size:12px;margin-top:8px;opacity:.8">Application ID: ${a.id} &bull; Created: ${fmt(a.created)} &bull; Status: ${(a.status||'draft').toUpperCase()}</div>
@@ -9618,6 +9640,29 @@ localStorage.removeItem('fb_cfg');
 showLoginScreen();
 // Auto-connect Firebase on load using the built-in config
 FSYNC.init().then(ok => { if (ok) showLoginScreen(); }); // re-render login to switch to Firebase email mode if connected
+
+// Brand the browser tab / installed-app icon with the real Worn Gundidj logo.
+// The static <link> icons are a generic placeholder; here we render the actual
+// logo, centred with padding on a white square, into a proper favicon.
+(function setBrandFavicon() {
+  const src = orgLogoSrc(); if (!src) return;
+  const img = new Image();
+  img.onload = () => {
+    const size = 256, cv = document.createElement('canvas');
+    cv.width = cv.height = size;
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, size, size);
+    const pad = size * 0.1, maxW = size - pad * 2, maxH = size - pad * 2;
+    let w = img.width, h = img.height;
+    const r = Math.min(maxW / w, maxH / h); w *= r; h *= r;
+    ctx.drawImage(img, (size - w) / 2, (size - h) / 2, w, h);
+    try {
+      const url = cv.toDataURL('image/png');
+      document.querySelectorAll('link[rel="icon"],link[rel="apple-touch-icon"]').forEach(l => l.href = url);
+    } catch (e) { /* canvas tainted — keep static icons */ }
+  };
+  img.src = src;
+})();
 
 // ===== MOBILE NAV =====
 function toggleMobMenu() {
