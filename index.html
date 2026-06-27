@@ -728,8 +728,10 @@ let referrals = DB.load('referrals', []);
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
+let fphoClients = DB.load('fphoClients', []); // separate client roster for the FPHO program
 let resources = DB.load('resources', []);
 function saveFPHO() { DB.save('fphoApplications', fphoApplications); }
+function saveFPHOClients() { DB.save('fphoClients', fphoClients); }
 
 // ===== AUDIT LOG =====
 let auditLog = DB.load('auditlog', []);
@@ -3662,6 +3664,7 @@ function renderReportsPage() {
     <div class="card-header"><div class="card-title">🏛️ SEWB Official Funding Reports</div></div>
     <p style="font-size:13px;color:var(--muted);margin-bottom:6px">Completed <strong>episodes of care</strong> for SEWB, AOD and Justice clients — for official funding acquittal.</p>
     <p style="font-size:12px;color:var(--muted);margin-bottom:16px">Episode criteria: <strong>12 weeks</strong> engaged with the program <strong>and</strong> a minimum of <strong>5 client contacts</strong> (program-tagged or general case notes).</p>
+    ${renderFundingKPIWidget()}
     <div class="grid-3">
       <div class="report-card" onclick="generateFundingReport('sewb')">
         <div class="rc-icon">💚</div>
@@ -3692,6 +3695,26 @@ function renderReportsPage() {
     </div>
   </div>
 
+  <!-- WORKLOAD & CAPACITY -->
+  <div class="card no-print" style="margin-bottom:20px;border-left:4px solid #7c3aed">
+    <div class="card-header"><div class="card-title">📊 Workload &amp; Capacity Analytics</div></div>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:14px">Caseload per worker, contact hours, contacts logged, and open workflow tasks. Contacts &amp; hours use the date range set above.</p>
+    <div class="grid-2">
+      <div class="report-card" onclick="generateWorkloadReport()">
+        <div class="rc-icon">📊</div>
+        <div class="rc-title">Workload &amp; Caseload Report</div>
+        <div class="rc-desc">Clients per worker, contact hours, contacts, open tasks and high-risk load — with team totals and capacity flags</div>
+        <span class="rc-badge" style="background:#f3e8ff;color:#6b21a8">${clients.filter(c=>c.status==='active').length} active clients</span>
+      </div>
+      <div class="report-card" onclick="generateProgramReport('activity')">
+        <div class="rc-icon">⏱️</div>
+        <div class="rc-title">Contact Hours / Time Report</div>
+        <div class="rc-desc">All time entries broken down by client, worker, and activity type</div>
+        <span class="rc-badge" style="background:#f3f4f6;color:#374151">${timeLogs.length} time entries</span>
+      </div>
+    </div>
+  </div>
+
   <!-- BULK CLIENT IMPORT -->
   <div class="card no-print" style="margin-bottom:20px" id="bulk-import-card">
     <div class="card-header">
@@ -3715,34 +3738,6 @@ function renderReportsPage() {
         <button class="btn btn-outline" onclick="document.getElementById('bulk-paste').value='';document.getElementById('bulk-preview').innerHTML=''">🗑 Clear</button>
       </div>
       <div id="bulk-preview"></div>
-    </div>
-  </div>
-
-  <!-- FUNDER COMPLIANCE REPORTS -->
-  <div class="card no-print" style="margin-bottom:16px">
-    <div class="card-header"><div class="card-title">🏛️ Funder &amp; Grant Compliance Reports</div></div>
-    <p style="font-size:13px;color:var(--muted);margin-bottom:14px">Pre-built templates for government and grant funding requirements. Uses the date range set below.</p>
-    <div class="grid-4">
-      <div class="report-card" onclick="genFunderReport('DHHS / DFFH')">
-        <div class="rc-icon">🏛️</div>
-        <div class="rc-title">DHHS / DFFH Report</div>
-        <div class="rc-desc">Department of Health &amp; Human Services compliance — client demographics, service hours, program participation</div>
-      </div>
-      <div class="report-card" onclick="genFunderReport('DSS')">
-        <div class="rc-icon">🇦🇺</div>
-        <div class="rc-title">DSS Report</div>
-        <div class="rc-desc">Department of Social Services — client outcomes, referral pathways, ATSI client data</div>
-      </div>
-      <div class="report-card" onclick="genFunderReport('VACCHO')">
-        <div class="rc-icon">🌿</div>
-        <div class="rc-title">VACCHO Report</div>
-        <div class="rc-desc">Victorian ACCHO reporting — cultural programs, SEWB outcomes, community engagement</div>
-      </div>
-      <div class="report-card" onclick="genFunderReport('Grant / General Funding')">
-        <div class="rc-icon">📋</div>
-        <div class="rc-title">General Grant Report</div>
-        <div class="rc-desc">Flexible template — service statistics, demographics, hours, and program outcomes</div>
-      </div>
     </div>
   </div>
 
@@ -4646,6 +4641,19 @@ const FUNDING_PROGRAMS = {
   aod:     { label:'AOD',     badge:'background:#fee2e2;color:#991b1b' },
   justice: { label:'Justice', badge:'background:#dbeafe;color:#1e40af' },
 };
+// Annual KPI target — completed episodes of care for the funding year.
+function fundingKPITarget(){ return DB.load('fundingKPITarget', 70); }
+function setFundingKPITarget(n){ DB.save('fundingKPITarget', Math.max(1, parseInt(n)||70)); }
+
+// Australian financial year (1 Jul – 30 Jun) containing the given date (default now)
+function currentFY(ref){
+  const d = ref ? new Date(ref) : new Date();
+  const y = d.getFullYear();
+  const startYear = d.getMonth() >= 6 ? y : y-1; // month 6 = July
+  const start = new Date(startYear, 6, 1).getTime();
+  const end   = new Date(startYear+1, 5, 30, 23,59,59).getTime();
+  return { start, end, label: `FY ${startYear}–${String(startYear+1).slice(2)}` };
+}
 
 // Per-client episode breakdown for one program
 function clientEpisodeStats(clientId, program) {
@@ -4655,38 +4663,163 @@ function clientEpisodeStats(clientId, program) {
     .filter(t => !isNaN(t))
     .sort((a,b)=>a-b);
   let completeEpisodes = 0, winStart = null, winCount = 0;
+  const episodeEndDates = []; // when each complete episode was reached
   for (let i=0; i<dates.length; i++) {
     if (winStart===null) { winStart = dates[i]; winCount = 0; }
     winCount++;
     const weeks = (dates[i]-winStart)/(7*86400000);
     if (weeks >= EOC_WEEKS && winCount >= EOC_MIN_CONTACTS) {
-      completeEpisodes++; winStart = null; winCount = 0;
+      completeEpisodes++; episodeEndDates.push(dates[i]); winStart = null; winCount = 0;
     }
   }
-  // Remaining unfinished window = current in-progress episode
-  let openContacts = 0, openWeeks = 0;
+  // Remaining unfinished window = current in-progress (partial) episode
+  let openContacts = 0, openWeeks = 0, partialFraction = 0;
   if (winStart!==null && winCount>0) {
     openContacts = winCount;
     openWeeks = (dates[dates.length-1]-winStart)/(7*86400000);
+    // Partial completion = how far the open window has progressed toward both thresholds
+    partialFraction = Math.min(1, Math.min(openWeeks/EOC_WEEKS, openContacts/EOC_MIN_CONTACTS));
   }
   const firstContact = dates.length ? dates[0] : null;
   const lastContact  = dates.length ? dates[dates.length-1] : null;
   const totalWeeks   = (firstContact && lastContact) ? (lastContact-firstContact)/(7*86400000) : 0;
-  return { totalContacts: dates.length, completeEpisodes, openContacts, openWeeks, firstContact, lastContact, totalWeeks };
+  return { totalContacts: dates.length, completeEpisodes, episodeEndDates, openContacts, openWeeks, partialFraction, firstContact, lastContact, totalWeeks };
 }
 
 // Program-level rollup
 function fundingProgramStats(program) {
   const cl = clients.filter(c=>c[program]);
-  let totalEpisodes=0, clientsWithEpisode=0, totalContacts=0;
+  let totalEpisodes=0, clientsWithEpisode=0, totalContacts=0, partialEpisodes=0, clientsInPartial=0;
+  const allEpisodeDates = [];
   const rows = cl.map(c=>{
     const s = clientEpisodeStats(c.id, program);
     totalEpisodes += s.completeEpisodes;
     totalContacts += s.totalContacts;
+    partialEpisodes += s.partialFraction;
     if (s.completeEpisodes>0) clientsWithEpisode++;
+    if (s.openContacts>0) clientsInPartial++;
+    allEpisodeDates.push(...s.episodeEndDates);
     return { client:c, ...s };
   });
-  return { program, clients:cl, rows, totalEpisodes, clientsWithEpisode, totalContacts };
+  return { program, clients:cl, rows, totalEpisodes, clientsWithEpisode, totalContacts, partialEpisodes, clientsInPartial, allEpisodeDates };
+}
+
+// KPI rollup across the funded programs for a given financial year
+function fundingKPI(programs, fy){
+  fy = fy || currentFY();
+  const stats = (programs||['sewb','aod','justice']).map(p=>fundingProgramStats(p));
+  let episodesFY=0, episodesAll=0, partial=0;
+  stats.forEach(s=>{
+    episodesAll += s.totalEpisodes;
+    partial += s.partialEpisodes;
+    episodesFY += s.allEpisodeDates.filter(t=>t>=fy.start && t<=fy.end).length;
+  });
+  const target = fundingKPITarget();
+  return { fy, target, episodesFY, episodesAll, partial: Math.round(partial*10)/10,
+    pct: target ? Math.round(episodesFY/target*100) : 0, stats };
+}
+
+// On-page KPI tracker widget for the SEWB Official Funding Reports section
+function renderFundingKPIWidget(){
+  const kpi = fundingKPI(['sewb','aod','justice']);
+  const bar = Math.min(100, kpi.pct);
+  const color = bar>=100 ? '#16a34a' : bar>=60 ? '#2d6a4f' : '#d97706';
+  return `
+  <div style="background:linear-gradient(135deg,#f0fdf4,#eef6ff);border:1px solid #cde5d8;border-radius:10px;padding:16px;margin-bottom:16px">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px">
+      <div style="font-weight:700;font-size:14px;color:var(--primary)">🎯 Annual KPI — Completed Episodes of Care <span style="font-weight:500;color:var(--muted)">(${kpi.fy.label})</span></div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <span style="font-size:12px;color:var(--muted)">Target</span>
+        <input type="number" min="1" id="kpi-target-input" value="${kpi.target}" style="width:70px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px;text-align:center">
+        <button class="btn btn-sm btn-outline" onclick="saveFundingKPITargetFromInput()">Set</button>
+      </div>
+    </div>
+    <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:10px">
+      <div class="stat-card" style="flex:1;min-width:120px"><div class="label">Completed (${kpi.fy.label})</div><div class="value" style="font-size:22px;color:${color}">${kpi.episodesFY}</div></div>
+      <div class="stat-card" style="flex:1;min-width:120px"><div class="label">Target</div><div class="value" style="font-size:22px">${kpi.target}</div></div>
+      <div class="stat-card" style="flex:1;min-width:120px"><div class="label">Progress</div><div class="value" style="font-size:22px;color:${color}">${kpi.pct}%</div></div>
+      <div class="stat-card" style="flex:1;min-width:120px"><div class="label">Partial in progress</div><div class="value" style="font-size:22px;color:#d97706">${kpi.partial}</div></div>
+    </div>
+    <div style="height:18px;background:#e5e7eb;border-radius:9px;overflow:hidden">
+      <div style="height:100%;width:${bar}%;background:${color};transition:width .3s;display:flex;align-items:center;justify-content:flex-end;padding-right:6px;color:#fff;font-size:10px;font-weight:700">${bar>=12?kpi.pct+'%':''}</div>
+    </div>
+    <div style="font-size:12px;color:var(--muted);margin-top:8px">
+      ${kpi.episodesFY>=kpi.target
+        ? '✅ <strong style="color:#16a34a">Annual target met.</strong>'
+        : `<strong>${kpi.target-kpi.episodesFY}</strong> more completed episode${kpi.target-kpi.episodesFY!==1?'s':''} needed to reach the target.`}
+      &nbsp;·&nbsp; <strong>${kpi.partial}</strong> partial episode-equivalents are currently building toward completion.
+    </div>
+  </div>`;
+}
+function saveFundingKPITargetFromInput(){
+  const v = document.getElementById('kpi-target-input')?.value;
+  setFundingKPITarget(v);
+  showToast('Annual KPI target updated ✓');
+  showPage('reports');
+}
+
+// ===== WORKLOAD & CAPACITY ANALYTICS =====
+const WORKLOAD_HIGH = 25; // active-client caseload considered "high load"
+function generateWorkloadReport(){
+  const from = document.getElementById('rpt-from')?.value || '2000-01-01';
+  const to   = document.getElementById('rpt-to')?.value || today();
+  openReport(buildWorkloadReport(from, to));
+}
+function buildWorkloadReport(from, to){
+  const inRange = d => d && d>=from && d<=to+'T23:59:59';
+  const workerSet = new Set();
+  clients.forEach(c=>c.keyWorker && workerSet.add(c.keyWorker));
+  notes.forEach(n=>n.worker && workerSet.add(n.worker));
+  timeLogs.forEach(t=>t.worker && workerSet.add(t.worker));
+  (workersList||[]).forEach(w=>w && workerSet.add(w));
+  const workers = [...workerSet].filter(Boolean).sort();
+
+  const rows = workers.map(w=>{
+    const myClients = clients.filter(c=>c.keyWorker===w);
+    const active   = myClients.filter(c=>c.status==='active').length;
+    const contacts = notes.filter(n=>n.worker===w && inRange(n.created)).length;
+    const minutes  = timeLogs.filter(t=>t.worker===w && inRange(t.date)).reduce((a,t)=>a+(Number(t.minutes)||0),0);
+    const openTasks= workflowTasks.filter(t=>t.worker===w && !t.done).length;
+    const highRisk = myClients.filter(c=>c.riskLevel==='high' && c.status==='active').length;
+    return { worker:w, total:myClients.length, active, contacts, hours:minutes/60, openTasks, highRisk };
+  }).filter(r=>r.total||r.contacts||r.hours||r.openTasks);
+  rows.sort((a,b)=>b.active-a.active || b.contacts-a.contacts);
+
+  const tot = rows.reduce((a,r)=>({active:a.active+r.active,total:a.total+r.total,contacts:a.contacts+r.contacts,hours:a.hours+r.hours,openTasks:a.openTasks+r.openTasks,highRisk:a.highRisk+r.highRisk}),{active:0,total:0,contacts:0,hours:0,openTasks:0,highRisk:0});
+  const unassigned = clients.filter(c=>c.status==='active' && !c.keyWorker).length;
+  const avgLoad = rows.length ? Math.round(tot.active/rows.length*10)/10 : 0;
+
+  let body = reportHeader('Workload & Capacity Report', `Caseload, contact hours & tasks · Period: ${fmt(from)} — ${fmt(to)}`);
+  body += `<div class="stat-row">
+    <div class="stat-box"><div class="sv">${tot.active}</div><div class="sl">Active Clients</div></div>
+    <div class="stat-box"><div class="sv">${rows.length}</div><div class="sl">Workers with Load</div></div>
+    <div class="stat-box"><div class="sv">${avgLoad}</div><div class="sl">Avg Active / Worker</div></div>
+    <div class="stat-box"><div class="sv">${tot.contacts}</div><div class="sl">Contacts (period)</div></div>
+    <div class="stat-box"><div class="sv">${tot.hours.toFixed(1)}</div><div class="sl">Contact Hours (period)</div></div>
+  </div>`;
+  if(unassigned) body += `<div style="background:#fef3c7;border:1px solid #fde68a;border-radius:6px;padding:8px 12px;font-size:12px;margin-bottom:14px">⚠️ <strong>${unassigned}</strong> active client${unassigned!==1?'s have':' has'} no key worker assigned.</div>`;
+  body += `<h2>By Worker</h2>
+  <table>
+    <tr><th>Worker</th><th>Active Clients</th><th>Total Clients</th><th>High-Risk (active)</th><th>Contacts (period)</th><th>Contact Hours</th><th>Open Tasks</th><th>Capacity</th></tr>
+    ${rows.map(r=>{
+      const flag = r.active>=WORKLOAD_HIGH ? '<span class="badge badge-high">High load</span>'
+        : r.active>=WORKLOAD_HIGH*0.7 ? '<span class="badge badge-medium">Near capacity</span>'
+        : '<span class="badge badge-low">OK</span>';
+      return `<tr>
+        <td><strong>${r.worker}</strong></td>
+        <td style="text-align:center;font-weight:700">${r.active}</td>
+        <td style="text-align:center">${r.total}</td>
+        <td style="text-align:center">${r.highRisk||'—'}</td>
+        <td style="text-align:center">${r.contacts}</td>
+        <td style="text-align:center">${r.hours.toFixed(1)}</td>
+        <td style="text-align:center">${r.openTasks||'—'}</td>
+        <td>${flag}</td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="8">No workload data</td></tr>'}
+    <tr style="font-weight:700"><td>TEAM TOTAL</td><td style="text-align:center">${tot.active}</td><td style="text-align:center">${tot.total}</td><td style="text-align:center">${tot.highRisk}</td><td style="text-align:center">${tot.contacts}</td><td style="text-align:center">${tot.hours.toFixed(1)}</td><td style="text-align:center">${tot.openTasks}</td><td></td></tr>
+  </table>
+  <p style="font-size:11px;color:#6b7280;margin-top:8px">Capacity flags: <strong>High load</strong> ≥ ${WORKLOAD_HIGH} active clients · <strong>Near capacity</strong> ≥ ${Math.round(WORKLOAD_HIGH*0.7)} · Contact hours from logged time entries in the selected period.</p>`;
+  return body;
 }
 
 function generateFundingReport(program) { openReport(buildFundingReport(program)); }
@@ -4701,12 +4834,28 @@ function buildFundingReport(program) {
   const grandClients  = allStats.reduce((a,s)=>a+s.clients.length,0);
   const grandWithEp   = allStats.reduce((a,s)=>a+s.clientsWithEpisode,0);
 
-  let body = reportHeader(title, `Completed Episodes of Care · Criteria: ${EOC_WEEKS} weeks engaged + minimum ${EOC_MIN_CONTACTS} client contacts`);
+  const grandPartial = allStats.reduce((a,s)=>a+s.partialEpisodes,0);
+  const kpi = fundingKPI(progs);
+  const kpiBar = Math.min(100, kpi.pct);
+  const kpiColor = kpiBar>=100 ? '#16a34a' : kpiBar>=60 ? '#2d6a4f' : '#d97706';
+
+  let body = reportHeader(title, `Episodes of Care · ${kpi.fy.label} · Criteria: ${EOC_WEEKS} weeks engaged + minimum ${EOC_MIN_CONTACTS} client contacts`);
+  // Annual KPI banner
+  body += `<div style="border:2px solid ${kpiColor};border-radius:8px;padding:14px 16px;margin-bottom:16px;background:#f8fbf9">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px">
+      <div style="font-size:14px;font-weight:700;color:#1a3a2a">Annual KPI — Completed Episodes of Care (${kpi.fy.label})</div>
+      <div style="font-size:13px;font-weight:700;color:${kpiColor}">${kpi.episodesFY} of ${kpi.target} &nbsp;(${kpi.pct}%)</div>
+    </div>
+    <div style="height:16px;background:#e5e7eb;border-radius:8px;overflow:hidden;margin-top:8px">
+      <div style="height:100%;width:${kpiBar}%;background:${kpiColor}"></div>
+    </div>
+    <div style="font-size:11px;color:#6b7280;margin-top:6px">${kpi.episodesFY>=kpi.target?'✓ Target met.':`${kpi.target-kpi.episodesFY} to go.`} &nbsp;·&nbsp; ${kpi.partial} partial episode-equivalents currently in progress toward the next milestones.</div>
+  </div>`;
   body += `<div class="stat-row">
-    <div class="stat-box"><div class="sv">${grandEpisodes}</div><div class="sl">Complete Episodes of Care</div></div>
-    <div class="stat-box"><div class="sv">${grandWithEp}</div><div class="sl">Clients with ≥1 Episode</div></div>
-    <div class="stat-box"><div class="sv">${grandClients}</div><div class="sl">Total Program Clients</div></div>
-    <div class="stat-box"><div class="sv">${grandClients?Math.round(grandWithEp/grandClients*100):0}%</div><div class="sl">Completion Rate</div></div>
+    <div class="stat-box"><div class="sv">${kpi.episodesFY}</div><div class="sl">Complete Episodes (${kpi.fy.label})</div></div>
+    <div class="stat-box"><div class="sv">${grandEpisodes}</div><div class="sl">Complete Episodes (all time)</div></div>
+    <div class="stat-box"><div class="sv">${Math.round(grandPartial*10)/10}</div><div class="sl">Partial Episode-Equivalents</div></div>
+    <div class="stat-box"><div class="sv">${grandWithEp}/${grandClients}</div><div class="sl">Clients with ≥1 Episode</div></div>
   </div>`;
   body += `<div style="background:#f0f7f3;border:1px solid #cde5d8;border-radius:6px;padding:10px 14px;font-size:11px;margin-bottom:16px;line-height:1.6">
     <strong>Episode of Care — definition.</strong> A completed episode is a period of <strong>${EOC_WEEKS} weeks (${EOC_DAYS} days)</strong> of engagement with the program containing a minimum of <strong>${EOC_MIN_CONTACTS} recorded client contacts</strong> (case notes tagged to the program <em>or</em> general). A client may accrue multiple consecutive episodes; a window that has not yet reached both thresholds is shown as <em>in&nbsp;progress</em>.
@@ -4715,14 +4864,15 @@ function buildFundingReport(program) {
   allStats.forEach(s=>{
     const meta = FUNDING_PROGRAMS[s.program] || { label:s.program };
     body += `<h2>${meta.label} — ${s.totalEpisodes} Complete Episode${s.totalEpisodes!==1?'s':''} of Care (${s.clients.length} client${s.clients.length!==1?'s':''})</h2>`;
-    body += `<table><tr><th>Client</th><th>First Contact</th><th>Last Contact</th><th>Weeks Engaged</th><th>Contacts</th><th>Complete Episodes</th><th>Current Window</th><th>Status</th></tr>`;
+    body += `<table><tr><th>Client</th><th>First Contact</th><th>Last Contact</th><th>Weeks Engaged</th><th>Contacts</th><th>Complete Episodes</th><th>Partial Progress</th><th>Status</th></tr>`;
     const sorted = [...s.rows].sort((a,b)=> b.completeEpisodes-a.completeEpisodes || b.totalContacts-a.totalContacts);
     body += (sorted.map(r=>{
       const complete = r.completeEpisodes>0;
-      const openInfo = r.openContacts ? `${r.openContacts}/${EOC_MIN_CONTACTS} contacts · ${r.openWeeks.toFixed(1)}/${EOC_WEEKS} wks` : '—';
+      const partialPct = Math.round(r.partialFraction*100);
+      const openInfo = r.openContacts ? `${partialPct}% &nbsp;(${r.openContacts}/${EOC_MIN_CONTACTS} contacts · ${r.openWeeks.toFixed(1)}/${EOC_WEEKS} wks)` : '—';
       const statusBadge = complete
-        ? `<span class="badge badge-low">✓ ${r.completeEpisodes} episode${r.completeEpisodes!==1?'s':''}</span>`
-        : `<span class="badge badge-medium">In progress</span>`;
+        ? `<span class="badge badge-low">✓ ${r.completeEpisodes} complete${r.openContacts?' + partial':''}</span>`
+        : (r.openContacts ? `<span class="badge badge-medium">Partial ${partialPct}%</span>` : `<span class="badge badge-closed">No contacts</span>`);
       return `<tr>
         <td>${r.client.fullName||'—'}</td>
         <td>${r.firstContact?fmt(new Date(r.firstContact).toISOString()):'—'}</td>
@@ -6362,6 +6512,7 @@ function openSessionModal(clientId, defaultType) {
 
     // Bill to NDIS plan if a support item was chosen on a disability session
     let billedMsg = '';
+    let _billedClaim = null;
     if(type==='disability') {
       const raw = document.getElementById('sm-ndis-item')?.value||'';
       const item = ndisFindItem(raw.split(' — ')[0].trim());
@@ -6371,12 +6522,15 @@ function openSessionModal(clientId, defaultType) {
           const cl = clients.find(c=>c.id===clientId);
           if(cl){
             cl.dis = cl.dis || {}; cl.dis.claims = cl.dis.claims || [];
-            cl.dis.claims.push({ id:uid(), code:item.c, name:item.n, unit:item.u, price:item.p,
+            const claim = { id:uid(), code:item.c, name:item.n, unit:item.u, price:item.p,
               qty, total:Math.round(item.p*qty*100)/100, date:noteDateStr,
               provider:worker, category:document.getElementById('sm-ndis-cat')?.value||ndisCategoryForCode(item.c),
-              note:'From session note', noteId:n.id, billedBy:currentUser?.name||'', billedAt:now() });
+              note:'From session note', noteId:n.id, billedBy:currentUser?.name||'', billedAt:now() };
+            claim.invoiceNo = ndisInvoiceNo(claim);
+            cl.dis.claims.push(claim);
             cl.disability = true;
-            billedMsg = ' + billed '+ndisMoney(item.p*qty)+' to NDIS';
+            _billedClaim = { clientId, claim };
+            billedMsg = ' + billed '+ndisMoney(item.p*qty)+' to NDIS (invoice generated)';
             audit('NDIS item billed (session)', `${item.c} × ${qty} = ${ndisMoney(item.p*qty)}`, clientId);
           }
         }
@@ -6412,7 +6566,9 @@ function openSessionModal(clientId, defaultType) {
     }
 
     audit('Logged session', `${(n.type||'general').toUpperCase()} — ${n.contactType||''} ${mins>0?'('+mins+' min)':''}`, clientId);
-    saveAll(); showToast(`Session logged${mins>0?' + '+mins+' min time':''}${billedMsg}`); return true;
+    saveAll(); showToast(`Session logged${mins>0?' + '+mins+' min time':''}${billedMsg}`);
+    if(_billedClaim) ndisGenerateInvoice(_billedClaim.clientId, _billedClaim.claim);
+    return true;
   }, '720px');
 }
 
@@ -6723,7 +6879,7 @@ function renderNDISFundingCards(c){
           <td style="font-size:12px">${cl.qty}</td>
           <td style="font-size:12px;font-weight:600;white-space:nowrap">${ndisMoney(cl.total)}</td>
           <td style="font-size:12px">${sanitize(cl.provider||'—')}</td>
-          <td><button class="btn btn-sm btn-danger" onclick="deleteNDISClaim('${c.id}','${cl.id}')">✕</button></td>
+          <td style="display:flex;gap:4px"><button class="btn btn-sm btn-outline" title="Generate invoice" onclick="ndisGenerateInvoice('${c.id}','${cl.id}')">🧾</button><button class="btn btn-sm btn-danger" onclick="deleteNDISClaim('${c.id}','${cl.id}')">✕</button></td>
         </tr>`).join('')}
       </tbody>
       <tfoot><tr><td colspan="6" style="text-align:right;font-weight:700">Total billed:</td><td style="font-weight:700">${ndisMoney(f.spent)}</td><td colspan="2"></td></tr></tfoot>
@@ -6802,7 +6958,7 @@ function openNDISBillModal(id){
     const qty = parseFloat(document.getElementById('ndisbill-qty')?.value)||0;
     if(qty<=0){ alert('Enter a quantity greater than zero.'); return false; }
     c.dis = c.dis || {}; c.dis.claims = c.dis.claims || [];
-    c.dis.claims.push({
+    const claim = {
       id: uid(), code: item.c, name: item.n, unit: item.u, price: item.p,
       qty, total: Math.round(item.p*qty*100)/100,
       date: document.getElementById('ndisbill-date')?.value||today(),
@@ -6810,11 +6966,14 @@ function openNDISBillModal(id){
       category: document.getElementById('ndisbill-cat')?.value||'',
       note: document.getElementById('ndisbill-note')?.value||'',
       billedBy: currentUser?.name||'', billedAt: now(),
-    });
+    };
+    claim.invoiceNo = ndisInvoiceNo(claim);
+    c.dis.claims.push(claim);
     c.disability = true;
     audit('NDIS item billed', `${item.c} × ${qty} = ${ndisMoney(item.p*qty)}`, id);
-    saveAll(); showToast('NDIS item billed ✓');
+    saveAll(); showToast('NDIS item billed ✓ — generating invoice');
     rerenderDisabilityTab(id);
+    ndisGenerateInvoice(id, claim);
     return true;
   });
 }
@@ -6854,6 +7013,91 @@ function deleteNDISClaim(id, claimId){
   const c=clients.find(cl=>cl.id===id); if(!c?.dis?.claims) return;
   c.dis.claims = c.dis.claims.filter(cl=>cl.id!==claimId);
   saveAll(); rerenderDisabilityTab(id);
+}
+
+// ----- NDIS invoice -----
+function ndisInvoiceNo(claim){
+  if(claim && claim.invoiceNo) return claim.invoiceNo;
+  const d = ((claim&&claim.date)||today()).replace(/-/g,'');
+  return 'INV-'+d+'-'+String((claim&&claim.id)||uid()).slice(-4).toUpperCase();
+}
+// Generate a printable NDIS tax invoice for one claim (by id) or an array of claims
+function ndisGenerateInvoice(clientId, claimOrId){
+  const c = clients.find(x=>x.id===clientId); if(!c) return;
+  const claims = c.dis?.claims || [];
+  let list;
+  if (Array.isArray(claimOrId)) list = claimOrId;
+  else if (typeof claimOrId === 'string') list = claims.filter(cl=>cl.id===claimOrId);
+  else if (claimOrId) list = [claimOrId];
+  else list = claims;
+  if(!list.length){ showToast('No claim to invoice'); return; }
+
+  const org = DB.load('orgName','Worn Gundidj Aboriginal Co-Operative');
+  const abn = DB.load('orgABN','');
+  const reg = DB.load('orgNDISReg','');
+  const logo = orgLogoSrc();
+  const dis = c.dis || {};
+  const invNo = ndisInvoiceNo(list[0]);
+  const total = list.reduce((a,cl)=>a+(Number(cl.total)||0),0);
+  const rows = list.map(cl=>`<tr>
+    <td>${fmt(cl.date)}</td>
+    <td>${sanitize(cl.name||'')}<div style="font-size:10px;color:#666;font-family:monospace">${sanitize(cl.code||'')}</div></td>
+    <td>${sanitize(cl.category||'Core')}</td>
+    <td style="text-align:right">${ndisMoney(cl.price)}</td>
+    <td style="text-align:center">${cl.qty}</td>
+    <td style="text-align:right">GST Free</td>
+    <td style="text-align:right;font-weight:700">${ndisMoney(cl.total)}</td>
+  </tr>`).join('');
+
+  const w = window.open('','_blank');
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>NDIS Invoice ${invNo} — ${c.fullName||''}</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Segoe UI',Arial,sans-serif;font-size:12px;color:#1a1a1a;padding:32px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    .top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #1a3a2a;padding-bottom:16px;margin-bottom:20px}
+    .brand{display:flex;align-items:center;gap:14px}
+    .brand img{height:56px}
+    .brand .o{font-size:16px;font-weight:800;color:#1a3a2a}
+    .brand .a{font-size:11px;color:#555;line-height:1.5;margin-top:2px}
+    .inv-meta{text-align:right}
+    .inv-meta .t{font-size:24px;font-weight:800;color:#1a3a2a;letter-spacing:1px}
+    .inv-meta div{font-size:11px;color:#555;margin-top:2px}
+    .parties{display:flex;gap:24px;margin-bottom:18px}
+    .party{flex:1;background:#f7faf8;border:1px solid #e2e8f0;border-radius:8px;padding:12px}
+    .party h4{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#16794a;margin-bottom:6px}
+    .party div{font-size:12px;line-height:1.6}
+    table{width:100%;border-collapse:collapse;margin:8px 0 16px}
+    th{background:#1a3a2a;color:#fff;padding:8px 10px;font-size:10px;text-transform:uppercase;text-align:left}
+    td{padding:8px 10px;border-bottom:1px solid #e5e7eb;font-size:11px}
+    .totals{margin-left:auto;width:280px}
+    .totals td{padding:6px 10px;font-size:12px}
+    .totals .grand{font-size:15px;font-weight:800;color:#1a3a2a;border-top:2px solid #1a3a2a}
+    .pay{background:#f0f7f3;border:1px solid #cde5d8;border-radius:8px;padding:12px;font-size:11px;line-height:1.7;margin-top:18px}
+    .foot{margin-top:24px;border-top:1px solid #e5e7eb;padding-top:10px;font-size:10px;color:#888;text-align:center}
+    @media print{body{padding:14px}}
+  </style></head><body>
+    <div class="top">
+      <div class="brand">${logo?`<img src="${logo}" alt="${org}">`:''}<div><div class="o">${org}</div><div class="a">1-3 Rooneys Rd, Warrnambool VIC 3280<br>03 5561 5315 · admin@worngundidj.org.au${abn?'<br>ABN: '+abn:''}${reg?'<br>NDIS Provider Reg: '+reg:''}</div></div></div>
+      <div class="inv-meta"><div class="t">TAX INVOICE</div><div><strong>Invoice #:</strong> ${invNo}</div><div><strong>Issue date:</strong> ${fmt(today())}</div></div>
+    </div>
+    <div class="parties">
+      <div class="party"><h4>Bill To — NDIS Participant</h4><div><strong>${c.fullName||'—'}</strong><br>NDIS No: ${dis.ndisNum||c.ndis||'—'}<br>Plan management: ${dis.planMgmt||'—'}${dis.supportCoord?'<br>Support Coordinator: '+dis.supportCoord:''}</div></div>
+      <div class="party"><h4>Service Provider</h4><div><strong>${org}</strong><br>${abn?'ABN: '+abn+'<br>':''}${reg?'NDIS Reg: '+reg+'<br>':''}admin@worngundidj.org.au</div></div>
+    </div>
+    <table>
+      <tr><th>Date</th><th>Support Item</th><th>Budget</th><th style="text-align:right">Unit Price</th><th style="text-align:center">Qty</th><th style="text-align:right">GST</th><th style="text-align:right">Amount</th></tr>
+      ${rows}
+    </table>
+    <table class="totals">
+      <tr><td>Subtotal</td><td style="text-align:right">${ndisMoney(total)}</td></tr>
+      <tr><td>GST</td><td style="text-align:right">$0.00</td></tr>
+      <tr class="grand"><td>Total Due</td><td style="text-align:right">${ndisMoney(total)}</td></tr>
+    </table>
+    <div class="pay"><strong>Payment details:</strong> Please remit payment to ${org}. Quote invoice number <strong>${invNo}</strong> as reference. NDIS supports are GST-free under the <em>A New Tax System (Goods and Services Tax) Act 1999</em>. This invoice is for supports delivered under the participant's NDIS plan.</div>
+    <div class="foot">${org} — NDIS Tax Invoice — Generated ${new Date().toLocaleString('en-AU')}</div>
+    <script>window.onload=()=>window.print()<\/script>
+  </body></html>`);
+  w.document.close();
 }
 
 // ----- Supports modal -----
@@ -7531,7 +7775,10 @@ function renderHomeOwnership() {
         <div style="font-size:18px;font-weight:800;margin-bottom:4px">First Peoples Home Ownership Program</div>
         <div style="font-size:13px;opacity:.85">Homes Victoria — Supporting First Peoples on the path to home ownership in Victoria</div>
       </div>
-      <button class="btn" style="background:#fff;color:#1a3a2a;font-weight:700" onclick="openFPHOForm()">➕ New Application</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn" style="background:rgba(255,255,255,0.15);color:#fff;font-weight:700;border:1px solid rgba(255,255,255,0.4)" onclick="generateFPHOReport()">📊 Program Report</button>
+        <button class="btn" style="background:#fff;color:#1a3a2a;font-weight:700" onclick="openFPHOForm()">➕ New Application</button>
+      </div>
     </div>
   </div>
 
@@ -7540,6 +7787,32 @@ function renderHomeOwnership() {
     <div class="fpho-grant-card"><div class="gc-name">Stamp Duty Helper</div><div class="gc-amt">up to $10,000</div><div class="gc-desc">Matched grant on land transfer duty</div></div>
     <div class="fpho-grant-card"><div class="gc-name">Deposit Contribution</div><div class="gc-amt">up to $20,000</div><div class="gc-desc">Dollar-for-dollar deposit match</div></div>
     <div class="fpho-grant-card"><div class="gc-name">New Build Bonus</div><div class="gc-amt">+ $5,000</div><div class="gc-desc">Extra on top of deposit contribution for new builds</div></div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">👥 FPHO Client List</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <span style="font-size:12px;color:var(--muted)">${fphoClients.length} client${fphoClients.length!==1?'s':''}</span>
+        <button class="btn btn-sm btn-primary" onclick="openFPHOClientModal()">➕ Add Client</button>
+      </div>
+    </div>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:12px">A dedicated client roster for the Home Ownership program, separate from the main CMS client list.</p>
+    ${fphoClients.length===0 ? `<div class="empty-state"><div class="icon">👥</div><p>No FPHO clients yet. Click <strong>Add Client</strong> to start the roster.</p></div>` :
+    `<div class="table-wrap"><table>
+      <thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>Region</th><th>Stage</th><th>Officer</th><th></th></tr></thead>
+      <tbody>
+        ${[...fphoClients].sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(cl=>`<tr>
+          <td style="font-weight:600">${sanitize(cl.name||'—')}</td>
+          <td style="font-size:12px">${sanitize(cl.phone||'—')}</td>
+          <td style="font-size:12px">${sanitize(cl.email||'—')}</td>
+          <td style="font-size:12px">${sanitize(cl.region||'—')}</td>
+          <td><span class="badge badge-${cl.stage==='Settled'?'low':cl.stage==='Pre-approval'||cl.stage==='Application'?'medium':'closed'}">${sanitize(cl.stage||'Enquiry')}</span></td>
+          <td style="font-size:12px">${sanitize(cl.officer||'—')}</td>
+          <td style="display:flex;gap:4px"><button class="btn btn-sm btn-outline" onclick="openFPHOClientModal('${cl.id}')">✏️</button><button class="btn btn-sm btn-danger" onclick="deleteFPHOClient('${cl.id}')">✕</button></td>
+        </tr>`).join('')}
+      </tbody>
+    </table></div>`}
   </div>
 
   <div class="card">
@@ -7571,6 +7844,85 @@ function deleteFPHO(id) {
   if(!confirm('Delete this application?')) return;
   fphoApplications = fphoApplications.filter(a=>a.id!==id);
   saveFPHO(); showPage('homeownership');
+}
+
+// ----- FPHO client roster -----
+const FPHO_STAGES = ['Enquiry','Information Session','Eligibility Check','Application','Pre-approval','Purchasing','Settled','Withdrawn'];
+const FPHO_REGIONS = ['Barwon South West','Grampians','Loddon Mallee','Hume','Gippsland','Melbourne Metro','Statewide'];
+function openFPHOClientModal(id){
+  const cl = id ? fphoClients.find(x=>x.id===id) : null;
+  const c = cl || {};
+  const esc = s => (s||'').replace(/"/g,'&quot;');
+  const html = `
+    <div class="grid-2">
+      <div class="form-group"><label>Full Name *</label><input id="fphc-name" value="${esc(c.name)}" placeholder="Client name"></div>
+      <div class="form-group"><label>Phone</label><input id="fphc-phone" value="${esc(c.phone)}"></div>
+      <div class="form-group"><label>Email</label><input id="fphc-email" value="${esc(c.email)}"></div>
+      <div class="form-group"><label>Region</label><select id="fphc-region"><option value="">—</option>${FPHO_REGIONS.map(r=>`<option ${c.region===r?'selected':''}>${r}</option>`).join('')}</select></div>
+      <div class="form-group"><label>Stage</label><select id="fphc-stage">${FPHO_STAGES.map(s=>`<option ${c.stage===s?'selected':''}>${s}</option>`).join('')}</select></div>
+      <div class="form-group"><label>ACCO Home Ownership Officer</label><input id="fphc-officer" value="${esc(c.officer)}"></div>
+      <div class="form-group"><label>ATSI Status</label><select id="fphc-atsi"><option value="">—</option>${['Aboriginal','Torres Strait Islander','Both','Neither'].map(s=>`<option ${c.atsi===s?'selected':''}>${s}</option>`).join('')}</select></div>
+      <div class="form-group"><label>Linked Application</label><select id="fphc-appId"><option value="">— None —</option>${fphoApplications.map(a=>`<option value="${a.id}" ${c.appId===a.id?'selected':''}>${a.primaryFirstName||''} ${a.primaryLastName||''} (${(a.status||'draft')})</option>`).join('')}</select></div>
+    </div>
+    <div class="form-group"><label>Notes</label><textarea id="fphc-notes" style="min-height:70px">${c.notes||''}</textarea></div>`;
+  showModal(id?'✏️ Edit FPHO Client':'👥 Add FPHO Client', html, () => {
+    const name = document.getElementById('fphc-name')?.value?.trim();
+    if(!name){ alert('Name is required'); return false; }
+    const g = s => document.getElementById(s)?.value||'';
+    const rec = { id: id||uid(), name, phone:g('fphc-phone'), email:g('fphc-email'), region:g('fphc-region'),
+      stage:g('fphc-stage'), officer:g('fphc-officer'), atsi:g('fphc-atsi'), appId:g('fphc-appId'), notes:g('fphc-notes'),
+      updatedAt: now(), created: c.created||today() };
+    if(id){ const i=fphoClients.findIndex(x=>x.id===id); if(i>=0) fphoClients[i]=rec; else fphoClients.push(rec); }
+    else fphoClients.push(rec);
+    saveFPHOClients(); showToast('FPHO client saved ✓'); showPage('homeownership');
+    return true;
+  });
+}
+function deleteFPHOClient(id){
+  if(!confirm('Remove this client from the FPHO roster?')) return;
+  fphoClients = fphoClients.filter(x=>x.id!==id);
+  saveFPHOClients(); showPage('homeownership');
+}
+
+// ----- FPHO program report -----
+function generateFPHOReport(){ openReport(buildFPHOReport()); }
+function buildFPHOReport(){
+  const apps = fphoApplications;
+  const byStatus = {}; apps.forEach(a=>{ const s=a.status||'draft'; byStatus[s]=(byStatus[s]||0)+1; });
+  const byStage = {}; fphoClients.forEach(c=>{ const s=c.stage||'Enquiry'; byStage[s]=(byStage[s]||0)+1; });
+  const byRegion = {}; fphoClients.forEach(c=>{ const r=c.region||'Unspecified'; byRegion[r]=(byRegion[r]||0)+1; });
+  // Indicative grant value: approved applications × programme maximums
+  const approved = apps.filter(a=>a.status==='approved').length;
+  const maxPerApp = 2500 + 10000 + 20000 + 5000; // Booster + Stamp Duty + Deposit + New Build
+  const settled = fphoClients.filter(c=>c.stage==='Settled').length;
+  const atsiCount = fphoClients.filter(c=>c.atsi && c.atsi!=='Neither').length;
+
+  let body = reportHeader('First Peoples Home Ownership — Program Report', 'Homes Victoria · Worn Gundidj ACCO Home Ownership');
+  body += `<div class="stat-row">
+    <div class="stat-box"><div class="sv">${fphoClients.length}</div><div class="sl">Program Clients</div></div>
+    <div class="stat-box"><div class="sv">${apps.length}</div><div class="sl">Applications</div></div>
+    <div class="stat-box"><div class="sv">${approved}</div><div class="sl">Approved</div></div>
+    <div class="stat-box"><div class="sv">${settled}</div><div class="sl">Settled</div></div>
+    <div class="stat-box"><div class="sv">${atsiCount}</div><div class="sl">ATSI Clients</div></div>
+  </div>`;
+  body += `<h2>Applications by Status</h2><table><tr><th>Status</th><th>Count</th></tr>
+    ${Object.entries(byStatus).sort((a,b)=>b[1]-a[1]).map(([s,n])=>`<tr><td>${s.toUpperCase()}</td><td>${n}</td></tr>`).join('')||'<tr><td colspan="2">No applications</td></tr>'}</table>`;
+  body += `<h2>Clients by Stage</h2><table><tr><th>Stage</th><th>Count</th></tr>
+    ${FPHO_STAGES.filter(s=>byStage[s]).map(s=>`<tr><td>${s}</td><td>${byStage[s]}</td></tr>`).join('')||'<tr><td colspan="2">No clients</td></tr>'}</table>`;
+  body += `<h2>Clients by Region</h2><table><tr><th>Region</th><th>Count</th></tr>
+    ${Object.entries(byRegion).sort((a,b)=>b[1]-a[1]).map(([r,n])=>`<tr><td>${r}</td><td>${n}</td></tr>`).join('')||'<tr><td colspan="2">No clients</td></tr>'}</table>`;
+  body += `<h2>Client Roster</h2>
+    <table><tr><th>Name</th><th>Region</th><th>Stage</th><th>Officer</th><th>ATSI</th><th>Linked Application</th></tr>
+    ${[...fphoClients].sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(c=>{
+      const app = fphoApplications.find(a=>a.id===c.appId);
+      return `<tr><td>${c.name||'—'}</td><td>${c.region||'—'}</td><td>${c.stage||'—'}</td><td>${c.officer||'—'}</td><td>${c.atsi||'—'}</td><td>${app?`${app.primaryFirstName||''} ${app.primaryLastName||''} (${app.status||'draft'})`:'—'}</td></tr>`;
+    }).join('')||'<tr><td colspan="6">No clients</td></tr>'}</table>`;
+  body += `<h2>Indicative Grant Exposure</h2>
+    <p style="font-size:12px">Programme maximums per application: Home Buyer Booster $2,500 · Stamp Duty Helper up to $10,000 · Deposit Contribution up to $20,000 · New Build Bonus $5,000 (max <strong>$${maxPerApp.toLocaleString()}</strong> per application).</p>
+    <table><tr><td><strong>Approved applications</strong></td><td>${approved}</td></tr>
+    <tr><td><strong>Indicative maximum grant value (approved × max)</strong></td><td>$${(approved*maxPerApp).toLocaleString()}</td></tr></table>
+    <p style="font-size:11px;color:#6b7280">Indicative only — actual grant amounts depend on each participant's eligibility and assessed entitlements.</p>`;
+  return body;
 }
 
 function openFPHOForm(id) {
@@ -8313,6 +8665,10 @@ function renderSettings() {
   <div class="card">
     <div class="card-title" style="margin-bottom:16px">⚙️ System Settings</div>
     <div class="form-group"><label>Organisation Name</label><input id="set-org" value="${DB.load('orgName','')}" placeholder="e.g. Worn Gundidj Aboriginal Co-Operative"></div>
+    <div class="grid-2">
+      <div class="form-group"><label>ABN (for NDIS invoices)</label><input id="set-abn" value="${DB.load('orgABN','')}" placeholder="e.g. 12 345 678 901"></div>
+      <div class="form-group"><label>NDIS Provider Registration No.</label><input id="set-ndisreg" value="${DB.load('orgNDISReg','')}" placeholder="e.g. 4050001234"></div>
+    </div>
     <div class="form-group"><label>Your Default Worker Name</label><input id="set-worker" value="${DB.load('workerName','')}" placeholder="Your name"></div>
     <div class="form-group">
       <label>Sidebar Background Image</label>
@@ -8742,6 +9098,8 @@ function clearSidebarBg() {
 
 function saveSettings() {
   DB.save('orgName', document.getElementById('set-org')?.value||'');
+  DB.save('orgABN', document.getElementById('set-abn')?.value||'');
+  DB.save('orgNDISReg', document.getElementById('set-ndisreg')?.value||'');
   DB.save('workerName', document.getElementById('set-worker')?.value||'');
   showToast('Settings saved');
 }
