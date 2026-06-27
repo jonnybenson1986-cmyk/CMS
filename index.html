@@ -1112,6 +1112,7 @@ function openClientProfile(id) {
 
   <div class="tabs" id="profile-tabs">
     <div class="tab active" onclick="switchProfileTab('overview','${id}')">Overview</div>
+    <div class="tab" id="ptab-notes" onclick="switchProfileTab('notes','${id}')">📝 Notes &amp; Files (${clientNotes.length})</div>
     <div class="tab" onclick="switchProfileTab('summary','${id}')">📄 Summary</div>
     <div class="tab" onclick="switchProfileTab('intake','${id}')">📋 Intake Form</div>
     <div class="tab" onclick="switchProfileTab('keyworkers','${id}')">👷 Key Workers</div>
@@ -1122,11 +1123,10 @@ function openClientProfile(id) {
     <div class="tab" onclick="switchProfileTab('disability','${id}')">♿ Disability</div>
     <div class="tab" onclick="switchProfileTab('workfoundations','${id}')">💼 Work Foundations</div>
     <div class="tab" onclick="switchProfileTab('cultural','${id}')">Cultural Strengthening</div>
-    <div class="tab" onclick="switchProfileTab('notes','${id}')">Notes (${clientNotes.length})</div>
     <div class="tab" onclick="switchProfileTab('time','${id}')">Time (${hrs}h ${mins}m)</div>
     <div class="tab" onclick="switchProfileTab('safety','${id}')">Safety Plan</div>
     <div class="tab" onclick="switchProfileTab('goals','${id}')">🎯 Goals (${(c.goalPlan||[]).length})</div>
-    <div class="tab" onclick="switchProfileTab('files','${id}')">📎 Files (${(c.attachments||[]).length})</div>
+    <div class="tab" id="ptab-files" onclick="switchProfileTab('files','${id}')">📎 Files (${(c.attachments||[]).length})</div>
     <div class="tab" onclick="switchProfileTab('feedback','${id}')">⭐ Feedback</div>
   </div>
   <div id="profile-tab-content">${renderProfileTab('overview', c, clientNotes, clientTime)}</div>
@@ -1172,7 +1172,7 @@ function renderProfileTab(tab, c, clientNotes, clientTime) {
       </div>
     </div>
     <div class="card">
-      <div class="card-header"><div class="card-title">📝 Recent Notes</div><button class="btn-ghost" onclick="document.querySelector('#profile-tabs .tab:nth-child(7)').click()">All notes →</button></div>
+      <div class="card-header"><div class="card-title">📝 Recent Notes</div><button class="btn-ghost" onclick="document.getElementById('ptab-notes').click()">All notes &amp; files →</button></div>
       ${recent.length===0?'<p style="color:var(--muted);font-size:13px">No notes yet</p>':
         recent.map(n=>`<div class="note-entry ${n.type||'general'}">
           <div class="note-meta"><span class="section-badge badge-${n.type||'general'}">${n.type||'general'}</span><span>${fmtdt(n.created)}</span><span>${n.worker||''}</span></div>
@@ -1364,34 +1364,84 @@ function renderProfileTab(tab, c, clientNotes, clientTime) {
   }
 
   if(tab === 'notes') {
+    const allFiles = c.attachments || [];
+    const standaloneTime = clientTime.filter(t=>!t.fromNoteId); // manual Log Time entries (session time shown on the note)
+    const unlinkedFiles = allFiles.filter(f=>!f.noteId);
+    // Build a combined chronological feed of notes + standalone time entries
+    const feed = [
+      ...clientNotes.map(n=>({ kind:'note', date:n.created, n })),
+      ...standaloneTime.map(t=>({ kind:'time', date:(t.date||'')+'T12:00:00', t })),
+    ].sort((a,b)=>(b.date||'').localeCompare(a.date||''));
     return `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn btn-sm btn-outline" onclick="filterNoteType('all')">All</button>
         <button class="btn btn-sm" style="background:#d1fae5;color:#065f46" onclick="filterNoteType('sewb')">SEWB</button>
         <button class="btn btn-sm" style="background:#fee2e2;color:#991b1b" onclick="filterNoteType('aod')">AOD</button>
         <button class="btn btn-sm" style="background:#dbeafe;color:#1e40af" onclick="filterNoteType('justice')">Justice</button>
         <button class="btn btn-sm" style="background:#fef3c7;color:#92400e" onclick="filterNoteType('cultural')">Cultural Strengthening</button>
+        <button class="btn btn-sm" style="background:#ede9fe;color:#6b21a8" onclick="filterNoteType('disability')">Disability</button>
       </div>
-      <button class="btn btn-primary btn-sm" onclick="openNoteModal('${c.id}')">➕ Add Note</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-outline btn-sm" onclick="openTimeModal('${c.id}')">⏱️ Log Time</button>
+        <button class="btn btn-primary btn-sm" onclick="openNoteModal('${c.id}')">➕ Add Note</button>
+      </div>
     </div>
     <div id="notes-list">
-    ${clientNotes.length===0?'<div class="empty-state"><div class="icon">📝</div><p>No notes yet for this client</p></div>':
-      clientNotes.map(n=>`<div class="note-entry ${n.type||'general'}" data-type="${n.type||'general'}">
+    ${feed.length===0?'<div class="empty-state"><div class="icon">📝</div><p>No notes or time logged yet for this client</p><p style="font-size:12px">Use <strong>Add Note</strong> or <strong>Log Session</strong> to record activity.</p></div>':
+      feed.map(item=>{
+        if(item.kind==='time'){
+          const t=item.t;
+          return `<div class="note-entry general" data-type="general" data-kind="time">
+            <div class="note-meta">
+              <span class="section-badge" style="background:#f3f4f6;color:#374151">⏱️ TIME</span>
+              <span>${fmt(t.date)}</span>
+              <span>${t.worker||''}</span>
+              ${t.activity?`<span>📍 ${t.activity}</span>`:''}
+              <span>⏱️ ${t.minutes||0} min</span>
+            </div>
+            ${t.notes?`<div class="note-text">${sanitize(t.notes)}</div>`:''}
+          </div>`;
+        }
+        const n=item.n;
+        const files=allFiles.filter(f=>f.noteId===n.id);
+        return `<div class="note-entry ${n.type||'general'}" data-type="${n.type||'general'}" data-kind="note">
         <div class="note-meta">
           <span class="section-badge badge-${n.type||'general'}">${n.type||'general'}</span>
           <span>${fmtdt(n.created)}</span>
           <span>${n.worker||''}</span>
           ${n.contactType?`<span>📍 ${n.contactType}</span>`:''}
           ${n.duration?`<span>⏱️ ${n.duration} min</span>`:''}
+          ${files.length?`<span title="Attached files">📎 ${files.length}</span>`:''}
           ${noteIsLocked(n)
             ? `<span style="margin-left:auto;font-size:10px;color:var(--muted);display:flex;align-items:center;gap:3px" title="Locked after 24 hours">🔒 Locked</span>`
             : `<button class="btn-ghost" style="margin-left:auto;color:var(--danger);font-size:11px" onclick="deleteNote('${n.id}','${c.id}')">Delete</button>`}
         </div>
         <div class="note-text">${(n.text||'').replace(/\n/g,'<br>')}</div>
-      </div>`).join('')
+        ${files.length?`<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">
+          ${files.map(f=>{
+            const i=allFiles.indexOf(f);
+            return `<span style="display:inline-flex;align-items:center;gap:6px;background:var(--bg);border:1px solid var(--border);border-radius:16px;padding:4px 10px;font-size:11px">
+              ${fileIcon(f.type)} <span style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${sanitize(f.name)}</span>
+              ${(f.type==='application/pdf'||(f.type||'').startsWith('image/'))?`<a href="#" onclick="event.preventDefault();previewFile('${c.id}',${i})" style="color:var(--primary)">View</a>`:''}
+              <a href="#" onclick="event.preventDefault();downloadFile('${c.id}',${i})" style="color:var(--primary)">⬇</a>
+            </span>`;
+          }).join('')}
+        </div>`:''}
+      </div>`;
+      }).join('')
     }
-    </div>`;
+    </div>
+    ${unlinkedFiles.length?`<div class="card" style="margin-top:16px">
+      <div class="card-header"><div class="card-title">📎 Other Client Files <span style="font-weight:400;color:var(--muted);font-size:12px">(not linked to a note)</span></div>
+        <button class="btn btn-sm btn-outline" onclick="document.getElementById('ptab-files').click()">Manage files →</button></div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px">
+        ${unlinkedFiles.map(f=>{ const i=allFiles.indexOf(f); return `<span style="display:inline-flex;align-items:center;gap:6px;background:var(--bg);border:1px solid var(--border);border-radius:16px;padding:5px 12px;font-size:12px">
+          ${fileIcon(f.type)} <span style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${sanitize(f.name)}</span>
+          ${(f.type==='application/pdf'||(f.type||'').startsWith('image/'))?`<a href="#" onclick="event.preventDefault();previewFile('${c.id}',${i})" style="color:var(--primary)">View</a>`:''}
+          <a href="#" onclick="event.preventDefault();downloadFile('${c.id}',${i})" style="color:var(--primary)">⬇</a>
+        </span>`; }).join('')}
+      </div></div>`:''}`;
   }
 
   if(tab === 'time') {
@@ -1868,19 +1918,25 @@ function renderProfileTab(tab, c, clientNotes, clientTime) {
       <div class="alert alert-info" style="margin-bottom:12px">📌 Supports PDF, Word, Excel, images, and text files. Files are stored locally. <strong>Export data regularly</strong> to back up.</div>
       ${attachments.length===0
         ?`<div class="empty-state"><div class="icon">📁</div><p>No files attached yet</p><button class="btn btn-primary btn-sm" style="margin-top:12px" onclick="document.getElementById('file-upload-${c.id}').click()">Attach First File</button></div>`
-        :`<div style="display:grid;gap:10px">${attachments.map((f,i)=>`
+        :`<div style="display:grid;gap:10px">${attachments.map((f,i)=>{
+          const srcNote = f.noteId ? notes.find(n=>n.id===f.noteId) : null;
+          const srcLabel = srcNote
+            ? `🔗 From ${(srcNote.type||'general').toUpperCase()} note · ${fmtdt(srcNote.created)}${srcNote.contactType?' · '+srcNote.contactType:''}`
+            : (f.source||'');
+          return `
           <div style="display:flex;align-items:center;gap:12px;padding:12px;border:1px solid var(--border);border-radius:8px;background:#fafaf8">
             <div style="font-size:28px">${fileIcon(f.type)}</div>
             <div style="flex:1;min-width:0">
               <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${f.name}</div>
               <div style="font-size:11px;color:var(--muted);margin-top:2px">${formatBytes(f.size)} · ${fmt(f.uploadedAt)} · ${f.uploadedBy||'—'}</div>
+              ${srcLabel?`<div style="font-size:11px;color:var(--primary);margin-top:3px">${srcNote?`<a href="#" onclick="event.preventDefault();document.getElementById('ptab-notes').click()" style="color:var(--primary);text-decoration:none">${srcLabel}</a>`:sanitize(srcLabel)}</div>`:''}
             </div>
             <div style="display:flex;gap:6px;flex-shrink:0">
               ${f.type==='application/pdf'||f.type.startsWith('image/')?`<button class="btn btn-sm btn-outline" onclick="previewFile('${c.id}',${i})">👁 View</button>`:''}
               <button class="btn btn-sm btn-outline" onclick="downloadFile('${c.id}',${i})">⬇ Download</button>
               <button class="btn btn-sm btn-danger" onclick="deleteFile('${c.id}',${i})">✕</button>
             </div>
-          </div>`).join('')}</div>`
+          </div>`;}).join('')}</div>`
       }
       <div style="margin-top:16px;border:2px dashed var(--border);border-radius:10px;padding:32px;text-align:center;color:var(--muted);cursor:pointer;transition:all 0.2s"
         onclick="document.getElementById('file-upload-${c.id}').click()"
@@ -3073,6 +3129,14 @@ function openNoteModal(clientId, defaultType) {
     }
     audit('Added note', `${(n.type||'general').toUpperCase()} note — ${n.contactType||''}`, n.clientId);
     saveAll(); showToast('Note saved' + (document.getElementById('nm-addtocal')?.checked?' + added to calendar':'')); return true;
+  });
+}
+
+// Filter the notes & files feed by program type ('all' shows everything)
+function filterNoteType(type) {
+  document.querySelectorAll('#notes-list .note-entry').forEach(el=>{
+    const t = el.getAttribute('data-type') || 'general';
+    el.style.display = (type==='all' || t===type) ? '' : 'none';
   });
 }
 
