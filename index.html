@@ -728,8 +728,10 @@ let referrals = DB.load('referrals', []);
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
+let fphoClients = DB.load('fphoClients', []); // separate client roster for the FPHO program
 let resources = DB.load('resources', []);
 function saveFPHO() { DB.save('fphoApplications', fphoApplications); }
+function saveFPHOClients() { DB.save('fphoClients', fphoClients); }
 
 // ===== AUDIT LOG =====
 let auditLog = DB.load('auditlog', []);
@@ -6510,6 +6512,7 @@ function openSessionModal(clientId, defaultType) {
 
     // Bill to NDIS plan if a support item was chosen on a disability session
     let billedMsg = '';
+    let _billedClaim = null;
     if(type==='disability') {
       const raw = document.getElementById('sm-ndis-item')?.value||'';
       const item = ndisFindItem(raw.split(' — ')[0].trim());
@@ -6519,12 +6522,15 @@ function openSessionModal(clientId, defaultType) {
           const cl = clients.find(c=>c.id===clientId);
           if(cl){
             cl.dis = cl.dis || {}; cl.dis.claims = cl.dis.claims || [];
-            cl.dis.claims.push({ id:uid(), code:item.c, name:item.n, unit:item.u, price:item.p,
+            const claim = { id:uid(), code:item.c, name:item.n, unit:item.u, price:item.p,
               qty, total:Math.round(item.p*qty*100)/100, date:noteDateStr,
               provider:worker, category:document.getElementById('sm-ndis-cat')?.value||ndisCategoryForCode(item.c),
-              note:'From session note', noteId:n.id, billedBy:currentUser?.name||'', billedAt:now() });
+              note:'From session note', noteId:n.id, billedBy:currentUser?.name||'', billedAt:now() };
+            claim.invoiceNo = ndisInvoiceNo(claim);
+            cl.dis.claims.push(claim);
             cl.disability = true;
-            billedMsg = ' + billed '+ndisMoney(item.p*qty)+' to NDIS';
+            _billedClaim = { clientId, claim };
+            billedMsg = ' + billed '+ndisMoney(item.p*qty)+' to NDIS (invoice generated)';
             audit('NDIS item billed (session)', `${item.c} × ${qty} = ${ndisMoney(item.p*qty)}`, clientId);
           }
         }
@@ -6560,7 +6566,9 @@ function openSessionModal(clientId, defaultType) {
     }
 
     audit('Logged session', `${(n.type||'general').toUpperCase()} — ${n.contactType||''} ${mins>0?'('+mins+' min)':''}`, clientId);
-    saveAll(); showToast(`Session logged${mins>0?' + '+mins+' min time':''}${billedMsg}`); return true;
+    saveAll(); showToast(`Session logged${mins>0?' + '+mins+' min time':''}${billedMsg}`);
+    if(_billedClaim) ndisGenerateInvoice(_billedClaim.clientId, _billedClaim.claim);
+    return true;
   }, '720px');
 }
 
@@ -6871,7 +6879,7 @@ function renderNDISFundingCards(c){
           <td style="font-size:12px">${cl.qty}</td>
           <td style="font-size:12px;font-weight:600;white-space:nowrap">${ndisMoney(cl.total)}</td>
           <td style="font-size:12px">${sanitize(cl.provider||'—')}</td>
-          <td><button class="btn btn-sm btn-danger" onclick="deleteNDISClaim('${c.id}','${cl.id}')">✕</button></td>
+          <td style="display:flex;gap:4px"><button class="btn btn-sm btn-outline" title="Generate invoice" onclick="ndisGenerateInvoice('${c.id}','${cl.id}')">🧾</button><button class="btn btn-sm btn-danger" onclick="deleteNDISClaim('${c.id}','${cl.id}')">✕</button></td>
         </tr>`).join('')}
       </tbody>
       <tfoot><tr><td colspan="6" style="text-align:right;font-weight:700">Total billed:</td><td style="font-weight:700">${ndisMoney(f.spent)}</td><td colspan="2"></td></tr></tfoot>
@@ -6950,7 +6958,7 @@ function openNDISBillModal(id){
     const qty = parseFloat(document.getElementById('ndisbill-qty')?.value)||0;
     if(qty<=0){ alert('Enter a quantity greater than zero.'); return false; }
     c.dis = c.dis || {}; c.dis.claims = c.dis.claims || [];
-    c.dis.claims.push({
+    const claim = {
       id: uid(), code: item.c, name: item.n, unit: item.u, price: item.p,
       qty, total: Math.round(item.p*qty*100)/100,
       date: document.getElementById('ndisbill-date')?.value||today(),
@@ -6958,11 +6966,14 @@ function openNDISBillModal(id){
       category: document.getElementById('ndisbill-cat')?.value||'',
       note: document.getElementById('ndisbill-note')?.value||'',
       billedBy: currentUser?.name||'', billedAt: now(),
-    });
+    };
+    claim.invoiceNo = ndisInvoiceNo(claim);
+    c.dis.claims.push(claim);
     c.disability = true;
     audit('NDIS item billed', `${item.c} × ${qty} = ${ndisMoney(item.p*qty)}`, id);
-    saveAll(); showToast('NDIS item billed ✓');
+    saveAll(); showToast('NDIS item billed ✓ — generating invoice');
     rerenderDisabilityTab(id);
+    ndisGenerateInvoice(id, claim);
     return true;
   });
 }
@@ -7002,6 +7013,91 @@ function deleteNDISClaim(id, claimId){
   const c=clients.find(cl=>cl.id===id); if(!c?.dis?.claims) return;
   c.dis.claims = c.dis.claims.filter(cl=>cl.id!==claimId);
   saveAll(); rerenderDisabilityTab(id);
+}
+
+// ----- NDIS invoice -----
+function ndisInvoiceNo(claim){
+  if(claim && claim.invoiceNo) return claim.invoiceNo;
+  const d = ((claim&&claim.date)||today()).replace(/-/g,'');
+  return 'INV-'+d+'-'+String((claim&&claim.id)||uid()).slice(-4).toUpperCase();
+}
+// Generate a printable NDIS tax invoice for one claim (by id) or an array of claims
+function ndisGenerateInvoice(clientId, claimOrId){
+  const c = clients.find(x=>x.id===clientId); if(!c) return;
+  const claims = c.dis?.claims || [];
+  let list;
+  if (Array.isArray(claimOrId)) list = claimOrId;
+  else if (typeof claimOrId === 'string') list = claims.filter(cl=>cl.id===claimOrId);
+  else if (claimOrId) list = [claimOrId];
+  else list = claims;
+  if(!list.length){ showToast('No claim to invoice'); return; }
+
+  const org = DB.load('orgName','Worn Gundidj Aboriginal Co-Operative');
+  const abn = DB.load('orgABN','');
+  const reg = DB.load('orgNDISReg','');
+  const logo = orgLogoSrc();
+  const dis = c.dis || {};
+  const invNo = ndisInvoiceNo(list[0]);
+  const total = list.reduce((a,cl)=>a+(Number(cl.total)||0),0);
+  const rows = list.map(cl=>`<tr>
+    <td>${fmt(cl.date)}</td>
+    <td>${sanitize(cl.name||'')}<div style="font-size:10px;color:#666;font-family:monospace">${sanitize(cl.code||'')}</div></td>
+    <td>${sanitize(cl.category||'Core')}</td>
+    <td style="text-align:right">${ndisMoney(cl.price)}</td>
+    <td style="text-align:center">${cl.qty}</td>
+    <td style="text-align:right">GST Free</td>
+    <td style="text-align:right;font-weight:700">${ndisMoney(cl.total)}</td>
+  </tr>`).join('');
+
+  const w = window.open('','_blank');
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>NDIS Invoice ${invNo} — ${c.fullName||''}</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Segoe UI',Arial,sans-serif;font-size:12px;color:#1a1a1a;padding:32px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    .top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #1a3a2a;padding-bottom:16px;margin-bottom:20px}
+    .brand{display:flex;align-items:center;gap:14px}
+    .brand img{height:56px}
+    .brand .o{font-size:16px;font-weight:800;color:#1a3a2a}
+    .brand .a{font-size:11px;color:#555;line-height:1.5;margin-top:2px}
+    .inv-meta{text-align:right}
+    .inv-meta .t{font-size:24px;font-weight:800;color:#1a3a2a;letter-spacing:1px}
+    .inv-meta div{font-size:11px;color:#555;margin-top:2px}
+    .parties{display:flex;gap:24px;margin-bottom:18px}
+    .party{flex:1;background:#f7faf8;border:1px solid #e2e8f0;border-radius:8px;padding:12px}
+    .party h4{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#16794a;margin-bottom:6px}
+    .party div{font-size:12px;line-height:1.6}
+    table{width:100%;border-collapse:collapse;margin:8px 0 16px}
+    th{background:#1a3a2a;color:#fff;padding:8px 10px;font-size:10px;text-transform:uppercase;text-align:left}
+    td{padding:8px 10px;border-bottom:1px solid #e5e7eb;font-size:11px}
+    .totals{margin-left:auto;width:280px}
+    .totals td{padding:6px 10px;font-size:12px}
+    .totals .grand{font-size:15px;font-weight:800;color:#1a3a2a;border-top:2px solid #1a3a2a}
+    .pay{background:#f0f7f3;border:1px solid #cde5d8;border-radius:8px;padding:12px;font-size:11px;line-height:1.7;margin-top:18px}
+    .foot{margin-top:24px;border-top:1px solid #e5e7eb;padding-top:10px;font-size:10px;color:#888;text-align:center}
+    @media print{body{padding:14px}}
+  </style></head><body>
+    <div class="top">
+      <div class="brand">${logo?`<img src="${logo}" alt="${org}">`:''}<div><div class="o">${org}</div><div class="a">1-3 Rooneys Rd, Warrnambool VIC 3280<br>03 5561 5315 · admin@worngundidj.org.au${abn?'<br>ABN: '+abn:''}${reg?'<br>NDIS Provider Reg: '+reg:''}</div></div></div>
+      <div class="inv-meta"><div class="t">TAX INVOICE</div><div><strong>Invoice #:</strong> ${invNo}</div><div><strong>Issue date:</strong> ${fmt(today())}</div></div>
+    </div>
+    <div class="parties">
+      <div class="party"><h4>Bill To — NDIS Participant</h4><div><strong>${c.fullName||'—'}</strong><br>NDIS No: ${dis.ndisNum||c.ndis||'—'}<br>Plan management: ${dis.planMgmt||'—'}${dis.supportCoord?'<br>Support Coordinator: '+dis.supportCoord:''}</div></div>
+      <div class="party"><h4>Service Provider</h4><div><strong>${org}</strong><br>${abn?'ABN: '+abn+'<br>':''}${reg?'NDIS Reg: '+reg+'<br>':''}admin@worngundidj.org.au</div></div>
+    </div>
+    <table>
+      <tr><th>Date</th><th>Support Item</th><th>Budget</th><th style="text-align:right">Unit Price</th><th style="text-align:center">Qty</th><th style="text-align:right">GST</th><th style="text-align:right">Amount</th></tr>
+      ${rows}
+    </table>
+    <table class="totals">
+      <tr><td>Subtotal</td><td style="text-align:right">${ndisMoney(total)}</td></tr>
+      <tr><td>GST</td><td style="text-align:right">$0.00</td></tr>
+      <tr class="grand"><td>Total Due</td><td style="text-align:right">${ndisMoney(total)}</td></tr>
+    </table>
+    <div class="pay"><strong>Payment details:</strong> Please remit payment to ${org}. Quote invoice number <strong>${invNo}</strong> as reference. NDIS supports are GST-free under the <em>A New Tax System (Goods and Services Tax) Act 1999</em>. This invoice is for supports delivered under the participant's NDIS plan.</div>
+    <div class="foot">${org} — NDIS Tax Invoice — Generated ${new Date().toLocaleString('en-AU')}</div>
+    <script>window.onload=()=>window.print()<\/script>
+  </body></html>`);
+  w.document.close();
 }
 
 // ----- Supports modal -----
@@ -7679,7 +7775,10 @@ function renderHomeOwnership() {
         <div style="font-size:18px;font-weight:800;margin-bottom:4px">First Peoples Home Ownership Program</div>
         <div style="font-size:13px;opacity:.85">Homes Victoria — Supporting First Peoples on the path to home ownership in Victoria</div>
       </div>
-      <button class="btn" style="background:#fff;color:#1a3a2a;font-weight:700" onclick="openFPHOForm()">➕ New Application</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn" style="background:rgba(255,255,255,0.15);color:#fff;font-weight:700;border:1px solid rgba(255,255,255,0.4)" onclick="generateFPHOReport()">📊 Program Report</button>
+        <button class="btn" style="background:#fff;color:#1a3a2a;font-weight:700" onclick="openFPHOForm()">➕ New Application</button>
+      </div>
     </div>
   </div>
 
@@ -7688,6 +7787,32 @@ function renderHomeOwnership() {
     <div class="fpho-grant-card"><div class="gc-name">Stamp Duty Helper</div><div class="gc-amt">up to $10,000</div><div class="gc-desc">Matched grant on land transfer duty</div></div>
     <div class="fpho-grant-card"><div class="gc-name">Deposit Contribution</div><div class="gc-amt">up to $20,000</div><div class="gc-desc">Dollar-for-dollar deposit match</div></div>
     <div class="fpho-grant-card"><div class="gc-name">New Build Bonus</div><div class="gc-amt">+ $5,000</div><div class="gc-desc">Extra on top of deposit contribution for new builds</div></div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">👥 FPHO Client List</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <span style="font-size:12px;color:var(--muted)">${fphoClients.length} client${fphoClients.length!==1?'s':''}</span>
+        <button class="btn btn-sm btn-primary" onclick="openFPHOClientModal()">➕ Add Client</button>
+      </div>
+    </div>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:12px">A dedicated client roster for the Home Ownership program, separate from the main CMS client list.</p>
+    ${fphoClients.length===0 ? `<div class="empty-state"><div class="icon">👥</div><p>No FPHO clients yet. Click <strong>Add Client</strong> to start the roster.</p></div>` :
+    `<div class="table-wrap"><table>
+      <thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>Region</th><th>Stage</th><th>Officer</th><th></th></tr></thead>
+      <tbody>
+        ${[...fphoClients].sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(cl=>`<tr>
+          <td style="font-weight:600">${sanitize(cl.name||'—')}</td>
+          <td style="font-size:12px">${sanitize(cl.phone||'—')}</td>
+          <td style="font-size:12px">${sanitize(cl.email||'—')}</td>
+          <td style="font-size:12px">${sanitize(cl.region||'—')}</td>
+          <td><span class="badge badge-${cl.stage==='Settled'?'low':cl.stage==='Pre-approval'||cl.stage==='Application'?'medium':'closed'}">${sanitize(cl.stage||'Enquiry')}</span></td>
+          <td style="font-size:12px">${sanitize(cl.officer||'—')}</td>
+          <td style="display:flex;gap:4px"><button class="btn btn-sm btn-outline" onclick="openFPHOClientModal('${cl.id}')">✏️</button><button class="btn btn-sm btn-danger" onclick="deleteFPHOClient('${cl.id}')">✕</button></td>
+        </tr>`).join('')}
+      </tbody>
+    </table></div>`}
   </div>
 
   <div class="card">
@@ -7719,6 +7844,85 @@ function deleteFPHO(id) {
   if(!confirm('Delete this application?')) return;
   fphoApplications = fphoApplications.filter(a=>a.id!==id);
   saveFPHO(); showPage('homeownership');
+}
+
+// ----- FPHO client roster -----
+const FPHO_STAGES = ['Enquiry','Information Session','Eligibility Check','Application','Pre-approval','Purchasing','Settled','Withdrawn'];
+const FPHO_REGIONS = ['Barwon South West','Grampians','Loddon Mallee','Hume','Gippsland','Melbourne Metro','Statewide'];
+function openFPHOClientModal(id){
+  const cl = id ? fphoClients.find(x=>x.id===id) : null;
+  const c = cl || {};
+  const esc = s => (s||'').replace(/"/g,'&quot;');
+  const html = `
+    <div class="grid-2">
+      <div class="form-group"><label>Full Name *</label><input id="fphc-name" value="${esc(c.name)}" placeholder="Client name"></div>
+      <div class="form-group"><label>Phone</label><input id="fphc-phone" value="${esc(c.phone)}"></div>
+      <div class="form-group"><label>Email</label><input id="fphc-email" value="${esc(c.email)}"></div>
+      <div class="form-group"><label>Region</label><select id="fphc-region"><option value="">—</option>${FPHO_REGIONS.map(r=>`<option ${c.region===r?'selected':''}>${r}</option>`).join('')}</select></div>
+      <div class="form-group"><label>Stage</label><select id="fphc-stage">${FPHO_STAGES.map(s=>`<option ${c.stage===s?'selected':''}>${s}</option>`).join('')}</select></div>
+      <div class="form-group"><label>ACCO Home Ownership Officer</label><input id="fphc-officer" value="${esc(c.officer)}"></div>
+      <div class="form-group"><label>ATSI Status</label><select id="fphc-atsi"><option value="">—</option>${['Aboriginal','Torres Strait Islander','Both','Neither'].map(s=>`<option ${c.atsi===s?'selected':''}>${s}</option>`).join('')}</select></div>
+      <div class="form-group"><label>Linked Application</label><select id="fphc-appId"><option value="">— None —</option>${fphoApplications.map(a=>`<option value="${a.id}" ${c.appId===a.id?'selected':''}>${a.primaryFirstName||''} ${a.primaryLastName||''} (${(a.status||'draft')})</option>`).join('')}</select></div>
+    </div>
+    <div class="form-group"><label>Notes</label><textarea id="fphc-notes" style="min-height:70px">${c.notes||''}</textarea></div>`;
+  showModal(id?'✏️ Edit FPHO Client':'👥 Add FPHO Client', html, () => {
+    const name = document.getElementById('fphc-name')?.value?.trim();
+    if(!name){ alert('Name is required'); return false; }
+    const g = s => document.getElementById(s)?.value||'';
+    const rec = { id: id||uid(), name, phone:g('fphc-phone'), email:g('fphc-email'), region:g('fphc-region'),
+      stage:g('fphc-stage'), officer:g('fphc-officer'), atsi:g('fphc-atsi'), appId:g('fphc-appId'), notes:g('fphc-notes'),
+      updatedAt: now(), created: c.created||today() };
+    if(id){ const i=fphoClients.findIndex(x=>x.id===id); if(i>=0) fphoClients[i]=rec; else fphoClients.push(rec); }
+    else fphoClients.push(rec);
+    saveFPHOClients(); showToast('FPHO client saved ✓'); showPage('homeownership');
+    return true;
+  });
+}
+function deleteFPHOClient(id){
+  if(!confirm('Remove this client from the FPHO roster?')) return;
+  fphoClients = fphoClients.filter(x=>x.id!==id);
+  saveFPHOClients(); showPage('homeownership');
+}
+
+// ----- FPHO program report -----
+function generateFPHOReport(){ openReport(buildFPHOReport()); }
+function buildFPHOReport(){
+  const apps = fphoApplications;
+  const byStatus = {}; apps.forEach(a=>{ const s=a.status||'draft'; byStatus[s]=(byStatus[s]||0)+1; });
+  const byStage = {}; fphoClients.forEach(c=>{ const s=c.stage||'Enquiry'; byStage[s]=(byStage[s]||0)+1; });
+  const byRegion = {}; fphoClients.forEach(c=>{ const r=c.region||'Unspecified'; byRegion[r]=(byRegion[r]||0)+1; });
+  // Indicative grant value: approved applications × programme maximums
+  const approved = apps.filter(a=>a.status==='approved').length;
+  const maxPerApp = 2500 + 10000 + 20000 + 5000; // Booster + Stamp Duty + Deposit + New Build
+  const settled = fphoClients.filter(c=>c.stage==='Settled').length;
+  const atsiCount = fphoClients.filter(c=>c.atsi && c.atsi!=='Neither').length;
+
+  let body = reportHeader('First Peoples Home Ownership — Program Report', 'Homes Victoria · Worn Gundidj ACCO Home Ownership');
+  body += `<div class="stat-row">
+    <div class="stat-box"><div class="sv">${fphoClients.length}</div><div class="sl">Program Clients</div></div>
+    <div class="stat-box"><div class="sv">${apps.length}</div><div class="sl">Applications</div></div>
+    <div class="stat-box"><div class="sv">${approved}</div><div class="sl">Approved</div></div>
+    <div class="stat-box"><div class="sv">${settled}</div><div class="sl">Settled</div></div>
+    <div class="stat-box"><div class="sv">${atsiCount}</div><div class="sl">ATSI Clients</div></div>
+  </div>`;
+  body += `<h2>Applications by Status</h2><table><tr><th>Status</th><th>Count</th></tr>
+    ${Object.entries(byStatus).sort((a,b)=>b[1]-a[1]).map(([s,n])=>`<tr><td>${s.toUpperCase()}</td><td>${n}</td></tr>`).join('')||'<tr><td colspan="2">No applications</td></tr>'}</table>`;
+  body += `<h2>Clients by Stage</h2><table><tr><th>Stage</th><th>Count</th></tr>
+    ${FPHO_STAGES.filter(s=>byStage[s]).map(s=>`<tr><td>${s}</td><td>${byStage[s]}</td></tr>`).join('')||'<tr><td colspan="2">No clients</td></tr>'}</table>`;
+  body += `<h2>Clients by Region</h2><table><tr><th>Region</th><th>Count</th></tr>
+    ${Object.entries(byRegion).sort((a,b)=>b[1]-a[1]).map(([r,n])=>`<tr><td>${r}</td><td>${n}</td></tr>`).join('')||'<tr><td colspan="2">No clients</td></tr>'}</table>`;
+  body += `<h2>Client Roster</h2>
+    <table><tr><th>Name</th><th>Region</th><th>Stage</th><th>Officer</th><th>ATSI</th><th>Linked Application</th></tr>
+    ${[...fphoClients].sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(c=>{
+      const app = fphoApplications.find(a=>a.id===c.appId);
+      return `<tr><td>${c.name||'—'}</td><td>${c.region||'—'}</td><td>${c.stage||'—'}</td><td>${c.officer||'—'}</td><td>${c.atsi||'—'}</td><td>${app?`${app.primaryFirstName||''} ${app.primaryLastName||''} (${app.status||'draft'})`:'—'}</td></tr>`;
+    }).join('')||'<tr><td colspan="6">No clients</td></tr>'}</table>`;
+  body += `<h2>Indicative Grant Exposure</h2>
+    <p style="font-size:12px">Programme maximums per application: Home Buyer Booster $2,500 · Stamp Duty Helper up to $10,000 · Deposit Contribution up to $20,000 · New Build Bonus $5,000 (max <strong>$${maxPerApp.toLocaleString()}</strong> per application).</p>
+    <table><tr><td><strong>Approved applications</strong></td><td>${approved}</td></tr>
+    <tr><td><strong>Indicative maximum grant value (approved × max)</strong></td><td>$${(approved*maxPerApp).toLocaleString()}</td></tr></table>
+    <p style="font-size:11px;color:#6b7280">Indicative only — actual grant amounts depend on each participant's eligibility and assessed entitlements.</p>`;
+  return body;
 }
 
 function openFPHOForm(id) {
@@ -8461,6 +8665,10 @@ function renderSettings() {
   <div class="card">
     <div class="card-title" style="margin-bottom:16px">⚙️ System Settings</div>
     <div class="form-group"><label>Organisation Name</label><input id="set-org" value="${DB.load('orgName','')}" placeholder="e.g. Worn Gundidj Aboriginal Co-Operative"></div>
+    <div class="grid-2">
+      <div class="form-group"><label>ABN (for NDIS invoices)</label><input id="set-abn" value="${DB.load('orgABN','')}" placeholder="e.g. 12 345 678 901"></div>
+      <div class="form-group"><label>NDIS Provider Registration No.</label><input id="set-ndisreg" value="${DB.load('orgNDISReg','')}" placeholder="e.g. 4050001234"></div>
+    </div>
     <div class="form-group"><label>Your Default Worker Name</label><input id="set-worker" value="${DB.load('workerName','')}" placeholder="Your name"></div>
     <div class="form-group">
       <label>Sidebar Background Image</label>
@@ -8890,6 +9098,8 @@ function clearSidebarBg() {
 
 function saveSettings() {
   DB.save('orgName', document.getElementById('set-org')?.value||'');
+  DB.save('orgABN', document.getElementById('set-abn')?.value||'');
+  DB.save('orgNDISReg', document.getElementById('set-ndisreg')?.value||'');
   DB.save('workerName', document.getElementById('set-worker')?.value||'');
   showToast('Settings saved');
 }
