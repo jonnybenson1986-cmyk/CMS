@@ -452,6 +452,7 @@
 <script src="vendor/firebase/firebase-app-compat.js"></script>
 <script src="vendor/firebase/firebase-firestore-compat.js"></script>
 <script src="vendor/firebase/firebase-auth-compat.js"></script>
+<script src="vendor/firebase/firebase-storage-compat.js"></script>
 <script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
 <script>
 // ===== DATA LAYER =====
@@ -509,7 +510,7 @@ const FSYNC = (() => {
       `https://www.gstatic.com/firebasejs/${ver}/`,             // CSP-allowed CDN fallback
       `https://cdn.jsdelivr.net/npm/firebase@${ver}/`,          // CSP-allowed CDN fallback
     ];
-    const files = ['firebase-app-compat.js', 'firebase-firestore-compat.js', 'firebase-auth-compat.js'];
+    const files = ['firebase-app-compat.js', 'firebase-firestore-compat.js', 'firebase-auth-compat.js', 'firebase-storage-compat.js'];
     for (const base of bases) {
       try {
         for (const f of files) await _loadScript(base + f);
@@ -638,6 +639,35 @@ const FSYNC = (() => {
   async function pushAudit()    { await _batch('auditlog',auditLog,a=>a.id); }
   async function deleteDoc(colName,id) { if(db&&id) col(colName).doc(id).delete().catch(()=>{}); }
 
+  // ===== FIREBASE STORAGE (large files: client attachments, resources) =====
+  // Files go to the cloud bucket instead of being base64-stuffed into the
+  // record, so storage is effectively unlimited and shared across all staff.
+  function storageReady(){ return !!(db && window.firebase && firebase.storage); }
+  function _storageRef(path){ return firebase.storage().ref().child('teams/'+(teamId||'worngundidj')+'/'+path); }
+  // Upload a File/Blob to "folder"; resolves to {storagePath, url, name, type, size}
+  async function uploadFile(folder, file, onProgress){
+    if(!storageReady()) throw new Error('Cloud Storage not connected');
+    const safe = (file.name||'file').replace(/[^\w.\-]+/g,'_');
+    const path = folder+'/'+uid()+'_'+safe;
+    const ref = _storageRef(path);
+    const task = ref.put(file, { contentType: file.type||'application/octet-stream' });
+    await new Promise((resolve,reject)=>{
+      task.on('state_changed',
+        s=>{ if(onProgress && s.totalBytes) onProgress(Math.round(s.bytesTransferred/s.totalBytes*100)); },
+        reject, resolve);
+    });
+    const url = await ref.getDownloadURL();
+    return { storagePath:path, url, name:file.name, type:file.type, size:file.size };
+  }
+  async function deleteStorageFile(storagePath){
+    if(!storageReady()||!storagePath) return;
+    try { await _storageRef(storagePath).delete(); } catch(e){ /* already gone */ }
+  }
+  async function getStorageURL(storagePath){
+    if(!storageReady()||!storagePath) return null;
+    try { return await _storageRef(storagePath).getDownloadURL(); } catch(e){ return null; }
+  }
+
   function _showSyncBadge(ok, err) {
     let b=document.getElementById('sync-badge');
     if (!b) { b=document.createElement('div'); b.id='sync-badge'; b.style.cssText='position:fixed;bottom:16px;right:16px;padding:6px 14px;border-radius:20px;font-size:12px;font-weight:700;z-index:9999;box-shadow:0 2px 8px rgba(0,0,0,0.15);transition:opacity 0.5s'; document.body.appendChild(b); }
@@ -706,7 +736,8 @@ const FSYNC = (() => {
     showPage('settings');
   }
 
-  return { init, isReady, pushAll, pushClients, pushNotes, pushReferrals, pushWorkers, pushTasks, pushAudit, pushBrokerage, deleteDoc, getCfg, saveCfg, showSetupModal, clearConfig };
+  return { init, isReady, pushAll, pushClients, pushNotes, pushReferrals, pushWorkers, pushTasks, pushAudit, pushBrokerage, deleteDoc, getCfg, saveCfg, showSetupModal, clearConfig,
+    storageReady, uploadFile, deleteStorageFile, getStorageURL };
 })();
 
 let clients = DB.load('clients', []);
@@ -1919,7 +1950,7 @@ function renderProfileTab(tab, c, clientNotes, clientTime) {
           <input type="file" id="file-upload-${c.id}" multiple accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.txt,.xlsx,.xls" style="display:none" onchange="handleFileUpload('${c.id}',this)">
         </div>
       </div>
-      <div class="alert alert-info" style="margin-bottom:12px">📌 Supports PDF, Word, Excel, images, and text files. Files are stored locally. <strong>Export data regularly</strong> to back up.</div>
+      <div class="alert alert-info" style="margin-bottom:12px">📌 Supports PDF, Word, Excel, images, and text files. ${FSYNC.storageReady()?'☁️ Files are uploaded to <strong>Cloud Storage</strong> (Australia) — effectively unlimited and shared with all staff.':'Files are stored locally (~5 MB limit). <strong>Connect Cloud Storage</strong> for unlimited space.'}</div>
       ${attachments.length===0
         ?`<div class="empty-state"><div class="icon">📁</div><p>No files attached yet</p><button class="btn btn-primary btn-sm" style="margin-top:12px" onclick="document.getElementById('file-upload-${c.id}').click()">Attach First File</button></div>`
         :`<div style="display:grid;gap:10px">${attachments.map((f,i)=>{
@@ -2466,40 +2497,70 @@ function formatBytes(b) {
   if(b<1048576) return (b/1024).toFixed(1)+' KB';
   return (b/1048576).toFixed(1)+' MB';
 }
-function handleFileUpload(clientId, input) {
+// ===== FILE STORAGE HELPERS (Firebase Storage with base64 fallback) =====
+// Returns a stored-file record. Uses Cloud Storage when connected (effectively
+// unlimited), otherwise falls back to inline base64 in local storage.
+async function cmsUploadAttachment(folder, file) {
+  const who = currentUser?.name || DB.load('workerName','');
+  if (FSYNC.storageReady()) {
+    const m = await FSYNC.uploadFile(folder, file);
+    return { id:uid(), name:m.name, type:m.type, size:m.size, storagePath:m.storagePath, url:m.url, uploadedAt:today(), uploadedBy:who };
+  }
+  const data = await new Promise((res,rej)=>{ const r=new FileReader(); r.onload=e=>res(e.target.result); r.onerror=rej; r.readAsDataURL(file); });
+  return { id:uid(), name:file.name, type:file.type, size:file.size, data, uploadedAt:today(), uploadedBy:who };
+}
+// Best source for a stored file (cloud URL or legacy base64)
+function fileSrc(f) { return (f && (f.url || f.data)) || ''; }
+
+async function handleFileUpload(clientId, input) {
   const c = clients.find(cl=>cl.id===clientId); if(!c) return;
   if(!c.attachments) c.attachments=[];
-  const files = Array.from(input.files); let loaded=0;
-  files.forEach(file=>{
-    const reader=new FileReader();
-    reader.onload=e=>{
-      const totalSize=c.attachments.reduce((a,f)=>a+(f.size||0),0)+file.size;
-      if(totalSize>8*1024*1024){showToast('⚠️ Storage limit — export data before adding more files');return;}
-      c.attachments.push({id:uid(),name:file.name,type:file.type,size:file.size,data:e.target.result,uploadedAt:today(),uploadedBy:DB.load('workerName','')});
-      loaded++; if(loaded===files.length){saveAll();showToast(`${loaded} file${loaded!==1?'s':''} attached`);openClientProfile(clientId);}
-    };
-    reader.readAsDataURL(file);
-  });
-  input.value='';
+  const files = Array.from(input.files); input.value='';
+  if(!files.length) return;
+  // The 8 MB cap only applies to local (base64) storage; Cloud Storage is unlimited
+  if(!FSYNC.storageReady()) {
+    const total = c.attachments.reduce((a,f)=>a+(f.size||0),0) + files.reduce((a,f)=>a+f.size,0);
+    if(total>8*1024*1024){ showToast('⚠️ Local file limit reached — connect Cloud Storage for unlimited files'); return; }
+  }
+  showToast(FSYNC.storageReady()?'☁️ Uploading…':'Attaching…');
+  let ok=0;
+  for(const file of files){
+    try { c.attachments.push(await cmsUploadAttachment('clients/'+clientId, file)); ok++; }
+    catch(e){ showToast('Upload failed: '+(e.message||e)); }
+  }
+  if(ok){ saveAll(); showToast(`${ok} file${ok!==1?'s':''} attached`); }
+  openClientProfile(clientId);
 }
 function handleFileDrop(clientId, event) {
   event.preventDefault(); event.currentTarget.style.borderColor='var(--border)'; event.currentTarget.style.background='';
-  handleFileUpload(clientId, {files:event.dataTransfer.files});
+  handleFileUpload(clientId, {files:event.dataTransfer.files, value:''});
 }
-function downloadFile(clientId, idx) {
+async function downloadFile(clientId, idx) {
   const c=clients.find(cl=>cl.id===clientId); if(!c) return;
   const f=c.attachments[idx]; if(!f) return;
-  const a=document.createElement('a'); a.href=f.data; a.download=f.name; a.click();
+  if(f.data){ const a=document.createElement('a'); a.href=f.data; a.download=f.name; a.click(); return; }
+  if(f.url){
+    try { const r=await fetch(f.url); const b=await r.blob(); const u=URL.createObjectURL(b); const a=document.createElement('a'); a.href=u; a.download=f.name; a.click(); setTimeout(()=>URL.revokeObjectURL(u),8000); }
+    catch(e){ window.open(f.url,'_blank'); }
+  }
 }
 function previewFile(clientId, idx) {
   const c=clients.find(cl=>cl.id===clientId); if(!c) return;
   const f=c.attachments[idx]; if(!f) return;
-  if(f.type.startsWith('image/')) showModal('🖼️ '+f.name,`<img src="${f.data}" style="max-width:100%;border-radius:6px">`,null,'700px',true);
-  else if(f.type==='application/pdf') showModal('📕 '+f.name,`<iframe src="${f.data}" style="width:100%;height:70vh;border:none;border-radius:6px"></iframe>`,null,'900px',true);
+  const src=fileSrc(f);
+  if((f.type||'').startsWith('image/')) { showModal('🖼️ '+f.name,`<img src="${src}" style="max-width:100%;border-radius:6px">`,null,'700px',true); return; }
+  // PDFs / other: open in a new tab (avoids the frame-src CSP and blocked data: navigations)
+  if(f.url){ window.open(f.url,'_blank'); return; }
+  if(f.data){
+    try { const parts=f.data.split(','); const bin=atob(parts[1]); const arr=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i); const u=URL.createObjectURL(new Blob([arr],{type:f.type||'application/octet-stream'})); window.open(u,'_blank'); setTimeout(()=>URL.revokeObjectURL(u),10000); }
+    catch(e){ window.open(src,'_blank'); }
+  }
 }
 function deleteFile(clientId, idx) {
   if(!confirm('Remove this file?')) return;
   const c=clients.find(cl=>cl.id===clientId); if(!c) return;
+  const f=c.attachments[idx];
+  if(f?.storagePath) FSYNC.deleteStorageFile(f.storagePath);
   c.attachments.splice(idx,1); saveAll(); openClientProfile(clientId);
 }
 
@@ -6684,20 +6745,21 @@ function sessRenderAttachments(){
       <button type="button" class="btn btn-sm btn-danger" onclick="sessRemoveAttachment(${i})">✕</button>
     </div>`).join('');
 }
-function sessHandleFiles(input){
+async function sessHandleFiles(input){
   const files = Array.from(input.files); if(!files.length) return;
-  let loaded=0;
-  files.forEach(file=>{
-    const reader=new FileReader();
-    reader.onload=e=>{
-      const totalSize=_sessionAttachments.reduce((a,f)=>a+(f.size||0),0)+file.size;
-      if(totalSize>8*1024*1024){ showToast('⚠️ Storage limit — keep attachments under 8 MB total'); return; }
-      _sessionAttachments.push({ id:uid(), name:file.name, type:file.type, size:file.size, data:e.target.result, uploadedAt:today(), uploadedBy:currentUser?.name||DB.load('workerName','') });
-      loaded++; if(loaded===files.length){ sessRenderAttachments(); showToast(`${files.length} file${files.length!==1?'s':''} attached`); }
-    };
-    reader.readAsDataURL(file);
-  });
-  input.value='';
+  if(input.value!==undefined) input.value='';
+  if(!FSYNC.storageReady()){
+    const total=_sessionAttachments.reduce((a,f)=>a+(f.size||0),0)+files.reduce((a,f)=>a+f.size,0);
+    if(total>8*1024*1024){ showToast('⚠️ Local file limit — connect Cloud Storage for unlimited files'); return; }
+  }
+  if(FSYNC.storageReady()) showToast('☁️ Uploading…');
+  let ok=0;
+  for(const file of files){
+    try { _sessionAttachments.push(await cmsUploadAttachment('sessions', file)); ok++; }
+    catch(e){ showToast('Upload failed: '+(e.message||e)); }
+  }
+  sessRenderAttachments();
+  if(ok) showToast(`${ok} file${ok!==1?'s':''} attached`);
 }
 function sessHandleDrop(event){
   event.preventDefault(); event.currentTarget.style.borderColor='var(--border)'; event.currentTarget.style.background='';
@@ -8415,20 +8477,21 @@ function fphoRenderAttachments() {
       </div>
     </div>`).join('');
 }
-function fphoHandleFiles(input) {
+async function fphoHandleFiles(input) {
   const files = Array.from(input.files); if(!files.length) return;
-  let loaded=0;
-  files.forEach(file=>{
-    const reader=new FileReader();
-    reader.onload=e=>{
-      const totalSize=_fphoAttachments.reduce((a,f)=>a+(f.size||0),0)+file.size;
-      if(totalSize>8*1024*1024){ showToast('⚠️ Storage limit — total attachments must stay under 8 MB'); return; }
-      _fphoAttachments.push({id:uid(),name:file.name,type:file.type,size:file.size,data:e.target.result,uploadedAt:today(),uploadedBy:currentUser?.name||DB.load('workerName','')});
-      loaded++; if(loaded===files.length){ fphoRenderAttachments(); showToast(`${files.length} file${files.length!==1?'s':''} attached`); }
-    };
-    reader.readAsDataURL(file);
-  });
-  input.value='';
+  if(input.value!==undefined) input.value='';
+  if(!FSYNC.storageReady()){
+    const total=_fphoAttachments.reduce((a,f)=>a+(f.size||0),0)+files.reduce((a,f)=>a+f.size,0);
+    if(total>8*1024*1024){ showToast('⚠️ Local file limit — connect Cloud Storage for unlimited documents'); return; }
+  }
+  if(FSYNC.storageReady()) showToast('☁️ Uploading…');
+  let ok=0;
+  for(const file of files){
+    try { _fphoAttachments.push(await cmsUploadAttachment('fpho', file)); ok++; }
+    catch(e){ showToast('Upload failed: '+(e.message||e)); }
+  }
+  fphoRenderAttachments();
+  if(ok) showToast(`${ok} file${ok!==1?'s':''} attached`);
 }
 function fphoHandleDrop(event) {
   event.preventDefault(); event.currentTarget.style.borderColor='var(--border)'; event.currentTarget.style.background='';
@@ -8436,15 +8499,19 @@ function fphoHandleDrop(event) {
 }
 function fphoRemoveAttachment(idx) {
   if(!confirm('Remove this document?')) return;
+  const f=_fphoAttachments[idx];
+  if(f?.storagePath) FSYNC.deleteStorageFile(f.storagePath);
   _fphoAttachments.splice(idx,1); fphoRenderAttachments();
 }
 function fphoDownloadAttachment(idx) {
   const f=_fphoAttachments[idx]; if(!f) return;
-  const a=document.createElement('a'); a.href=f.data; a.download=f.name; a.click();
+  if(f.data){ const a=document.createElement('a'); a.href=f.data; a.download=f.name; a.click(); return; }
+  if(f.url){ fetch(f.url).then(r=>r.blob()).then(b=>{ const u=URL.createObjectURL(b); const a=document.createElement('a'); a.href=u; a.download=f.name; a.click(); setTimeout(()=>URL.revokeObjectURL(u),8000); }).catch(()=>window.open(f.url,'_blank')); }
 }
 function fphoPreviewAttachment(idx) {
   const f=_fphoAttachments[idx]; if(!f) return;
   // Open in a new tab rather than a nested modal (which would replace the form).
+  if(f.url){ window.open(f.url,'_blank'); return; }
   try {
     const parts=f.data.split(','); const bin=atob(parts[1]); const arr=new Uint8Array(bin.length);
     for(let i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i);
@@ -9049,40 +9116,39 @@ function renderResourcesList() {
   </div>`;
 }
 
-function uploadResources(input) {
-  const files = [...input.files];
+async function uploadResources(input) {
+  const files = [...input.files]; input.value = '';
   if(!files.length) return;
-  let done = 0;
-  files.forEach(file => {
-    const reader = new FileReader();
-    reader.onload = e => {
-      resources.push({ id: uid(), name: file.name, size: file.size, type: file.type, data: e.target.result, uploaded: today() });
-      done++;
-      if(done === files.length) {
-        saveResources();
-        const el = document.getElementById('resources-list');
-        if(el) el.innerHTML = renderResourcesList();
-        showToast(`${files.length} file${files.length>1?'s':''} uploaded ✓`);
-        audit('Resource uploaded', files.map(f=>f.name).join(', '));
-      }
-    };
-    reader.readAsDataURL(file);
-  });
-  input.value = '';
+  if(!FSYNC.storageReady()) {
+    const total = resources.reduce((a,r)=>a+(r.size||0),0) + files.reduce((a,f)=>a+f.size,0);
+    if(total>8*1024*1024){ showToast('⚠️ Local file limit — connect Cloud Storage for unlimited resources'); return; }
+  }
+  showToast(FSYNC.storageReady()?'☁️ Uploading…':'Uploading…');
+  let ok=0;
+  for(const file of files){
+    try { const m=await cmsUploadAttachment('resources', file); resources.push({ id:m.id, name:m.name, size:m.size, type:m.type, data:m.data, storagePath:m.storagePath, url:m.url, uploaded:today() }); ok++; }
+    catch(e){ showToast('Upload failed: '+(e.message||e)); }
+  }
+  if(ok){
+    saveResources();
+    const el = document.getElementById('resources-list');
+    if(el) el.innerHTML = renderResourcesList();
+    showToast(`${ok} file${ok!==1?'s':''} uploaded ✓`);
+    audit('Resource uploaded', files.map(f=>f.name).join(', '));
+  }
 }
 
-function downloadResource(id) {
+async function downloadResource(id) {
   const r = resources.find(x=>x.id===id);
   if(!r) return;
-  const a = document.createElement('a');
-  a.href = r.data;
-  a.download = r.name;
-  a.click();
+  if(r.data){ const a=document.createElement('a'); a.href=r.data; a.download=r.name; a.click(); return; }
+  if(r.url){ try { const resp=await fetch(r.url); const b=await resp.blob(); const u=URL.createObjectURL(b); const a=document.createElement('a'); a.href=u; a.download=r.name; a.click(); setTimeout(()=>URL.revokeObjectURL(u),8000); } catch(e){ window.open(r.url,'_blank'); } }
 }
 
 function deleteResource(id) {
   const r = resources.find(x=>x.id===id);
   if(!r || !confirm(`Delete "${r.name}"?`)) return;
+  if(r.storagePath) FSYNC.deleteStorageFile(r.storagePath);
   resources = resources.filter(x=>x.id!==id);
   saveResources();
   const el = document.getElementById('resources-list');
