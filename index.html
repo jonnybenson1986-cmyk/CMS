@@ -8872,6 +8872,15 @@ function renderSettings() {
       <button class="btn btn-danger" onclick="clearData()">🗑️ Clear All Data</button>
     </div>
   </div>
+
+  <div class="card">
+    <div class="card-title" style="margin-bottom:16px">🎬 Demo / Training Data</div>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:16px">Load a set of clearly-labelled <strong>fake "DEMO —"</strong> clients across all programs (with notes, time, NDIS billing and an FPHO client) so you can record a how-to video or train staff <strong>without touching real client information</strong>. Remove it again in one click when you're done.</p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <button class="btn btn-primary" onclick="loadDemoData()">🎬 Load Demo Data</button>
+      <button class="btn btn-outline" onclick="removeDemoData()">🧹 Remove Demo Data</button>
+    </div>
+  </div>
   <!-- RESOURCES CARD -->
   <div class="card" style="border-left:4px solid var(--primary)">
     <div class="card-header">
@@ -9384,6 +9393,65 @@ function clearData() {
   if(!confirm('This cannot be undone. Delete everything?')) return;
   audit('Cleared all data', `Deleted ${clients.length} clients, ${notes.length} notes`);
   clients=[]; notes=[]; timeLogs=[]; saveAll(); showToast('Data cleared'); showPage('dashboard');
+}
+
+// ===== DEMO / TRAINING DATA =====
+// Loads clearly-labelled fake clients ("DEMO —") so the app can be filmed or
+// used for training without exposing any real client information.
+function loadDemoData() {
+  if(clients.some(c=>c._demo)) { showToast('Demo data is already loaded'); return; }
+  if(!confirm('Load DEMO clients (fake data) for video/training? They are clearly labelled "DEMO —" and can be removed in one click.')) return;
+  const dnow = (d)=>new Date(d).toISOString();
+  const mk = (o)=>({ id:'demo_'+uid(), _demo:true, status:'active', created:dnow('2026-02-10'), riskLevel:'low', keyWorker:'Jon Benson', ...o });
+
+  const c1 = mk({ fullName:'DEMO — Jodie Williams', dob:'1992-04-18', phone:'0400 111 222', community:'Framlingham', mob:'Gunditjmara',
+    sewb:true, sewbDomains:[4,3,5,4,5,4,3,4], riskLevel:'low' });
+  const c2 = mk({ fullName:'DEMO — Marcus Clarke', dob:'1988-09-02', phone:'0400 333 444', community:'Warrnambool', mob:'Kirrae Whurrong',
+    aod:true, justice:true, aodStage:'Action', aodPrimary:'Alcohol', jusDiversion:'CISP', riskLevel:'medium' });
+  const c3 = mk({ fullName:'DEMO — Aunty Pauline Rose', dob:'1965-12-11', phone:'0400 555 666', community:'Portland', mob:'Gunditjmara',
+    disability:true, ndis:'4300000123',
+    dis:{ ndisNum:'4300000123', planMgmt:'Plan Managed', supportCoord:'Helen Burns', ndisStart:'2026-01-01', ndisEnd:'2026-12-31',
+      primary:'Physical', disabilityType:'Mobility impairment',
+      budget:{ core:24000, capBuild:9000, capital:4000 },
+      claims:[
+        { id:'demoCl1', code:'01_011_0107_1_1', name:'Assistance With Self-Care Activities', unit:'Hour', price:67.56, qty:6, total:405.36, date:'2026-05-12', provider:'Jon Benson', category:'Core', invoiceNo:'INV-20260512-CL1' },
+        { id:'demoCl2', code:'15_056_0128_1_3', name:'Assessment Recommendation Therapy or Training - Occupational Therapist', unit:'Hour', price:193.99, qty:2, total:387.98, date:'2026-05-20', provider:'Mary Singh (OT)', category:'Capacity Building', invoiceNo:'INV-20260520-CL2' },
+      ],
+      supports:[
+        { id:'demoS1', name:'Mary Singh', role:'Occupational Therapist (OT)', org:'Coastal Allied Health', phone:'03 5500 0000', email:'mary@coastalah.au', freq:'Fortnightly' },
+        { id:'demoS2', name:'Dan Lovett', role:'Support Worker', org:'Worn Gundidj', phone:'03 5561 5315', freq:'Weekly' },
+      ] }
+  });
+  clients.push(c1, c2, c3);
+
+  notes.push(
+    { id:'demo_'+uid(), _demo:true, clientId:c1.id, type:'sewb', created:dnow('2026-03-02T10:00'), worker:'Jon Benson', contactType:'Face-to-face', duration:60, text:'Initial SEWB session. Discussed connection to family and community. Jodie identified goals around cultural reconnection.' },
+    { id:'demo_'+uid(), _demo:true, clientId:c1.id, type:'sewb', created:dnow('2026-04-01T11:00'), worker:'Jon Benson', contactType:'Home visit', duration:45, text:'Follow-up — progress on goals, feeling more supported.' },
+    { id:'demo_'+uid(), _demo:true, clientId:c2.id, type:'aod', created:dnow('2026-03-15T14:00'), worker:'Jon Benson', contactType:'Face-to-face', duration:60, text:'AOD support session. Reviewed stage of change and supports in place.' },
+    { id:'demo_'+uid(), _demo:true, clientId:c3.id, type:'disability', created:dnow('2026-05-12T09:30'), worker:'Jon Benson', contactType:'Home visit', duration:90, text:'Coordinated OT assessment and reviewed NDIS plan supports.' },
+  );
+  timeLogs.push(
+    { id:'demo_'+uid(), _demo:true, clientId:c1.id, date:'2026-03-02', minutes:60, activity:'Client Session', worker:'Jon Benson' },
+    { id:'demo_'+uid(), _demo:true, clientId:c2.id, date:'2026-03-15', minutes:60, activity:'Client Session', worker:'Jon Benson' },
+    { id:'demo_'+uid(), _demo:true, clientId:c3.id, date:'2026-05-12', minutes:90, activity:'Home Visit', worker:'Jon Benson' },
+  );
+  fphoClients.push({ id:'demo_'+uid(), _demo:true, name:'DEMO — Tahlia & Ben Murray', phone:'0400 777 888', email:'demo@example.com', region:'Barwon South West', stage:'Pre-approval', officer:'Jon Benson', atsi:'Aboriginal', notes:'Demo FPHO client for training/video.' });
+
+  saveAll(); saveFPHOClients();
+  showToast('🎬 Demo data loaded — clients prefixed "DEMO —"');
+  showPage('dashboard');
+}
+function removeDemoData() {
+  const n = clients.filter(c=>c._demo).length + fphoClients.filter(c=>c._demo).length;
+  if(n===0) { showToast('No demo data found'); return; }
+  if(!confirm(`Remove all ${n} demo records? Your real data is untouched.`)) return;
+  clients     = clients.filter(c=>!c._demo);
+  notes       = notes.filter(x=>!x._demo);
+  timeLogs    = timeLogs.filter(x=>!x._demo);
+  fphoClients = fphoClients.filter(c=>!c._demo);
+  saveAll(); saveFPHOClients();
+  showToast('🧹 Demo data removed');
+  showPage('dashboard');
 }
 
 // ============================================================
