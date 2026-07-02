@@ -1,10 +1,14 @@
 [[headers]]
   for = "/*"
   [headers.values]
+    # Force HTTPS for 2 years incl. subdomains (protects the auth token / PHI in transit)
+    Strict-Transport-Security = "max-age=63072000; includeSubDomains; preload"
     # Prevent clickjacking
     X-Frame-Options = "DENY"
     # Stop browsers sniffing MIME types
     X-Content-Type-Options = "nosniff"
+    # Isolate cross-origin popups/embeds
+    Cross-Origin-Opener-Policy = "same-origin"
     # Only send referrer to same origin
     Referrer-Policy = "strict-origin-when-cross-origin"
     # Restrict permissions

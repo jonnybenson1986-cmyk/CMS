@@ -5854,7 +5854,7 @@ function dismissReminder(id) {
 function openNoticeModal() {
   showModal('📋 Post to Noticeboard', `
     <div class="form-group"><label>Title *</label><input id="nb-title" placeholder="Notice title"></div>
-    <div class="form-group"><label>Author / Posted by</label><input id="nb-author" value="${DB.load('workerName','')}"></div>
+    <div class="form-group"><label>Author / Posted by</label><input id="nb-author" value="${sanitize(DB.load('workerName',''))}"></div>
     <div class="form-group"><label>Message *</label><textarea id="nb-text" style="min-height:120px" placeholder="Notice details…"></textarea></div>`,
     () => {
       const title = document.getElementById('nb-title')?.value?.trim();
@@ -8893,7 +8893,8 @@ function exportAuditLog() {
   [...auditLog].reverse().forEach(e => rows.push([
     e.ts, e.worker, e.role, e.action, e.detail, e.clientName, e.page
   ]));
-  const csv = rows.map(r => r.map(v => `"${(v||'').toString().replace(/"/g,'""')}"`).join(',')).join('\n');
+  const csvCell = v => { let x=(v==null?'':v).toString(); if(/^[=+\-@\t\r]/.test(x)) x="'"+x; return '"'+x.replace(/"/g,'""')+'"'; };
+  const csv = rows.map(r => r.map(csvCell).join(',')).join('\n');
   const blob = new Blob([csv], {type:'text/csv'});
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
   a.download = `audit-log-${today()}.csv`; a.click();
@@ -8904,12 +8905,12 @@ function renderSettings() {
   return `
   <div class="card">
     <div class="card-title" style="margin-bottom:16px">⚙️ System Settings</div>
-    <div class="form-group"><label>Organisation Name</label><input id="set-org" value="${DB.load('orgName','')}" placeholder="e.g. Worn Gundidj Aboriginal Co-Operative"></div>
+    <div class="form-group"><label>Organisation Name</label><input id="set-org" value="${sanitize(DB.load('orgName',''))}" placeholder="e.g. Worn Gundidj Aboriginal Co-Operative"></div>
     <div class="grid-2">
-      <div class="form-group"><label>ABN (for NDIS invoices)</label><input id="set-abn" value="${DB.load('orgABN','')}" placeholder="e.g. 12 345 678 901"></div>
-      <div class="form-group"><label>NDIS Provider Registration No.</label><input id="set-ndisreg" value="${DB.load('orgNDISReg','')}" placeholder="e.g. 4050001234"></div>
+      <div class="form-group"><label>ABN (for NDIS invoices)</label><input id="set-abn" value="${sanitize(DB.load('orgABN',''))}" placeholder="e.g. 12 345 678 901"></div>
+      <div class="form-group"><label>NDIS Provider Registration No.</label><input id="set-ndisreg" value="${sanitize(DB.load('orgNDISReg',''))}" placeholder="e.g. 4050001234"></div>
     </div>
-    <div class="form-group"><label>Your Default Worker Name</label><input id="set-worker" value="${DB.load('workerName','')}" placeholder="Your name"></div>
+    <div class="form-group"><label>Your Default Worker Name</label><input id="set-worker" value="${sanitize(DB.load('workerName',''))}" placeholder="Your name"></div>
     <div class="form-group">
       <label>Sidebar Background Image</label>
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:4px">
@@ -9891,9 +9892,11 @@ window._sessionIPReady = fetch('https://api.ipify.org?format=json', { cache: 'no
   .then(d => { window._sessionIP = d.ip || ''; })
   .catch(() => { window._sessionIP = 'unavailable'; });
 
-function _recordFailedLogin(key) {}
-function _isLockedOut(key) { return false; }
-function _clearFailedLogins(key) {}
+function _failKey(email){ return 'login_fail_'+String(email||'').toLowerCase(); }
+function _recordFailedLogin(email){ const k=_failKey(email); const r=DB.load(k,{n:0,until:0}); r.n=(r.n||0)+1; if(r.n>=5) r.until=Date.now()+15*60*1000; DB.save(k,r); }
+function _isLockedOut(email){ const r=DB.load(_failKey(email),null); return !!(r&&r.until&&Date.now()<r.until); }
+function _lockoutMins(email){ const r=DB.load(_failKey(email),null); return r&&r.until?Math.ceil((r.until-Date.now())/60000):0; }
+function _clearFailedLogins(email){ DB.save(_failKey(email),{n:0,until:0}); }
 
 function checkLogin() {
   if(!currentUser) { showLoginScreen(); return false; }
@@ -10126,6 +10129,7 @@ async function doLogin() {
     const btn   = document.getElementById('login-btn');
     if (!email) { errEl.textContent='Please enter your email address'; return; }
     if (!pass)  { errEl.textContent='Please enter your password'; return; }
+    if (_isLockedOut(email)) { errEl.textContent='Too many failed attempts. Try again in '+_lockoutMins(email)+' minute(s).'; return; }
     errEl.textContent=''; btn.disabled=true; btn.textContent='Signing in…';
     try {
       // Firebase may still be loading on a fresh page (slow/flaky CDN). Actively
@@ -10155,7 +10159,7 @@ async function doLogin() {
       } else {
         u.firebaseUid = cred.user.uid;
       }
-      saveCurrentUser(u); _auditLogin(u); initApp();
+      _clearFailedLogins(email); saveCurrentUser(u); _auditLogin(u); initApp();
     } catch(e) {
       btn.disabled=false; btn.textContent='Sign In →';
       const msgs = {
@@ -10166,6 +10170,7 @@ async function doLogin() {
         'auth/invalid-credential':'Email or password is incorrect.',
         'auth/sdk-unavailable':   'Still connecting to the secure server — please wait a moment and try again.',
       };
+      if (['auth/wrong-password','auth/invalid-credential','auth/user-not-found'].includes(e.code)) _recordFailedLogin(email);
       errEl.textContent = msgs[e.code] || ('Error: ' + e.message);
     }
     return;
@@ -10290,6 +10295,12 @@ async function logout() {
   // re-prompts for credentials rather than auto-reconnecting anonymously.
   try {
     if(window.firebase && firebase.apps.length) await firebase.auth().signOut();
+  } catch(e) { /* ignore */ }
+  // Clear cached client PHI from this device on logout (shared-device safety).
+  // Data re-syncs from the cloud on next sign-in.
+  try {
+    clients=[]; notes=[]; timeLogs=[]; referrals=[];
+    ['clients','notes','timelogs','referrals','fphoApplications','fphoClients','resources'].forEach(k=>DB.save(k,[]));
   } catch(e) { /* ignore */ }
   showLoginScreen();
 }
