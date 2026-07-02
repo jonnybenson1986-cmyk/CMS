@@ -978,8 +978,8 @@ function renderDashboard() {
         recentClients.map(c=>`<div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border);cursor:pointer" onclick="openClientProfile('${c.id}')">
           <div class="avatar">${initials(c.fullName)}</div>
           <div style="flex:1">
-            <div style="font-size:13px;font-weight:600">${c.fullName}</div>
-            <div style="font-size:11px;color:var(--muted)">${c.mob||''} ${c.community ? '· '+c.community : ''}</div>
+            <div style="font-size:13px;font-weight:600">${sanitize(c.fullName)}</div>
+            <div style="font-size:11px;color:var(--muted)">${sanitize(c.mob||'')} ${c.community ? '· '+sanitize(c.community) : ''}</div>
           </div>
           <span class="tag ${c.status==='active'?'tag-active':'tag-closed'}">${c.status||'active'}</span>
         </div>`).join('')
@@ -991,7 +991,7 @@ function renderDashboard() {
         recentNotes.map(n=>{
           const c = clients.find(cl=>cl.id===n.clientId);
           return `<div class="note-entry ${n.type||'general'}" style="margin-bottom:8px;cursor:pointer" onclick="openClientProfile('${n.clientId}')">
-            <div class="note-meta"><span class="section-badge badge-${n.type||'general'}">${n.type||'general'}</span><span>${c?.fullName||'Unknown'}</span><span>${fmt(n.created)}</span></div>
+            <div class="note-meta"><span class="section-badge badge-${n.type||'general'}">${n.type||'general'}</span><span>${sanitize(c?.fullName||'Unknown')}</span><span>${fmt(n.created)}</span></div>
             <div class="note-text">${(n.text||'').slice(0,120)}${(n.text||'').length>120?'…':''}</div>
           </div>`;
         }).join('')
@@ -1026,10 +1026,10 @@ function renderClients() {
             const age = c.dob ? Math.floor((Date.now()-new Date(c.dob))/(365.25*24*3600*1000)) : '?';
             const progs = [c.sewb&&'SEWB',c.aod&&'AOD',c.justice&&'Justice',c.cultural&&'Cultural'].filter(Boolean);
             return `<tr class="client-row" data-id="${c.id}" style="cursor:pointer">
-              <td><div style="display:flex;align-items:center;gap:10px"><div class="avatar">${initials(c.fullName)}</div><div><div style="font-weight:600;font-size:13px">${c.fullName}</div><div style="font-size:11px;color:var(--muted)">${c.pronouns||''}</div></div></div></td>
+              <td><div style="display:flex;align-items:center;gap:10px"><div class="avatar">${initials(c.fullName)}</div><div><div style="font-weight:600;font-size:13px">${sanitize(c.fullName)}</div><div style="font-size:11px;color:var(--muted)">${c.pronouns||''}</div></div></div></td>
               <td style="font-size:12px;color:var(--muted)">${c.clientId||'—'}</td>
               <td style="font-size:13px">${c.dob||'—'}<br><span style="font-size:11px;color:var(--muted)">${age} yrs</span></td>
-              <td style="font-size:13px">${c.community||'—'}<br><span style="font-size:11px;color:var(--muted)">${c.mob||''}</span></td>
+              <td style="font-size:13px">${sanitize(c.community||'—')}<br><span style="font-size:11px;color:var(--muted)">${sanitize(c.mob||'')}</span></td>
               <td>${progs.map(p=>`<span class="tag badge-${p.toLowerCase()}" style="margin-right:3px;font-size:10px">${p}</span>`).join('')||'<span style="color:var(--muted);font-size:12px">None</span>'}</td>
               <td><span class="risk-pill risk-${c.riskLevel||'low'}">${(c.riskLevel||'low').toUpperCase()}</span></td>
               <td><span class="tag ${c.status==='active'?'tag-active':'tag-closed'}">${c.status||'active'}</span></td>
@@ -1062,7 +1062,7 @@ function renderClosedClients() {
         ${closed.map(c=>{
           const progs = [c.sewb&&'SEWB',c.aod&&'AOD',c.justice&&'Justice',c.cultural&&'Cultural',c.disability&&'Disability',c.workFoundations&&'Work Foundations'].filter(Boolean);
           return `<tr>
-            <td><div style="display:flex;align-items:center;gap:10px"><div class="avatar" style="opacity:0.6">${initials(c.fullName)}</div><div style="font-weight:600;font-size:13px">${c.fullName}</div></div></td>
+            <td><div style="display:flex;align-items:center;gap:10px"><div class="avatar" style="opacity:0.6">${initials(c.fullName)}</div><div style="font-weight:600;font-size:13px">${sanitize(c.fullName)}</div></div></td>
             <td style="font-size:12px;color:var(--muted)">${c.clientId||'—'}</td>
             <td>${progs.map(p=>`<span class="tag" style="font-size:10px;margin-right:3px">${p}</span>`).join('')||'—'}</td>
             <td style="font-size:13px">${c.closedDate||'—'}</td>
@@ -1081,7 +1081,7 @@ function renderClosedClients() {
 function closeClient(id) {
   const c = clients.find(cl=>cl.id===id); if(!c) return;
   const html = `
-    <p style="font-size:13px;color:var(--muted);margin-bottom:14px">Closing <strong>${c.fullName}</strong>'s file will move them to the Closed Clients area. You can reopen them at any time.</p>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:14px">Closing <strong>${sanitize(c.fullName)}</strong>'s file will move them to the Closed Clients area. You can reopen them at any time.</p>
     <div class="form-group"><label>Closure Reason *</label>
       <select id="close-reason">
         <option value="">— Select reason —</option>
@@ -1131,12 +1131,12 @@ function openClientProfile(id) {
     <div class="avatar avatar-lg" style="background:var(--primary)">${initials(c.fullName)}</div>
     <div style="flex:1">
       <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-        <h2 style="font-size:22px;font-weight:700">${c.fullName}</h2>
+        <h2 style="font-size:22px;font-weight:700">${sanitize(c.fullName)}</h2>
         <span class="tag ${c.status==='active'?'tag-active':'tag-closed'}">${c.status||'active'}</span>
         <span class="risk-pill risk-${c.riskLevel||'low'}">${(c.riskLevel||'low').toUpperCase()} RISK</span>
       </div>
       <div style="color:var(--muted);font-size:13px;margin-top:4px">
-        ID: ${c.clientId||'—'} &bull; DOB: ${c.dob||'—'} &bull; ${c.community||''} ${c.mob?'· '+c.mob:''} &bull; ${c.phone||'No phone'}
+        ID: ${c.clientId||'—'} &bull; DOB: ${c.dob||'—'} &bull; ${sanitize(c.community||'')} ${c.mob?'· '+sanitize(c.mob):''} &bull; ${c.phone||'No phone'}
       </div>
       <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
         ${[c.sewb&&'SEWB',c.aod&&'AOD',c.justice&&'Justice',c.cultural&&'Cultural'].filter(Boolean).map(p=>`<span class="section-badge badge-${p.toLowerCase()}">${p}</span>`).join('')}
@@ -1218,7 +1218,7 @@ function renderProfileTab(tab, c, clientNotes, clientTime) {
       <div class="card-header"><div class="card-title">📝 Recent Notes</div><button class="btn-ghost" onclick="document.getElementById('ptab-notes').click()">All notes &amp; files →</button></div>
       ${recent.length===0?'<p style="color:var(--muted);font-size:13px">No notes yet</p>':
         recent.map(n=>`<div class="note-entry ${n.type||'general'}">
-          <div class="note-meta"><span class="section-badge badge-${n.type||'general'}">${n.type||'general'}</span><span>${fmtdt(n.created)}</span><span>${n.worker||''}</span></div>
+          <div class="note-meta"><span class="section-badge badge-${n.type||'general'}">${n.type||'general'}</span><span>${fmtdt(n.created)}</span><span>${sanitize(n.worker||'')}</span></div>
           <div class="note-text">${sanitize(n.text)}</div>
         </div>`).join('')
       }
@@ -1452,7 +1452,7 @@ function renderProfileTab(tab, c, clientNotes, clientTime) {
         <div class="note-meta">
           <span class="section-badge badge-${n.type||'general'}">${n.type||'general'}</span>
           <span>${fmtdt(n.created)}</span>
-          <span>${n.worker||''}</span>
+          <span>${sanitize(n.worker||'')}</span>
           ${n.contactType?`<span>📍 ${n.contactType}</span>`:''}
           ${n.duration?`<span>⏱️ ${n.duration} min</span>`:''}
           ${files.length?`<span title="Attached files">📎 ${files.length}</span>`:''}
@@ -1551,10 +1551,10 @@ function renderProfileTab(tab, c, clientNotes, clientTime) {
     <div class="card">
       <div class="card-header"><div class="card-title">👤 Client Details</div></div>
       <div class="grid-3">
-        <div class="form-group"><label>Full Name</label><input id="if-fullName" value="${c.fullName||''}"></div>
-        <div class="form-group"><label>Preferred Name</label><input id="if-preferredName" value="${c.preferredName||''}"></div>
+        <div class="form-group"><label>Full Name</label><input id="if-fullName" value="${sanitize(c.fullName||'')}"></div>
+        <div class="form-group"><label>Preferred Name</label><input id="if-preferredName" value="${sanitize(c.preferredName||'')}"></div>
         <div class="form-group"><label>Date of Birth</label><input type="date" id="if-dob" value="${c.dob||''}"></div>
-        <div class="form-group" style="grid-column:1/-1"><label>Address</label><input id="if-address" value="${c.address||''}"></div>
+        <div class="form-group" style="grid-column:1/-1"><label>Address</label><input id="if-address" value="${sanitize(c.address||'')}"></div>
         <div class="form-group"><label>Phone</label><input id="if-phone" value="${c.phone||''}"></div>
         <div class="form-group"><label>Safe to leave calls/texts?</label>
           <select id="if-safeContact"><option value="">Select…</option><option ${c.ifSafeContact==='Yes'?'selected':''}>Yes</option><option ${c.ifSafeContact==='No'?'selected':''}>No</option></select></div>
@@ -1579,7 +1579,7 @@ function renderProfileTab(tab, c, clientNotes, clientTime) {
         </div>
       </div>
       <div class="grid-3">
-        <div class="form-group"><label>Who's your Mob?</label><input id="if-mob" value="${c.mob||''}" placeholder="WG can assist with tracing"></div>
+        <div class="form-group"><label>Who's your Mob?</label><input id="if-mob" value="${sanitize(c.mob||'')}" placeholder="WG can assist with tracing"></div>
         <div class="form-group"><label>Language/dialects spoken at home</label><input id="if-languages" value="${c.languages||''}"></div>
         <div class="form-group"><label>Interpreter or support person required?</label>
           <select id="if-interpreter"><option value="">Select…</option><option ${c.interpreter==='Yes'?'selected':''}>Yes</option><option ${c.interpreter==='No'?'selected':''}>No</option></select></div>
@@ -1855,12 +1855,12 @@ function renderProfileTab(tab, c, clientNotes, clientTime) {
           <div class="avatar" style="background:${workerColour(w.role)}">${initials(w.name)}</div>
           <div style="flex:1">
             <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-              <strong style="font-size:14px">${w.name}</strong>
+              <strong style="font-size:14px">${sanitize(w.name)}</strong>
               <span class="section-badge" style="background:#e0e7ff;color:#3730a3">${w.role||'Worker'}</span>
               ${w.primary?'<span class="tag tag-active" style="font-size:10px">Primary Worker</span>':''}
             </div>
             <div style="font-size:12px;color:var(--muted);margin-top:4px">
-              ${w.organisation?`🏢 ${w.organisation} &bull; `:''}
+              ${w.organisation?`🏢 ${sanitize(w.organisation)} &bull; `:''}
               ${w.phone?`📞 ${w.phone} &bull; `:''}
               ${w.email?`✉️ ${w.email}`:''}
             </div>
@@ -1902,7 +1902,7 @@ function renderProfileTab(tab, c, clientNotes, clientTime) {
       <button class="btn btn-outline" onclick="exportClientJSON('${c.id}')">💾 Export Client File (.json)</button>
     </div>
     <div class="card">
-      <div class="card-header"><div class="card-title" style="font-size:16px">📄 Client Summary — ${c.fullName}</div></div>
+      <div class="card-header"><div class="card-title" style="font-size:16px">📄 Client Summary — ${sanitize(c.fullName)}</div></div>
       <div class="grid-4" style="margin-bottom:16px">
         <div class="stat-card"><div class="label">Programs</div><div class="value" style="font-size:20px">${progs.length}</div><div class="sub">${progs.join(', ')||'None'}</div></div>
         <div class="stat-card"><div class="label">Total Notes</div><div class="value" style="font-size:20px">${clientNotes.length}</div></div>
@@ -1936,11 +1936,11 @@ function renderProfileTab(tab, c, clientNotes, clientTime) {
       ${c.justice?`<div style="margin-bottom:16px"><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:8px">Justice Summary</div><div style="font-size:13px"><strong>Diversion:</strong> ${c.jusDiversion||'None'} &nbsp;|&nbsp; <strong>Legal:</strong> ${c.jusLegal||'—'} &nbsp;|&nbsp; <strong>Court:</strong> ${c.jusCourts||'—'}</div></div>`:''}
       <div style="margin-bottom:16px">
         <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:8px">Key Workers</div>
-        ${(c.keyWorkers||[]).length===0?'<p style="font-size:13px;color:var(--muted)">None recorded</p>':(c.keyWorkers||[]).map(w=>`<span style="display:inline-flex;align-items:center;gap:6px;background:var(--bg);border-radius:20px;padding:4px 12px;font-size:12px;margin:3px">${w.name} <em style="color:var(--muted)">${w.role||''}</em></span>`).join('')}
+        ${(c.keyWorkers||[]).length===0?'<p style="font-size:13px;color:var(--muted)">None recorded</p>':(c.keyWorkers||[]).map(w=>`<span style="display:inline-flex;align-items:center;gap:6px;background:var(--bg);border-radius:20px;padding:4px 12px;font-size:12px;margin:3px">${sanitize(w.name)} <em style="color:var(--muted)">${w.role||''}</em></span>`).join('')}
       </div>
       <div>
         <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:8px">Recent Notes</div>
-        ${recentNotes.length===0?'<p style="font-size:13px;color:var(--muted)">No notes yet</p>':recentNotes.map(n=>`<div class="note-entry ${n.type||'general'}" style="margin-bottom:8px"><div class="note-meta"><span class="section-badge badge-${n.type||'general'}">${n.type||'general'}</span><span>${fmtdt(n.created)}</span><span>${n.worker||''}</span></div><div class="note-text">${(n.text||'').slice(0,200)}${(n.text||'').length>200?'…':''}</div></div>`).join('')}
+        ${recentNotes.length===0?'<p style="font-size:13px;color:var(--muted)">No notes yet</p>':recentNotes.map(n=>`<div class="note-entry ${n.type||'general'}" style="margin-bottom:8px"><div class="note-meta"><span class="section-badge badge-${n.type||'general'}">${n.type||'general'}</span><span>${fmtdt(n.created)}</span><span>${sanitize(n.worker||'')}</span></div><div class="note-text">${(n.text||'').slice(0,200)}${(n.text||'').length>200?'…':''}</div></div>`).join('')}
       </div>
     </div>`;
   }
@@ -1970,7 +1970,7 @@ function renderProfileTab(tab, c, clientNotes, clientTime) {
           <div style="display:flex;align-items:center;gap:12px;padding:12px;border:1px solid var(--border);border-radius:8px;background:#fafaf8">
             <div style="font-size:28px">${fileIcon(f.type)}</div>
             <div style="flex:1;min-width:0">
-              <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${f.name}</div>
+              <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${sanitize(f.name)}</div>
               <div style="font-size:11px;color:var(--muted);margin-top:2px">${formatBytes(f.size)} · ${fmt(f.uploadedAt)} · ${f.uploadedBy||'—'}</div>
               ${srcLabel?`<div style="font-size:11px;color:var(--primary);margin-top:3px">${srcNote?`<a href="#" onclick="event.preventDefault();document.getElementById('ptab-notes').click()" style="color:var(--primary);text-decoration:none">${srcLabel}</a>`:sanitize(srcLabel)}</div>`:''}
             </div>
@@ -2426,12 +2426,12 @@ function printWorkFoundations(id) {
   const caItems = [['caSkills','You feel you have skills to offer'],['caLearn','You can learn what you need to'],['caJobs','You believe there are attainable jobs out there to suit you'],['caHelp','You can ask for help'],['caSayNo','Saying No'],['caRights','You feel confident stating your rights and needs'],['caConvo','You can start and keep a conversation going'],['caAcceptCrit','You can accept criticism'],['caGiveCrit','You can give constructive criticism'],['caAnger','Express anger or frustration in a healthy way'],['caOpinion','You can express your opinion']];
   const ratingOpts = ['Strongly Agree','Agree','Neutral','Disagree','Strongly Disagree'];
   const brand089 = printBrandHeader('#7c2d12');
-  w.document.write(`<!DOCTYPE html><html><head><title>Form 089 — ${c.fullName}</title>
+  w.document.write(`<!DOCTYPE html><html><head><title>Form 089 — ${sanitize(c.fullName)}</title>
   <style>body{font-family:Arial,sans-serif;font-size:11px;color:#111;padding:20px;-webkit-print-color-adjust:exact;print-color-adjust:exact}h1{font-size:16px;background:#7c2d12;color:#fff;padding:10px 16px;border-radius:4px}h2{font-size:13px;background:#fef3c7;padding:6px 10px;margin:14px 0 6px;border-left:4px solid #d97706}table{width:100%;border-collapse:collapse;margin-bottom:12px}th{background:#7c2d12;color:#fff;padding:6px 8px;font-size:10px;text-align:center}td{padding:6px 8px;border:1px solid #ddd;font-size:10px}td:first-child{text-align:left}tr:nth-child(even)td{background:#fafafa}.field{display:flex;gap:8px;margin-bottom:6px}.label{font-weight:bold;width:200px;flex-shrink:0}.footer{margin-top:24px;padding-top:10px;border-top:1px solid #ddd;font-size:9px;color:#999;display:flex;justify-content:space-between}${brand089.css}</style>
   </head><body>
   ${brand089.html}
   <h1>Worn Gundidj — Employment Intake Referral Form (Form 089)</h1>
-  <p>Client: <strong>${c.fullName}</strong> &nbsp;|&nbsp; Date: ${fmt(wf.completedDate||today())} &nbsp;|&nbsp; Coordinator: ${wf.coordinator||'—'}</p>
+  <p>Client: <strong>${sanitize(c.fullName)}</strong> &nbsp;|&nbsp; Date: ${fmt(wf.completedDate||today())} &nbsp;|&nbsp; Coordinator: ${wf.coordinator||'—'}</p>
   <h2>Personal Details</h2>
   ${[['Name',`${wf.firstName||''} ${wf.lastName||''}`],['Preferred Name',wf.preferredName],['Phone',wf.phone],['Email',wf.email],['Gender',wf.gender],['Cultural Status',wf.culturalStatus||wf.cultural],['Contact Method',wf.contactMethod]].map(([l,v])=>`<div class="field"><span class="label">${l}:</span><span>${v||'—'}</span></div>`).join('')}
   <h2>Employment Information</h2>
@@ -2466,12 +2466,12 @@ function printFeedback(id) {
   const w = window.open('','_blank');
   if(!w){ showToast('⚠️ Pop-up blocked — allow pop-ups for this site to open documents'); return; }
   const brandFb = printBrandHeader('#1a3a2a');
-  w.document.write(`<!DOCTYPE html><html><head><title>SEWB Feedback — ${c.fullName}</title>
+  w.document.write(`<!DOCTYPE html><html><head><title>SEWB Feedback — ${sanitize(c.fullName)}</title>
   <style>body{font-family:Arial,sans-serif;font-size:11px;color:#111;padding:20px;-webkit-print-color-adjust:exact;print-color-adjust:exact}h1{font-size:16px;background:#1a3a2a;color:#fff;padding:10px 16px;border-radius:4px}h2{font-size:12px;background:#d1fae5;padding:5px 10px;margin:12px 0 6px;border-left:4px solid #2d6a4f}.field{display:flex;gap:8px;margin-bottom:5px}.label{font-weight:bold;width:280px;flex-shrink:0}.footer{margin-top:24px;padding-top:10px;border-top:1px solid #ddd;font-size:9px;color:#999}${brandFb.css}</style>
   </head><body>
   ${brandFb.html}
   <h1>Worn Gundidj SEWB Feedback Form</h1>
-  <p>Client: <strong>${c.fullName}</strong> &nbsp;|&nbsp; Date: ${fmt(fb.date)} &nbsp;|&nbsp; Worker: ${fb.worker||'—'}</p>
+  <p>Client: <strong>${sanitize(c.fullName)}</strong> &nbsp;|&nbsp; Date: ${fmt(fb.date)} &nbsp;|&nbsp; Worker: ${fb.worker||'—'}</p>
   <h2>About This Feedback</h2>
   ${[['Completed by',fb.fillerName],['Role',fb.fillerRole],['Client consent',fb.consent]].map(([l,v])=>`<div class="field"><span class="label">${l}:</span><span>${v||'—'}</span></div>`).join('')}
   <h2>Services &amp; Referrals</h2>
@@ -2604,7 +2604,7 @@ function copyClientSummary(id) {
   const age=c.dob?Math.floor((Date.now()-new Date(c.dob))/(365.25*24*3600*1000)):'?';
   const progs=[c.sewb&&'SEWB',c.aod&&'AOD',c.justice&&'Justice',c.cultural&&'Cultural'].filter(Boolean).join(', ');
   const rn=notes.filter(n=>n.clientId===id).sort((a,b)=>b.created.localeCompare(a.created)).slice(0,3);
-  const text=['WORN GUNDIDJ — CLIENT SUMMARY',`Generated: ${new Date().toLocaleDateString('en-AU')}`,``,`CLIENT: ${c.fullName}`,`DOB: ${c.dob||'—'} (${age} yrs)  |  Risk: ${(c.riskLevel||'low').toUpperCase()}`,`Mob: ${c.mob||'—'}  |  Community: ${c.community||'—'}`,`Phone: ${c.phone||'—'}  |  Key Worker: ${c.keyWorker||'—'}`,``,`PROGRAMS: ${progs||'None'}`,``,`GOALS:`,`  Short: ${c.ifGoalShort||c.goals||'—'}`,`  Medium: ${c.ifGoalMedium||'—'}`,`  Long: ${c.ifGoalLong||'—'}`,``,`RECENT NOTES:`,...rn.map(n=>`  [${(n.type||'general').toUpperCase()}] ${fmtdt(n.created)}: ${(n.text||'').slice(0,150)}`)].join('\n');
+  const text=['WORN GUNDIDJ — CLIENT SUMMARY',`Generated: ${new Date().toLocaleDateString('en-AU')}`,``,`CLIENT: ${sanitize(c.fullName)}`,`DOB: ${c.dob||'—'} (${age} yrs)  |  Risk: ${(c.riskLevel||'low').toUpperCase()}`,`Mob: ${sanitize(c.mob||'—')}  |  Community: ${sanitize(c.community||'—')}`,`Phone: ${c.phone||'—'}  |  Key Worker: ${sanitize(c.keyWorker||'—')}`,``,`PROGRAMS: ${progs||'None'}`,``,`GOALS:`,`  Short: ${c.ifGoalShort||c.goals||'—'}`,`  Medium: ${c.ifGoalMedium||'—'}`,`  Long: ${c.ifGoalLong||'—'}`,``,`RECENT NOTES:`,...rn.map(n=>`  [${(n.type||'general').toUpperCase()}] ${fmtdt(n.created)}: ${(n.text||'').slice(0,150)}`)].join('\n');
   navigator.clipboard.writeText(text).then(()=>showToast('Summary copied to clipboard'));
 }
 
@@ -2729,24 +2729,24 @@ function printIntake(id) {
   const win = window.open('','_blank');
   if(!win){ showToast('⚠️ Pop-up blocked — allow pop-ups for this site to open documents'); return; }
   const brandIntake = printBrandHeader('#1a3a2a');
-  win.document.write(`<html><head><title>WG Intake — ${c.fullName}</title>
+  win.document.write(`<html><head><title>WG Intake — ${sanitize(c.fullName)}</title>
   <style>body{font-family:Arial,sans-serif;font-size:12px;padding:20px;color:#111;-webkit-print-color-adjust:exact;print-color-adjust:exact}h2{font-size:16px;margin:16px 0 6px}h3{font-size:13px;margin:12px 0 4px;color:#2d6a4f}table{width:100%;border-collapse:collapse}td{padding:5px 8px;border:1px solid #ddd;vertical-align:top}td:first-child{font-weight:bold;width:35%;background:#f9f9f9}.chk{display:inline-block;width:12px;height:12px;border:1px solid #666;margin-right:4px}${brandIntake.css}</style>
   </head><body>
   ${brandIntake.html}
   <h1 style="font-size:20px;color:#1a3a2a">Worn Gundidj — Client Intake Form</h1>
-  <p style="color:#666">Printed: ${new Date().toLocaleDateString('en-AU')} &bull; Client: ${c.fullName}</p>
+  <p style="color:#666">Printed: ${new Date().toLocaleDateString('en-AU')} &bull; Client: ${sanitize(c.fullName)}</p>
   <hr>
   <h2>Client Details</h2>
   <table>
-    <tr><td>Full Name</td><td>${c.fullName||''}</td></tr>
-    <tr><td>Preferred Name</td><td>${c.preferredName||''}</td></tr>
+    <tr><td>Full Name</td><td>${sanitize(c.fullName||'')}</td></tr>
+    <tr><td>Preferred Name</td><td>${sanitize(c.preferredName||'')}</td></tr>
     <tr><td>Date of Birth</td><td>${c.dob||''}</td></tr>
-    <tr><td>Address</td><td>${c.address||''}</td></tr>
+    <tr><td>Address</td><td>${sanitize(c.address||'')}</td></tr>
     <tr><td>Phone</td><td>${c.phone||''} (Safe to contact: ${c.ifSafeContact||'—'})</td></tr>
     <tr><td>Email</td><td>${c.email||''}</td></tr>
     <tr><td>Gender</td><td>${c.gender||''}</td></tr>
     <tr><td>LGBTIQA+SB</td><td>${c.ifLgbtiqa||''}</td></tr>
-    <tr><td>Mob / Language Group</td><td>${c.mob||''}</td></tr>
+    <tr><td>Mob / Language Group</td><td>${sanitize(c.mob||'')}</td></tr>
     <tr><td>Languages</td><td>${c.languages||''}</td></tr>
     <tr><td>Interpreter Required</td><td>${c.interpreter||''}</td></tr>
     <tr><td>Marital Status</td><td>${c.ifMarital||''}</td></tr>
@@ -2781,13 +2781,13 @@ function openWorkerModal(clientId, idx) {
   const w = idx !== null ? (c.keyWorkers[idx]||{}) : {};
   const html = `
   <div class="grid-2">
-    <div class="form-group"><label>Full Name *</label><input id="wm-name" value="${w.name||''}"></div>
+    <div class="form-group"><label>Full Name *</label><input id="wm-name" value="${sanitize(w.name||'')}"></div>
     <div class="form-group"><label>Role / Title</label>
       <select id="wm-role">
         ${['Key Worker','Case Manager','Support Worker','Cultural Mentor','GP','Psychologist','Counsellor','Legal','Housing Worker','Employment Consultant','NDIS Support Coordinator','Family Violence Worker','BTH Worker','Elder/Respected Person','Other'].map(r=>`<option ${w.role===r?'selected':''}>${r}</option>`).join('')}
       </select>
     </div>
-    <div class="form-group"><label>Organisation / Service</label><input id="wm-org" value="${w.organisation||''}"></div>
+    <div class="form-group"><label>Organisation / Service</label><input id="wm-org" value="${sanitize(w.organisation||'')}"></div>
     <div class="form-group"><label>Phone</label><input id="wm-phone" value="${w.phone||''}"></div>
     <div class="form-group"><label>Email</label><input type="email" id="wm-email" value="${w.email||''}"></div>
     <div class="form-group"><label>Start Date</label><input type="date" id="wm-start" value="${w.startDate||today()}"></div>
@@ -2876,7 +2876,7 @@ function filterNotes(clientId, type) {
   const filtered = notes.filter(n=>n.clientId===clientId&&(n.type||'general')===type).sort((a,b)=>b.created?.localeCompare(a.created));
   if(!filtered.length) return '<p style="color:var(--muted);font-size:13px">No notes recorded for this area yet</p>';
   return filtered.map(n=>`<div class="note-entry ${type}">
-    <div class="note-meta"><span>${fmtdt(n.created)}</span><span>${n.worker||''}</span>${n.contactType?`<span>📍 ${n.contactType}</span>`:''}</div>
+    <div class="note-meta"><span>${fmtdt(n.created)}</span><span>${sanitize(n.worker||'')}</span>${n.contactType?`<span>📍 ${n.contactType}</span>`:''}</div>
     <div class="note-text">${(n.text||'').replace(/\n/g,'<br>')}</div>
   </div>`).join('');
 }
@@ -2985,7 +2985,7 @@ function openAssignWorkersModal(id) {
   const c = clients.find(cl=>cl.id===id); if(!c) return;
   const assigned = c.assignedWorkers || (c.keyWorker ? [c.keyWorker] : []);
   const html = `
-    <p style="font-size:13px;color:var(--muted);margin-bottom:16px">Select which workers can access <strong>${c.fullName}</strong>'s file. Jon Benson and Jade Atkinson always have full access.</p>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:16px">Select which workers can access <strong>${sanitize(c.fullName)}</strong>'s file. Jon Benson and Jade Atkinson always have full access.</p>
     <div style="display:flex;flex-direction:column;gap:10px">
       ${workersList.map(w=>`
         <label style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;cursor:pointer;font-size:13px;${assigned.includes(w)?'background:#f0fdf4;border-color:#86efac':''}">
@@ -3018,8 +3018,8 @@ function clientFormHTML(c) {
   <div style="border-bottom:1px solid var(--border);padding-bottom:16px;margin-bottom:16px">
     <div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:12px">PERSONAL INFORMATION</div>
     <div class="grid-3">
-      <div class="form-group"><label>Full Name *</label><input id="cf-fullName" value="${c.fullName||''}"></div>
-      <div class="form-group"><label>Preferred Name</label><input id="cf-preferredName" value="${c.preferredName||''}"></div>
+      <div class="form-group"><label>Full Name *</label><input id="cf-fullName" value="${sanitize(c.fullName||'')}"></div>
+      <div class="form-group"><label>Preferred Name</label><input id="cf-preferredName" value="${sanitize(c.preferredName||'')}"></div>
       <div class="form-group"><label>Pronouns</label><input id="cf-pronouns" value="${c.pronouns||''}"></div>
       <div class="form-group"><label>Date of Birth</label><input type="date" id="cf-dob" value="${c.dob||''}"></div>
       <div class="form-group"><label>Gender</label>
@@ -3032,7 +3032,7 @@ function clientFormHTML(c) {
     <div class="grid-3">
       <div class="form-group"><label>Phone</label><input id="cf-phone" value="${c.phone||''}"></div>
       <div class="form-group"><label>Email</label><input type="email" id="cf-email" value="${c.email||''}"></div>
-      <div class="form-group"><label>Address</label><input id="cf-address" value="${c.address||''}"></div>
+      <div class="form-group"><label>Address</label><input id="cf-address" value="${sanitize(c.address||'')}"></div>
       <div class="form-group" style="grid-column:1/-1"><label>Emergency Contact (Name, Relationship, Phone)</label><input id="cf-emergencyContact" value="${c.emergencyContact||''}"></div>
     </div>
   </div>
@@ -3041,8 +3041,8 @@ function clientFormHTML(c) {
     <div class="grid-3">
       <div class="form-group"><label>Aboriginal / TSI</label>
         <select id="cf-atsi"><option>Yes — Aboriginal</option><option>Yes — Torres Strait Islander</option><option>Yes — Both</option><option>No</option><option>Prefer not to say</option></select></div>
-      <div class="form-group"><label>Mob / Language Group</label><input id="cf-mob" value="${c.mob||''}"></div>
-      <div class="form-group"><label>Country / Community</label><input id="cf-community" value="${c.community||''}"></div>
+      <div class="form-group"><label>Mob / Language Group</label><input id="cf-mob" value="${sanitize(c.mob||'')}"></div>
+      <div class="form-group"><label>Country / Community</label><input id="cf-community" value="${sanitize(c.community||'')}"></div>
       <div class="form-group"><label>Languages Spoken</label><input id="cf-languages" value="${c.languages||''}"></div>
       <div class="form-group"><label>Interpreter Required</label>
         <select id="cf-interpreter"><option>No</option><option>Yes</option></select></div>
@@ -3127,7 +3127,7 @@ function collectClientForm() {
 
 // ===== NOTE MODAL =====
 function openNoteModal(clientId, defaultType) {
-  const clientOpts = clients.map(c=>`<option value="${c.id}" ${c.id===clientId?'selected':''}>${c.fullName}</option>`).join('');
+  const clientOpts = clients.map(c=>`<option value="${c.id}" ${c.id===clientId?'selected':''}>${sanitize(c.fullName)}</option>`).join('');
   const html = `
   <div class="form-group"><label>Client *</label><select id="nm-client">${clientOpts}</select></div>
   <div class="grid-2">
@@ -3208,7 +3208,7 @@ function openNoteModal(clientId, defaultType) {
       const endMins = noteD.getHours()*60+noteD.getMinutes()+dur;
       calEvents.push({
         id: uid(), type: typeMap[n.type]||'appointment',
-        title: `${(n.contactType||'Session')} — ${cl?.fullName||'Client'}`,
+        title: `${(n.contactType||'Session')} — ${sanitize(cl?.fullName||'Client')}`,
         clientId: n.clientId,
         date: isoDate(noteD),
         startTime: `${startHH}:${startMM}`,
@@ -3251,7 +3251,7 @@ function deleteNote(noteId, clientId) {
 
 // ===== TIME MODAL =====
 function openTimeModal(clientId) {
-  const clientOpts = clients.map(c=>`<option value="${c.id}" ${c.id===clientId?'selected':''}>${c.fullName}</option>`).join('');
+  const clientOpts = clients.map(c=>`<option value="${c.id}" ${c.id===clientId?'selected':''}>${sanitize(c.fullName)}</option>`).join('');
   const html = `
   <div class="form-group"><label>Client *</label><select id="tm-client">${clientOpts}</select></div>
   <div class="grid-2">
@@ -3308,9 +3308,9 @@ function renderNotes() {
         return `<div class="note-entry ${n.type||'general'}" data-type="${n.type||'general'}" style="cursor:pointer" onclick="openClientProfile('${n.clientId}')">
           <div class="note-meta">
             <span class="section-badge badge-${n.type||'general'}">${n.type||'general'}</span>
-            <strong style="font-size:12px">${c?.fullName||'Unknown'}</strong>
+            <strong style="font-size:12px">${sanitize(c?.fullName||'Unknown')}</strong>
             <span>${fmtdt(n.created)}</span>
-            <span>${n.worker||''}</span>
+            <span>${sanitize(n.worker||'')}</span>
             ${n.contactType?`<span>📍 ${n.contactType}</span>`:''}
           </div>
           <div class="note-text">${(n.text||'').slice(0,200)}${(n.text||'').length>200?'…':''}</div>
@@ -3349,7 +3349,7 @@ function renderTime() {
         ${[...timeLogs].sort((a,b)=>b.date?.localeCompare(a.date)).map(t=>{
           const c = clients.find(cl=>cl.id===t.clientId);
           return `<tr>
-            <td style="cursor:pointer" onclick="openClientProfile('${t.clientId}')">${c?.fullName||'Unknown'}</td>
+            <td style="cursor:pointer" onclick="openClientProfile('${t.clientId}')">${sanitize(c?.fullName||'Unknown')}</td>
             <td>${fmt(t.date)}</td><td>${t.activity||'—'}</td><td>${t.type||'—'}</td>
             <td><span class="time-badge">${t.minutes} min</span></td>
             <td>${t.worker||'—'}</td>
@@ -3379,8 +3379,8 @@ function renderSEWB() {
       ${sewbClients.length===0?'<tr><td colspan="6"><div class="empty-state"><div class="icon">💚</div><p>No SEWB clients enrolled</p></div></td></tr>':
         sewbClients.map(c=>{
           const assessed = (c.sewbDomains||[]).filter(d=>d>0).length;
-          return `<tr><td style="cursor:pointer" onclick="openClientProfile('${c.id}')">${c.fullName}</td>
-            <td>${c.community||'—'}</td>
+          return `<tr><td style="cursor:pointer" onclick="openClientProfile('${c.id}')">${sanitize(c.fullName)}</td>
+            <td>${sanitize(c.community||'—')}</td>
             <td><span class="risk-pill risk-${c.riskLevel||'low'}">${(c.riskLevel||'low').toUpperCase()}</span></td>
             <td><div class="progress-bar" style="width:120px"><div class="progress-fill" style="width:${(assessed/8)*100}%"></div></div><span style="font-size:11px;color:var(--muted)">${assessed}/8</span></td>
             <td><span class="tag ${c.status==='active'?'tag-active':'tag-closed'}">${c.status||'active'}</span></td>
@@ -3409,7 +3409,7 @@ function renderAOD() {
       <tbody>
       ${aodClients.length===0?'<tr><td colspan="6"><div class="empty-state"><div class="icon">🔴</div><p>No AOD clients enrolled</p></div></td></tr>':
         aodClients.map(c=>`<tr>
-          <td style="cursor:pointer" onclick="openClientProfile('${c.id}')">${c.fullName}</td>
+          <td style="cursor:pointer" onclick="openClientProfile('${c.id}')">${sanitize(c.fullName)}</td>
           <td style="font-size:12px">${(c.aodPrimary||'—').slice(0,40)}</td>
           <td>${c.aodStage||'—'}</td><td style="font-size:12px">${c.aodTreatment||'—'}</td>
           <td><span class="risk-pill risk-${c.riskLevel||'low'}">${(c.riskLevel||'low').toUpperCase()}</span></td>
@@ -3437,8 +3437,8 @@ function renderJustice() {
       <tbody>
       ${jClients.length===0?'<tr><td colspan="6"><div class="empty-state"><div class="icon">⚖️</div><p>No justice clients enrolled</p></div></td></tr>':
         jClients.map(c=>`<tr>
-          <td style="cursor:pointer" onclick="openClientProfile('${c.id}')">${c.fullName}</td>
-          <td>${c.community||'—'}</td><td>${c.jusDiversion||'None'}</td>
+          <td style="cursor:pointer" onclick="openClientProfile('${c.id}')">${sanitize(c.fullName)}</td>
+          <td>${sanitize(c.community||'—')}</td><td>${c.jusDiversion||'None'}</td>
           <td style="font-size:12px">${(c.jusLegal||'—').slice(0,30)}</td>
           <td><span class="risk-pill risk-${c.riskLevel||'low'}">${(c.riskLevel||'low').toUpperCase()}</span></td>
           <td><button class="btn btn-sm btn-outline" onclick="openClientProfile('${c.id}')">View</button></td>
@@ -3466,8 +3466,8 @@ function renderCultural() {
       <tbody>
       ${cClients.length===0?'<tr><td colspan="5"><div class="empty-state"><div class="icon">🌀</div><p>No cultural clients enrolled</p></div></td></tr>':
         cClients.map(c=>`<tr>
-          <td style="cursor:pointer" onclick="openClientProfile('${c.id}')">${c.fullName}</td>
-          <td>${c.mob||'—'}</td><td>${c.community||'—'}</td>
+          <td style="cursor:pointer" onclick="openClientProfile('${c.id}')">${sanitize(c.fullName)}</td>
+          <td>${sanitize(c.mob||'—')}</td><td>${sanitize(c.community||'—')}</td>
           <td style="font-size:12px">${(c.cultGoals||'—').slice(0,60)}</td>
           <td><button class="btn btn-sm btn-outline" onclick="openClientProfile('${c.id}')">View</button></td>
         </tr>`).join('')
@@ -3726,7 +3726,7 @@ function renderReportsPage() {
       <label>Select Client</label>
       <select id="rpt-client-select" onchange="updateClientReportButtons()">
         <option value="">— Choose a client —</option>
-        ${[...clients].sort((a,b)=>a.fullName?.localeCompare(b.fullName)).map(c=>`<option value="${c.id}">${c.fullName}${c.status==='closed'?' (Closed)':''}</option>`).join('')}
+        ${[...clients].sort((a,b)=>a.fullName?.localeCompare(b.fullName)).map(c=>`<option value="${c.id}">${sanitize(c.fullName)}${c.status==='closed'?' (Closed)':''}</option>`).join('')}
       </select>
     </div>
     <div id="rpt-client-btns" class="hidden" style="display:flex;gap:10px;flex-wrap:wrap;margin-top:4px">
@@ -4109,16 +4109,16 @@ function printBrandHeader(themeColor) {
 }
 
 function reportHeader(title, subtitle, clientName) {
-  const org = DB.load('orgName','Worn Gundidj Aboriginal Co-Operative');
+  const org = sanitize(DB.load('orgName','Worn Gundidj Aboriginal Co-Operative'));
   const logo = orgLogoSrc();
   return `
   <div class="header">
     <div class="header-brand">
       ${logo?`<img src="${logo}" class="report-logo" alt="${org}">`:''}
       <div>
-        <div class="report-title">${title}</div>
-        <div class="report-sub">${subtitle}</div>
-        ${clientName ? `<div class="report-client">Client: ${clientName}</div>` : ''}
+        <div class="report-title">${sanitize(title)}</div>
+        <div class="report-sub">${sanitize(subtitle)}</div>
+        ${clientName ? `<div class="report-client">Client: ${sanitize(clientName)}</div>` : ''}
       </div>
     </div>
     <div class="org">
@@ -4313,7 +4313,7 @@ function bulkImportPreview() {
           const progs = [r.sewb&&'SEWB',r.aod&&'AOD',r.justice&&'Justice',r.cultural&&'Cultural',r.disability&&'Disability'].filter(Boolean).join(', ')||'—';
           return `<tr style="background:${dup?'#fef9c3':''}">
             <td style="padding:6px 8px;border:1px solid var(--border);color:var(--muted)">${i+1}</td>
-            <td style="padding:6px 8px;border:1px solid var(--border);font-weight:600">${r.fullName}</td>
+            <td style="padding:6px 8px;border:1px solid var(--border);font-weight:600">${sanitize(r.fullName)}</td>
             <td style="padding:6px 8px;border:1px solid var(--border)">${r.dob||'—'}</td>
             <td style="padding:6px 8px;border:1px solid var(--border)">${r.gender||'—'}</td>
             <td style="padding:6px 8px;border:1px solid var(--border)">${r.phone||'—'}</td>
@@ -4411,19 +4411,19 @@ function buildFullClientReport(c, from, to) {
 
   <h2>Client Demographics</h2>
   <div class="field-row">
-    <div class="field"><label>Full Name</label><p>${c.fullName||'—'}</p></div>
-    <div class="field"><label>Preferred Name</label><p>${c.preferredName||'—'}</p></div>
+    <div class="field"><label>Full Name</label><p>${sanitize(c.fullName||'—')}</p></div>
+    <div class="field"><label>Preferred Name</label><p>${sanitize(c.preferredName||'—')}</p></div>
     <div class="field"><label>Date of Birth</label><p>${c.dob||'—'} (${age} yrs)</p></div>
     <div class="field"><label>Gender</label><p>${c.gender||'—'}</p></div>
   </div>
   <div class="field-row">
     <div class="field"><label>Phone</label><p>${c.phone||'—'}</p></div>
     <div class="field"><label>Email</label><p>${c.email||'—'}</p></div>
-    <div class="field"><label>Address</label><p>${c.address||'—'}</p></div>
+    <div class="field"><label>Address</label><p>${sanitize(c.address||'—')}</p></div>
   </div>
   <div class="field-row">
-    <div class="field"><label>Mob / Language Group</label><p>${c.mob||'—'}</p></div>
-    <div class="field"><label>Community / Country</label><p>${c.community||'—'}</p></div>
+    <div class="field"><label>Mob / Language Group</label><p>${sanitize(c.mob||'—')}</p></div>
+    <div class="field"><label>Community / Country</label><p>${sanitize(c.community||'—')}</p></div>
     <div class="field"><label>Languages</label><p>${c.languages||'—'}</p></div>
     <div class="field"><label>ATSI</label><p>${c.atsi||'—'}</p></div>
   </div>
@@ -4431,7 +4431,7 @@ function buildFullClientReport(c, from, to) {
     <div class="field"><label>Housing</label><p>${c.housing||'—'}</p></div>
     <div class="field"><label>Employment</label><p>${c.employment||'—'}</p></div>
     <div class="field"><label>GP</label><p>${c.gp||'—'}</p></div>
-    <div class="field"><label>Key Worker</label><p>${c.keyWorker||'—'}</p></div>
+    <div class="field"><label>Key Worker</label><p>${sanitize(c.keyWorker||'—')}</p></div>
   </div>
   <div class="field-row">
     <div class="field"><label>Emergency Contact 1</label><p>${c.ifEc1name||'—'} ${c.ifEc1rel?'('+c.ifEc1rel+')':''} ${c.ifEc1phone||''}</p></div>
@@ -4460,13 +4460,13 @@ function buildFullClientReport(c, from, to) {
   <h2>Key Workers &amp; Support People</h2>
   ${(c.keyWorkers||[]).length===0 ? '<p>No key workers recorded</p>' : `
   <table><tr><th>Name</th><th>Role</th><th>Organisation</th><th>Phone</th><th>Primary</th></tr>
-  ${(c.keyWorkers||[]).map(w=>`<tr><td>${w.name}</td><td>${w.role||'—'}</td><td>${w.organisation||'—'}</td><td>${w.phone||'—'}</td><td>${w.primary?'✅ Yes':'—'}</td></tr>`).join('')}
+  ${(c.keyWorkers||[]).map(w=>`<tr><td>${sanitize(w.name)}</td><td>${w.role||'—'}</td><td>${sanitize(w.organisation||'—')}</td><td>${w.phone||'—'}</td><td>${w.primary?'✅ Yes':'—'}</td></tr>`).join('')}
   </table>`}
 
   <h2>Case Notes (${clientNotes.length}) — ${fmt(from)} to ${fmt(to)}</h2>
   ${clientNotes.length===0 ? '<p>No notes in this period</p>' :
     clientNotes.map(n=>`<div class="note-block ${n.type||'general'}">
-      <div class="note-meta"><strong class="badge badge-${n.type||'general'}">${(n.type||'general').toUpperCase()}</strong> &nbsp; ${fmtdt(n.created)} &nbsp;|&nbsp; ${n.worker||'—'} &nbsp;|&nbsp; ${n.contactType||''} ${n.duration?'| '+n.duration+' min':''}</div>
+      <div class="note-meta"><strong class="badge badge-${n.type||'general'}">${(n.type||'general').toUpperCase()}</strong> &nbsp; ${fmtdt(n.created)} &nbsp;|&nbsp; ${sanitize(n.worker||'—')} &nbsp;|&nbsp; ${n.contactType||''} ${n.duration?'| '+n.duration+' min':''}</div>
       <p>${(n.text||'').replace(/\n/g,'<br>')}</p>
       ${n.followup?`<p style="margin-top:6px;color:#6b7280"><strong>Follow-up:</strong> ${sanitize(n.followup)}</p>`:''}
     </div>`).join('')
@@ -4505,7 +4505,7 @@ function buildSEWBClientReport(c, inline) {
   <h3>SEWB Case Notes (${sewbNotes.length})</h3>
   ${sewbNotes.length===0 ? '<p>No SEWB notes recorded</p>' :
     sewbNotes.map(n=>`<div class="note-block sewb">
-      <div class="note-meta">${fmtdt(n.created)} | ${n.worker||'—'} | ${n.contactType||''}</div>
+      <div class="note-meta">${fmtdt(n.created)} | ${sanitize(n.worker||'—')} | ${n.contactType||''}</div>
       <p>${(n.text||'').replace(/\n/g,'<br>')}</p>
     </div>`).join('')}`;
   return inline ? html : html;
@@ -4539,7 +4539,7 @@ function buildAODClientReport(c, inline) {
   <h3>AOD Case Notes (${aodNotes.length})</h3>
   ${aodNotes.length===0 ? '<p>No AOD notes recorded</p>' :
     aodNotes.map(n=>`<div class="note-block aod">
-      <div class="note-meta">${fmtdt(n.created)} | ${n.worker||'—'} | ${n.contactType||''}</div>
+      <div class="note-meta">${fmtdt(n.created)} | ${sanitize(n.worker||'—')} | ${n.contactType||''}</div>
       <p>${(n.text||'').replace(/\n/g,'<br>')}</p>
     </div>`).join('')}`;
 }
@@ -4567,7 +4567,7 @@ function buildJusticeClientReport(c, inline) {
   <h3>Justice Case Notes (${jNotes.length})</h3>
   ${jNotes.length===0 ? '<p>No justice notes recorded</p>' :
     jNotes.map(n=>`<div class="note-block justice">
-      <div class="note-meta">${fmtdt(n.created)} | ${n.worker||'—'} | ${n.contactType||''}</div>
+      <div class="note-meta">${fmtdt(n.created)} | ${sanitize(n.worker||'—')} | ${n.contactType||''}</div>
       <p>${(n.text||'').replace(/\n/g,'<br>')}</p>
     </div>`).join('')}`;
 }
@@ -4597,7 +4597,7 @@ function buildCulturalClientReport(c, inline) {
   <h3>Cultural Case Notes (${cNotes.length})</h3>
   ${cNotes.length===0 ? '<p>No cultural notes recorded</p>' :
     cNotes.map(n=>`<div class="note-block cultural">
-      <div class="note-meta">${fmtdt(n.created)} | ${n.worker||'—'} | ${n.contactType||''}</div>
+      <div class="note-meta">${fmtdt(n.created)} | ${sanitize(n.worker||'—')} | ${n.contactType||''}</div>
       <p>${(n.text||'').replace(/\n/g,'<br>')}</p>
     </div>`).join('')}`;
 }
@@ -4631,7 +4631,7 @@ function buildDisabilityClientReport(c) {
   <div class="field-row"><div class="field"><label>Funded Supports</label><p>${dis.fundedSupports||'—'}</p></div></div>
   ${buildNDISFundingReportSection(c)}
   <h3>Disability Notes (${disNotes.length})</h3>
-  ${disNotes.map(n=>`<div class="note-block"><div class="note-meta">${fmtdt(n.created)} | ${n.worker||'—'}</div><p>${(n.text||'').replace(/\n/g,'<br>')}</p></div>`).join('')||'<p>None</p>'}`;
+  ${disNotes.map(n=>`<div class="note-block"><div class="note-meta">${fmtdt(n.created)} | ${sanitize(n.worker||'—')}</div><p>${(n.text||'').replace(/\n/g,'<br>')}</p></div>`).join('')||'<p>None</p>'}`;
 }
 
 // NDIS funding summary + claims + supports for the printed disability report
@@ -4658,7 +4658,7 @@ function buildNDISFundingReportSection(c){
     html += `<h2>🤝 Client Supports &amp; Providers</h2>
     <table>
       <tr><th>Name</th><th>Role</th><th>Organisation</th><th>Phone</th><th>Email</th><th>Frequency</th></tr>
-      ${supports.map(s=>`<tr><td>${s.name||'—'}</td><td>${s.role||'—'}</td><td>${s.org||'—'}</td><td>${s.phone||'—'}</td><td>${s.email||'—'}</td><td>${s.freq||'—'}</td></tr>`).join('')}
+      ${supports.map(s=>`<tr><td>${sanitize(s.name||'—')}</td><td>${s.role||'—'}</td><td>${sanitize(s.org||'—')}</td><td>${s.phone||'—'}</td><td>${s.email||'—'}</td><td>${s.freq||'—'}</td></tr>`).join('')}
     </table>`;
   }
   return html;
@@ -4693,7 +4693,7 @@ function buildWorkFoundationsClientReport(c) {
   <h2>Achievements / Milestones</h2>
   <p>${(wf.achievements||'—').replace(/\n/g,'<br>')}</p>
   <h3>Work Foundations Notes (${wfNotes.length})</h3>
-  ${wfNotes.map(n=>`<div class="note-block"><div class="note-meta">${fmtdt(n.created)} | ${n.worker||'—'}</div><p>${(n.text||'').replace(/\n/g,'<br>')}</p></div>`).join('')||'<p>None</p>'}`;
+  ${wfNotes.map(n=>`<div class="note-block"><div class="note-meta">${fmtdt(n.created)} | ${sanitize(n.worker||'—')}</div><p>${(n.text||'').replace(/\n/g,'<br>')}</p></div>`).join('')||'<p>None</p>'}`;
 }
 
 // ---- SAFETY PLAN REPORT ----
@@ -4738,7 +4738,7 @@ function buildNotesReport(c, from, to) {
   ${Object.entries(byType).map(([t,ns])=>`
     <h2>${t.toUpperCase()} Notes (${ns.length})</h2>
     ${ns.map(n=>`<div class="note-block ${t}">
-      <div class="note-meta">${fmtdt(n.created)} | ${n.worker||'—'} | ${n.contactType||''} ${n.duration?'| '+n.duration+' min':''}</div>
+      <div class="note-meta">${fmtdt(n.created)} | ${sanitize(n.worker||'—')} | ${n.contactType||''} ${n.duration?'| '+n.duration+' min':''}</div>
       <p>${(n.text||'').replace(/\n/g,'<br>')}</p>
       ${n.followup?`<p style="margin-top:5px"><strong>Follow-up:</strong> ${sanitize(n.followup)}</p>`:''}
     </div>`).join('')}
@@ -4964,7 +4964,7 @@ function buildWorkloadReport(from, to){
         : r.active>=WORKLOAD_HIGH*0.7 ? '<span class="badge badge-medium">Near capacity</span>'
         : '<span class="badge badge-low">OK</span>';
       return `<tr>
-        <td><strong>${r.worker}</strong></td>
+        <td><strong>${sanitize(r.worker)}</strong></td>
         <td style="text-align:center;font-weight:700">${r.active}</td>
         <td style="text-align:center">${r.total}</td>
         <td style="text-align:center">${r.highRisk||'—'}</td>
@@ -5032,7 +5032,7 @@ function buildFundingReport(program) {
         ? `<span class="badge badge-low">✓ ${r.completeEpisodes} complete${r.openContacts?' + partial':''}</span>`
         : (r.openContacts ? `<span class="badge badge-medium">Partial ${partialPct}%</span>` : `<span class="badge badge-closed">No contacts</span>`);
       return `<tr>
-        <td>${r.client.fullName||'—'}</td>
+        <td>${sanitize(r.client.fullName||'—')}</td>
         <td>${r.firstContact?fmt(new Date(r.firstContact).toISOString()):'—'}</td>
         <td>${r.lastContact?fmt(new Date(r.lastContact).toISOString()):'—'}</td>
         <td>${r.totalWeeks?r.totalWeeks.toFixed(1):'0'}</td>
@@ -5067,7 +5067,7 @@ function buildDisabilityProgramReport(from, to) {
   <table><tr><th>Type</th><th>Count</th></tr>${Object.entries(byType).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<tr><td>${k}</td><td>${v}</td></tr>`).join('')}</table>
   <h2>Client Details</h2>
   <table><tr><th>Client</th><th>Primary Disability</th><th>NDIS #</th><th>Plan Management</th><th>DSP</th><th>Worker</th></tr>
-  ${dc.map(c=>`<tr><td>${c.fullName}</td><td>${c.dis?.primary||'—'}</td><td>${c.dis?.ndisNum||c.ndis||'—'}</td><td>${c.dis?.planMgmt||'—'}</td><td>${c.dis?.dsp||'—'}</td><td>${c.keyWorker||'—'}</td></tr>`).join('')}
+  ${dc.map(c=>`<tr><td>${sanitize(c.fullName)}</td><td>${c.dis?.primary||'—'}</td><td>${c.dis?.ndisNum||c.ndis||'—'}</td><td>${c.dis?.planMgmt||'—'}</td><td>${c.dis?.dsp||'—'}</td><td>${sanitize(c.keyWorker||'—')}</td></tr>`).join('')}
   </table>` + reportFooter();
 }
 
@@ -5089,7 +5089,7 @@ function buildWorkFoundationsProgramReport(from, to) {
   <table><tr><th>Barrier</th><th>Clients</th></tr>${Object.entries(byBarrier).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<tr><td>${k}</td><td>${v}</td></tr>`).join('')}</table>
   <h2>Client Details</h2>
   <table><tr><th>Client</th><th>Employment Goal</th><th>Stage</th><th>Current Status</th><th>External Provider</th><th>Worker</th></tr>
-  ${wc.map(c=>`<tr><td>${c.fullName}</td><td>${c.wf?.employmentGoal||'—'}</td><td>${c.wf?.status||'—'}</td><td>${c.wf?.empStatus||'—'}</td><td>${c.wf?.externalProvider||'—'}</td><td>${c.keyWorker||'—'}</td></tr>`).join('')}
+  ${wc.map(c=>`<tr><td>${sanitize(c.fullName)}</td><td>${c.wf?.employmentGoal||'—'}</td><td>${c.wf?.status||'—'}</td><td>${c.wf?.empStatus||'—'}</td><td>${c.wf?.externalProvider||'—'}</td><td>${sanitize(c.keyWorker||'—')}</td></tr>`).join('')}
   </table>` + reportFooter();
 }
 
@@ -5132,10 +5132,10 @@ function buildAllProgramsReport(from, to) {
   <table>
     <tr><th>Client</th><th>Status</th>${programs.map(p=>`<th>${p.icon}</th>`).join('')}<th>Worker</th></tr>
     ${clients.map(c=>`<tr>
-      <td>${c.fullName}</td>
+      <td>${sanitize(c.fullName)}</td>
       <td>${c.status||'active'}</td>
       ${programs.map(p=>`<td style="text-align:center">${p.filter(c)?'✓':''}</td>`).join('')}
-      <td>${c.keyWorker||'—'}</td>
+      <td>${sanitize(c.keyWorker||'—')}</td>
     </tr>`).join('')}
   </table>
 
@@ -5144,7 +5144,7 @@ function buildAllProgramsReport(from, to) {
     if(!pc.length) return '';
     return `<h2 style="background:${p.color};padding:6px 10px;border-radius:4px">${p.icon} ${p.label} — ${pc.length} clients</h2>
     <table><tr><th>Client</th><th>Key Worker</th><th>Risk</th><th>Status</th></tr>
-    ${pc.map(c=>`<tr><td>${c.fullName}</td><td>${c.keyWorker||'—'}</td><td>${c.riskLevel||'—'}</td><td>${c.status||'active'}</td></tr>`).join('')}
+    ${pc.map(c=>`<tr><td>${sanitize(c.fullName)}</td><td>${sanitize(c.keyWorker||'—')}</td><td>${c.riskLevel||'—'}</td><td>${c.status||'active'}</td></tr>`).join('')}
     </table>`;
   }).join('')}
   ` + reportFooter();
@@ -5187,7 +5187,7 @@ function buildGoalsReport() {
     const total=goals.reduce((a,g)=>a+(g.milestones?.length||0),0);
     return `
     <div style="margin-bottom:16px">
-      <div style="font-size:13px;font-weight:700;color:#1a3a2a;margin-bottom:6px">${c.fullName} <span style="font-size:11px;color:#6b7280;font-weight:400">— ${done}/${total} milestones complete</span></div>
+      <div style="font-size:13px;font-weight:700;color:#1a3a2a;margin-bottom:6px">${sanitize(c.fullName)} <span style="font-size:11px;color:#6b7280;font-weight:400">— ${done}/${total} milestones complete</span></div>
       <table><tr><th>Goal</th><th>Category</th><th>Target Date</th><th>Milestones</th><th>Status</th></tr>
       ${goals.map(g=>{
         const gDone=g.milestones?.filter(m=>m.done).length||0;
@@ -5228,13 +5228,13 @@ function buildSEWBProgramReport(from, to) {
   <table><tr><th>Client</th><th>Mob/Community</th><th>Domains Assessed</th><th>Goals Set</th><th>Risk</th><th>Status</th></tr>
   ${cl.map(c=>{
     const assessed=(c.sewbDomains||[]).filter(d=>d>0).length;
-    return `<tr><td>${c.fullName}</td><td>${c.mob||'—'} / ${c.community||'—'}</td><td>${assessed}/8</td><td>${c.sewbGoals?'✅':'—'}</td><td><span class="badge badge-${c.riskLevel||'low'}">${(c.riskLevel||'low').toUpperCase()}</span></td><td><span class="badge badge-${c.status||'active'}">${c.status||'active'}</span></td></tr>`;
+    return `<tr><td>${sanitize(c.fullName)}</td><td>${sanitize(c.mob||'—')} / ${sanitize(c.community||'—')}</td><td>${assessed}/8</td><td>${c.sewbGoals?'✅':'—'}</td><td><span class="badge badge-${c.riskLevel||'low'}">${(c.riskLevel||'low').toUpperCase()}</span></td><td><span class="badge badge-${c.status||'active'}">${c.status||'active'}</span></td></tr>`;
   }).join('')}
   </table>
   <h2>SEWB Notes Summary (${fmt(from)} — ${fmt(to)})</h2>
   ${notes.filter(n=>n.type==='sewb'&&n.created>=from&&n.created<=to+'T23:59:59').sort((a,b)=>b.created.localeCompare(a.created)).map(n=>{
     const c=clients.find(cl=>cl.id===n.clientId);
-    return `<div class="note-block sewb"><div class="note-meta"><strong>${c?.fullName||'Unknown'}</strong> — ${fmtdt(n.created)} | ${n.worker||'—'}</div><p>${(n.text||'').replace(/\n/g,'<br>')}</p></div>`;
+    return `<div class="note-block sewb"><div class="note-meta"><strong>${sanitize(c?.fullName||'Unknown')}</strong> — ${fmtdt(n.created)} | ${sanitize(n.worker||'—')}</div><p>${(n.text||'').replace(/\n/g,'<br>')}</p></div>`;
   }).join('') || '<p>No SEWB notes in this period</p>'}`;
 }
 
@@ -5257,12 +5257,12 @@ function buildAODProgramReport(from, to) {
   </table>
   <h2>Client List</h2>
   <table><tr><th>Client</th><th>Primary Substance</th><th>Stage of Change</th><th>Treatment</th><th>Readiness</th><th>Risk</th></tr>
-  ${cl.map(c=>`<tr><td>${c.fullName}</td><td>${(c.aodPrimary||'—').slice(0,30)}</td><td>${c.aodStage||'—'}</td><td>${c.aodTreatment||'—'}</td><td>${c.aodReadiness||'—'}/10</td><td><span class="badge badge-${c.riskLevel||'low'}">${(c.riskLevel||'low').toUpperCase()}</span></td></tr>`).join('')}
+  ${cl.map(c=>`<tr><td>${sanitize(c.fullName)}</td><td>${(c.aodPrimary||'—').slice(0,30)}</td><td>${c.aodStage||'—'}</td><td>${c.aodTreatment||'—'}</td><td>${c.aodReadiness||'—'}/10</td><td><span class="badge badge-${c.riskLevel||'low'}">${(c.riskLevel||'low').toUpperCase()}</span></td></tr>`).join('')}
   </table>
   <h2>AOD Notes Summary (${fmt(from)} — ${fmt(to)})</h2>
   ${notes.filter(n=>n.type==='aod'&&n.created>=from&&n.created<=to+'T23:59:59').sort((a,b)=>b.created.localeCompare(a.created)).map(n=>{
     const c=clients.find(cl=>cl.id===n.clientId);
-    return `<div class="note-block aod"><div class="note-meta"><strong>${c?.fullName||'Unknown'}</strong> — ${fmtdt(n.created)} | ${n.worker||'—'}</div><p>${(n.text||'').replace(/\n/g,'<br>')}</p></div>`;
+    return `<div class="note-block aod"><div class="note-meta"><strong>${sanitize(c?.fullName||'Unknown')}</strong> — ${fmtdt(n.created)} | ${sanitize(n.worker||'—')}</div><p>${(n.text||'').replace(/\n/g,'<br>')}</p></div>`;
   }).join('') || '<p>No AOD notes in this period</p>'}`;
 }
 
@@ -5285,12 +5285,12 @@ function buildJusticeProgramReport(from, to) {
   </table>
   <h2>Client List</h2>
   <table><tr><th>Client</th><th>Community</th><th>Diversion</th><th>Legal Rep</th><th>Court Dates</th><th>Risk</th></tr>
-  ${cl.map(c=>`<tr><td>${c.fullName}</td><td>${c.community||'—'}</td><td>${c.jusDiversion||'None'}</td><td>${(c.jusLegal||'—').slice(0,25)}</td><td style="font-size:10px">${(c.jusCourts||'—').slice(0,40)}</td><td><span class="badge badge-${c.riskLevel||'low'}">${(c.riskLevel||'low').toUpperCase()}</span></td></tr>`).join('')}
+  ${cl.map(c=>`<tr><td>${sanitize(c.fullName)}</td><td>${sanitize(c.community||'—')}</td><td>${c.jusDiversion||'None'}</td><td>${(c.jusLegal||'—').slice(0,25)}</td><td style="font-size:10px">${(c.jusCourts||'—').slice(0,40)}</td><td><span class="badge badge-${c.riskLevel||'low'}">${(c.riskLevel||'low').toUpperCase()}</span></td></tr>`).join('')}
   </table>
   <h2>Justice Notes (${fmt(from)} — ${fmt(to)})</h2>
   ${notes.filter(n=>n.type==='justice'&&n.created>=from&&n.created<=to+'T23:59:59').sort((a,b)=>b.created.localeCompare(a.created)).map(n=>{
     const c=clients.find(cl=>cl.id===n.clientId);
-    return `<div class="note-block justice"><div class="note-meta"><strong>${c?.fullName||'Unknown'}</strong> — ${fmtdt(n.created)} | ${n.worker||'—'}</div><p>${(n.text||'').replace(/\n/g,'<br>')}</p></div>`;
+    return `<div class="note-block justice"><div class="note-meta"><strong>${sanitize(c?.fullName||'Unknown')}</strong> — ${fmtdt(n.created)} | ${sanitize(n.worker||'—')}</div><p>${(n.text||'').replace(/\n/g,'<br>')}</p></div>`;
   }).join('') || '<p>No justice notes in this period</p>'}`;
 }
 
@@ -5307,12 +5307,12 @@ function buildCulturalProgramReport(from, to) {
   </div>
   <h2>Client List</h2>
   <table><tr><th>Client</th><th>Mob</th><th>Community / Country</th><th>Cultural Goals</th><th>Elders Involved</th><th>Risk</th></tr>
-  ${cl.map(c=>`<tr><td>${c.fullName}</td><td>${c.mob||'—'}</td><td>${c.community||'—'}</td><td style="font-size:10px">${(c.cultGoals||'—').slice(0,50)}</td><td>${c.cultElders?'✅':'—'}</td><td><span class="badge badge-${c.riskLevel||'low'}">${(c.riskLevel||'low').toUpperCase()}</span></td></tr>`).join('')}
+  ${cl.map(c=>`<tr><td>${sanitize(c.fullName)}</td><td>${sanitize(c.mob||'—')}</td><td>${sanitize(c.community||'—')}</td><td style="font-size:10px">${(c.cultGoals||'—').slice(0,50)}</td><td>${c.cultElders?'✅':'—'}</td><td><span class="badge badge-${c.riskLevel||'low'}">${(c.riskLevel||'low').toUpperCase()}</span></td></tr>`).join('')}
   </table>
   <h2>Cultural Notes (${fmt(from)} — ${fmt(to)})</h2>
   ${notes.filter(n=>n.type==='cultural'&&n.created>=from&&n.created<=to+'T23:59:59').sort((a,b)=>b.created.localeCompare(a.created)).map(n=>{
     const c=clients.find(cl=>cl.id===n.clientId);
-    return `<div class="note-block cultural"><div class="note-meta"><strong>${c?.fullName||'Unknown'}</strong> — ${fmtdt(n.created)} | ${n.worker||'—'}</div><p>${(n.text||'').replace(/\n/g,'<br>')}</p></div>`;
+    return `<div class="note-block cultural"><div class="note-meta"><strong>${sanitize(c?.fullName||'Unknown')}</strong> — ${fmtdt(n.created)} | ${sanitize(n.worker||'—')}</div><p>${(n.text||'').replace(/\n/g,'<br>')}</p></div>`;
   }).join('') || '<p>No cultural notes in this period</p>'}`;
 }
 
@@ -5336,7 +5336,7 @@ function buildCaseloadReport(from, to) {
   ${[...active].sort((a,b)=>a.fullName?.localeCompare(b.fullName)).map(c=>{
     const age=c.dob?Math.floor((Date.now()-new Date(c.dob))/(365.25*24*3600*1000)):'?';
     const progs=[c.sewb&&'S',c.aod&&'A',c.justice&&'J',c.cultural&&'C'].filter(Boolean).join('/');
-    return `<tr><td><strong>${c.fullName}</strong></td><td>${c.dob||'—'} (${age})</td><td>${c.mob||'—'} / ${c.community||'—'}</td><td>${progs||'—'}</td><td>${c.keyWorker||'—'}</td><td><span class="badge badge-${c.riskLevel||'low'}">${(c.riskLevel||'low').toUpperCase()}</span></td><td>${fmt(c.created)}</td></tr>`;
+    return `<tr><td><strong>${sanitize(c.fullName)}</strong></td><td>${c.dob||'—'} (${age})</td><td>${sanitize(c.mob||'—')} / ${sanitize(c.community||'—')}</td><td>${progs||'—'}</td><td>${sanitize(c.keyWorker||'—')}</td><td><span class="badge badge-${c.riskLevel||'low'}">${(c.riskLevel||'low').toUpperCase()}</span></td><td>${fmt(c.created)}</td></tr>`;
   }).join('')}
   </table>
   ${clients.filter(c=>c.status==='closed').length>0 ? `
@@ -5344,7 +5344,7 @@ function buildCaseloadReport(from, to) {
   <table><tr><th>Client</th><th>Programs</th><th>Risk</th><th>Open Since</th></tr>
   ${clients.filter(c=>c.status==='closed').map(c=>{
     const progs=[c.sewb&&'SEWB',c.aod&&'AOD',c.justice&&'Justice',c.cultural&&'Cultural'].filter(Boolean).join(', ');
-    return `<tr><td>${c.fullName}</td><td>${progs||'—'}</td><td><span class="badge badge-${c.riskLevel||'low'}">${(c.riskLevel||'low').toUpperCase()}</span></td><td>${fmt(c.created)}</td></tr>`;
+    return `<tr><td>${sanitize(c.fullName)}</td><td>${progs||'—'}</td><td><span class="badge badge-${c.riskLevel||'low'}">${(c.riskLevel||'low').toUpperCase()}</span></td><td>${fmt(c.created)}</td></tr>`;
   }).join('')}
   </table>` : ''}`;
 }
@@ -5384,7 +5384,7 @@ function buildActivityReport(from, to) {
   ${Object.entries(byClient).sort((a,b)=>b[1]-a[1]).map(([id,m])=>{
     const c=clients.find(cl=>cl.id===id);
     const count=filtered.filter(t=>t.clientId===id).length;
-    return `<tr><td>${c?.fullName||'Unknown'}</td><td>${Math.floor(m/60)}h ${m%60}m</td><td>${count}</td></tr>`;
+    return `<tr><td>${sanitize(c?.fullName||'Unknown')}</td><td>${Math.floor(m/60)}h ${m%60}m</td><td>${count}</td></tr>`;
   }).join('')}
   <tr style="font-weight:700;background:#f0f7f3"><td>TOTAL</td><td>${Math.floor(total/60)}h ${total%60}m</td><td>${filtered.length}</td></tr>
   </table>
@@ -5392,7 +5392,7 @@ function buildActivityReport(from, to) {
   <table><tr><th>Date</th><th>Client</th><th>Activity</th><th>Mode</th><th>Duration</th><th>Worker</th></tr>
   ${filtered.map(t=>{
     const c=clients.find(cl=>cl.id===t.clientId);
-    return `<tr><td>${fmt(t.date)}</td><td>${c?.fullName||'Unknown'}</td><td>${t.activity||'—'}</td><td>${t.type||'—'}</td><td>${t.minutes} min</td><td>${t.worker||'—'}</td></tr>`;
+    return `<tr><td>${fmt(t.date)}</td><td>${sanitize(c?.fullName||'Unknown')}</td><td>${t.activity||'—'}</td><td>${t.type||'—'}</td><td>${t.minutes} min</td><td>${t.worker||'—'}</td></tr>`;
   }).join('')}
   </table>`;
 }
@@ -5419,10 +5419,10 @@ function buildRiskRegister() {
     ${atRisk.map(c=>{
       const progs=[c.sewb&&'SEWB',c.aod&&'AOD',c.justice&&'Justice',c.cultural&&'Cultural'].filter(Boolean).join(', ');
       return `<tr>
-        <td><strong>${c.fullName}</strong><br><span style="font-size:10px;color:#6b7280">${c.community||''} ${c.mob?'· '+c.mob:''}</span></td>
+        <td><strong>${sanitize(c.fullName)}</strong><br><span style="font-size:10px;color:#6b7280">${sanitize(c.community||'')} ${c.mob?'· '+sanitize(c.mob):''}</span></td>
         <td><span class="badge badge-${c.riskLevel}">${c.riskLevel.toUpperCase()}</span></td>
         <td style="font-size:10px">${progs||'—'}</td>
-        <td>${c.keyWorker||'—'}</td>
+        <td>${sanitize(c.keyWorker||'—')}</td>
         <td>${c.sfWarning?'✅ Yes':'⚠️ No'}</td>
         <td>${c.sfNext||'—'}</td>
         <td style="font-size:10px">${c.ifEc1name||'—'} ${c.ifEc1phone?'· '+c.ifEc1phone:''}</td>
@@ -5431,9 +5431,9 @@ function buildRiskRegister() {
   </table>
   ${atRisk.filter(c=>c.riskLevel==='high').map(c=>`
     <div class="page-break"></div>
-    <h2>⚠️ HIGH RISK — ${c.fullName}</h2>
+    <h2>⚠️ HIGH RISK — ${sanitize(c.fullName)}</h2>
     <table>
-      <tr><td>Key Worker</td><td>${c.keyWorker||'—'}</td><td>Phone</td><td>${c.phone||'—'}</td></tr>
+      <tr><td>Key Worker</td><td>${sanitize(c.keyWorker||'—')}</td><td>Phone</td><td>${c.phone||'—'}</td></tr>
       <tr><td>Emergency Contact</td><td>${c.ifEc1name||'—'} (${c.ifEc1rel||'—'})</td><td>Phone</td><td>${c.ifEc1phone||'—'}</td></tr>
       <tr><td>Warning Signs</td><td colspan="3">${c.sfWarning||'Not recorded'}</td></tr>
       <tr><td>Coping Strategies</td><td colspan="3">${c.sfCoping||'Not recorded'}</td></tr>
@@ -5473,7 +5473,7 @@ function getCourtEvents() {
       const dateMatch = line.match(/(\d{1,2}[\s\/\-]\w+[\s\/\-]\d{2,4}|\d{4}-\d{2}-\d{2})/i);
       if(dateMatch) {
         let d = new Date(dateMatch[1].replace(/(\d{1,2})[\s](\w+)[\s](\d{4})/,'$2 $1 $3'));
-        if(!isNaN(d)) evts.push({ id:'court_'+c.id+'_'+line.slice(0,20), type:'court', title:`⚖️ ${c.fullName} — Court`, clientId:c.id, date:d.toISOString().split('T')[0], startTime:'09:00', endTime:'10:00', notes:line, readOnly:true });
+        if(!isNaN(d)) evts.push({ id:'court_'+c.id+'_'+line.slice(0,20), type:'court', title:`⚖️ ${sanitize(c.fullName)} — Court`, clientId:c.id, date:d.toISOString().split('T')[0], startTime:'09:00', endTime:'10:00', notes:line, readOnly:true });
       }
     });
   });
@@ -5486,7 +5486,7 @@ function getFollowupEvents() {
   notes.forEach(n => {
     if(!n.followup || !n.followupDate) return;
     const c = clients.find(cl=>cl.id===n.clientId);
-    evts.push({ id:'fu_'+n.id, type:'followup', title:`🔔 Follow-up: ${c?.fullName||'Client'}`, clientId:n.clientId, date:n.followupDate, startTime:'09:00', endTime:'09:30', notes:n.followup, readOnly:true });
+    evts.push({ id:'fu_'+n.id, type:'followup', title:`🔔 Follow-up: ${sanitize(c?.fullName||'Client')}`, clientId:n.clientId, date:n.followupDate, startTime:'09:00', endTime:'09:30', notes:n.followup, readOnly:true });
   });
   return evts;
 }
@@ -5627,8 +5627,8 @@ function renderTodayView() {
                     ? `<div style="display:flex;align-items:center;gap:8px">
                         <div class="avatar" style="width:28px;height:28px;font-size:11px;background:var(--primary-light)">${initials(cl.fullName)}</div>
                         <div>
-                          <div style="font-weight:600;font-size:13px;cursor:pointer" onclick="closeModal&&closeModal();openClientProfile('${cl.id}')">${cl.fullName}</div>
-                          <div style="font-size:11px;color:var(--muted)">${cl.mob||cl.community||''}</div>
+                          <div style="font-weight:600;font-size:13px;cursor:pointer" onclick="closeModal&&closeModal();openClientProfile('${cl.id}')">${sanitize(cl.fullName)}</div>
+                          <div style="font-size:11px;color:var(--muted)">${sanitize(cl.mob||cl.community||'')}</div>
                         </div>
                       </div>`
                     : `<span style="color:var(--muted);font-size:12px">No client linked</span>`}
@@ -5673,7 +5673,7 @@ function renderTodayView() {
                 return `<div class="rem-item">
                   <div style="flex:1">
                     <div style="font-size:13px;font-weight:600;${overdue?'color:#dc2626':''}">${r.text}</div>
-                    ${cl?`<div style="font-size:11px;color:var(--muted);margin-top:2px">👤 ${cl.fullName}</div>`:''}
+                    ${cl?`<div style="font-size:11px;color:var(--muted);margin-top:2px">👤 ${sanitize(cl.fullName)}</div>`:''}
                     ${r.dueDate?`<div style="font-size:11px;${overdue?'color:#dc2626;font-weight:700':'color:var(--muted)'}">📅 ${fmt(r.dueDate)} ${overdue?'⚠️ OVERDUE':''}</div>`:''}
                   </div>
                   <button class="btn-ghost" style="color:var(--success);font-size:16px" onclick="dismissReminder('${r.id}')" title="Mark done">✓</button>
@@ -5697,8 +5697,8 @@ function renderTodayView() {
                 return `<div class="nb-item" onclick="viewNotice('${n.id}')">
                   <div style="display:flex;align-items:flex-start;gap:6px">
                     <div style="flex:1">
-                      <div style="font-size:13px;font-weight:600">${n.title}${isNew?'<span class="nb-new">NEW</span>':''}</div>
-                      <div style="font-size:11px;color:var(--muted);margin-top:3px">${fmt(n.created)} · ${n.author||'Staff'}</div>
+                      <div style="font-size:13px;font-weight:600">${sanitize(n.title)}${isNew?'<span class="nb-new">NEW</span>':''}</div>
+                      <div style="font-size:11px;color:var(--muted);margin-top:3px">${fmt(n.created)} · ${sanitize(n.author||'Staff')}</div>
                       <div style="font-size:12px;color:var(--text);margin-top:4px;line-height:1.5">${(n.text||'').slice(0,100)}${(n.text||'').length>100?'…':''}</div>
                     </div>
                     <button class="btn-ghost" style="color:var(--danger);font-size:11px" onclick="event.stopPropagation();deleteNotice('${n.id}')">✕</button>
@@ -5798,7 +5798,7 @@ function renderWeekView() {
             const cl  = clients.find(c=>c.id===e.clientId);
             return `<div class="cal-event" style="top:${top}px;height:${ht}px;background:${cfg.bg};border-left:3px solid ${cfg.color};color:${cfg.color};border-top:2px solid ${sc.color}" onclick="viewEvent('${e.id}')">
               <div class="cal-event-title">${cfg.icon} ${e.title}</div>
-              ${cl?`<div class="cal-event-sub">${cl.fullName}</div>`:''}
+              ${cl?`<div class="cal-event-sub">${sanitize(cl.fullName)}</div>`:''}
               <div class="cal-event-time">${e.startTime||''}${e.endTime?' – '+e.endTime:''}</div>
             </div>`;
           }).join('');
@@ -5869,7 +5869,7 @@ function openNoticeModal() {
 function viewNotice(id) {
   const n = noticeboards.find(nb=>nb.id===id); if(!n) return;
   showModal('📋 '+n.title, `
-    <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Posted by <strong>${n.author||'Staff'}</strong> on ${fmt(n.created)}</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Posted by <strong>${sanitize(n.author||'Staff')}</strong> on ${fmt(n.created)}</div>
     <p style="font-size:13px;line-height:1.7">${(n.text||'').replace(/\n/g,'<br>')}</p>`,
     null,'520px',true
   );
@@ -6037,7 +6037,7 @@ function viewEvent(id) {
   <table style="width:100%;font-size:13px;border-collapse:collapse">
     <tr><td style="padding:7px 0;color:var(--muted);font-weight:600;width:130px">📅 Date</td><td>${d.toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'long',year:'numeric'})}</td></tr>
     <tr><td style="padding:7px 0;color:var(--muted);font-weight:600">⏰ Time</td><td>${e.startTime||'—'}${e.endTime?' – '+e.endTime:''}</td></tr>
-    ${cl?`<tr><td style="padding:7px 0;color:var(--muted);font-weight:600">👤 Client</td><td><a href="#" onclick="closeModal();openClientProfile('${cl.id}')" style="color:var(--primary-light);font-weight:600">${cl.fullName}</a></td></tr>`:''}
+    ${cl?`<tr><td style="padding:7px 0;color:var(--muted);font-weight:600">👤 Client</td><td><a href="#" onclick="closeModal();openClientProfile('${cl.id}')" style="color:var(--primary-light);font-weight:600">${sanitize(cl.fullName)}</a></td></tr>`:''}
     ${e.worker?`<tr><td style="padding:7px 0;color:var(--muted);font-weight:600">👷 Worker</td><td>${e.worker}</td></tr>`:''}
     ${e.location?`<tr><td style="padding:7px 0;color:var(--muted);font-weight:600">📍 Location</td><td>${e.location}</td></tr>`:''}
     ${e.notes?`<tr><td style="padding:7px 0;color:var(--muted);font-weight:600;vertical-align:top">📝 Notes</td><td>${e.notes.replace(/\n/g,'<br>')}</td></tr>`:''}
@@ -6213,15 +6213,15 @@ function renderReferralCard(r) {
     <div style="display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap">
       <div style="flex:1;min-width:200px">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-          <div class="rc-name">${r.name||'Unknown'}</div>
+          <div class="rc-name">${sanitize(r.name||'Unknown')}</div>
           <span class="urgency-flag" style="background:${uc.bg};color:${uc.color}">${uc.label}</span>
           ${overdue?'<span style="background:#fee2e2;color:#dc2626;font-size:10px;font-weight:700;padding:2px 8px;border-radius:12px">⚠️ '+age+'d old</span>':''}
         </div>
         <div class="rc-meta">
           ${r.dob?`DOB: ${r.dob} &bull; `:''}
           ${r.phone?`📞 ${r.phone} &bull; `:''}
-          ${r.mob?`Mob: ${r.mob} &bull; `:''}
-          ${r.community?r.community:''}
+          ${r.mob?`Mob: ${sanitize(r.mob)} &bull; `:''}
+          ${r.community?sanitize(r.community):''}
         </div>
         <div class="rc-meta" style="margin-top:4px">
           <strong>Referred by:</strong> ${r.referralSource||'—'} &bull;
@@ -6247,7 +6247,7 @@ function renderReferralCard(r) {
     </div>
     ${actions.length>1?`<div id="actions-${r.id}" style="display:none;margin-top:10px;border-top:1px solid var(--border);padding-top:10px">
       <div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:6px">FULL ACTION LOG</div>
-      ${[...actions].reverse().map(a=>`<div class="ref-action-log" style="border-left-color:var(--primary-light)"><div style="font-weight:600">${a.worker||'Staff'} <span style="font-weight:400;color:var(--muted)">— ${a.type||'Note'} — ${fmtdt(a.date)}</span></div>${a.text}</div>`).join('')}
+      ${[...actions].reverse().map(a=>`<div class="ref-action-log" style="border-left-color:var(--primary-light)"><div style="font-weight:600">${sanitize(a.worker||'Staff')} <span style="font-weight:400;color:var(--muted)">— ${a.type||'Note'} — ${fmtdt(a.date)}</span></div>${a.text}</div>`).join('')}
     </div>
     <button class="btn-ghost" style="font-size:11px;margin-top:6px" onclick="toggleActionLog('${r.id}')">📋 ${actions.length-1} more action${actions.length-1!==1?'s':''} ▾</button>`:''}
   </div>`;
@@ -6269,17 +6269,17 @@ function openReferralModal(id) {
 
   <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid var(--border)">Personal Details</div>
   <div class="grid-3">
-    <div class="form-group"><label>Full Name *</label><input id="rf-name" value="${r?.name||''}"></div>
+    <div class="form-group"><label>Full Name *</label><input id="rf-name" value="${sanitize(r?.name||'')}"></div>
     <div class="form-group"><label>Preferred Name</label><input id="rf-preferred" value="${r?.preferred||''}"></div>
     <div class="form-group"><label>Date of Birth</label><input type="date" id="rf-dob" value="${r?.dob||''}"></div>
     <div class="form-group"><label>Phone</label><input id="rf-phone" value="${r?.phone||''}"></div>
     <div class="form-group"><label>Gender</label>
       <select id="rf-gender"><option value="">Select…</option>${['Male','Female','Non-binary','Transgender','Prefer not to say','Other'].map(g=>`<option ${r?.gender===g?'selected':''}>${g}</option>`).join('')}</select></div>
-    <div class="form-group"><label>Mob / Language Group</label><input id="rf-mob" value="${r?.mob||''}"></div>
-    <div class="form-group"><label>Community / Country</label><input id="rf-community" value="${r?.community||''}"></div>
+    <div class="form-group"><label>Mob / Language Group</label><input id="rf-mob" value="${sanitize(r?.mob||'')}"></div>
+    <div class="form-group"><label>Community / Country</label><input id="rf-community" value="${sanitize(r?.community||'')}"></div>
     <div class="form-group"><label>ATSI</label>
       <select id="rf-atsi"><option value="">Select…</option>${['Yes — Aboriginal','Yes — Torres Strait Islander','Yes — Both','No','Prefer not to say'].map(g=>`<option ${r?.atsi===g?'selected':''}>${g}</option>`).join('')}</select></div>
-    <div class="form-group"><label>Address</label><input id="rf-address" value="${r?.address||''}"></div>
+    <div class="form-group"><label>Address</label><input id="rf-address" value="${sanitize(r?.address||'')}"></div>
   </div>
 
   <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin:14px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)">Referral Details</div>
@@ -6352,7 +6352,7 @@ function openReferralActionModal(id) {
   const actions = r.actions||[];
   const html = `
   <div style="margin-bottom:16px">
-    <div style="font-size:13px;font-weight:700">${r.name}</div>
+    <div style="font-size:13px;font-weight:700">${sanitize(r.name)}</div>
     <div style="font-size:12px;color:var(--muted)">${r.referralSource||''} · ${fmt(r.created)}</div>
   </div>
   <div class="form-group"><label>Action Type</label>
@@ -6369,7 +6369,7 @@ function openReferralActionModal(id) {
   ${actions.length>0?`
   <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px">
     <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:8px">Previous Actions (${actions.length})</div>
-    ${[...actions].reverse().map(a=>`<div class="ref-action-log"><div style="font-weight:600">${a.worker||'Staff'} <span style="font-weight:400;color:var(--muted)">— ${a.type||'Note'} — ${fmtdt(a.date)}</span></div>${a.text}${a.nextAction?`<div style="margin-top:4px;color:var(--primary-light)">→ Next: ${a.nextAction}</div>`:''}</div>`).join('')}
+    ${[...actions].reverse().map(a=>`<div class="ref-action-log"><div style="font-weight:600">${sanitize(a.worker||'Staff')} <span style="font-weight:400;color:var(--muted)">— ${a.type||'Note'} — ${fmtdt(a.date)}</span></div>${a.text}${a.nextAction?`<div style="margin-top:4px;color:var(--primary-light)">→ Next: ${a.nextAction}</div>`:''}</div>`).join('')}
   </div>`:''}`;
 
   showModal('📋 Action / Notes — '+r.name, html, () => {
@@ -6392,7 +6392,7 @@ function openReferralActionModal(id) {
 function openAllocateModal(id) {
   const r = referrals.find(rf=>rf.id===id); if(!r) return;
   const html = `
-  <div style="margin-bottom:16px;font-size:13px"><strong>Referral:</strong> ${r.name} · <span style="color:var(--muted)">${r.referralReason?.slice(0,80)||''}</span></div>
+  <div style="margin-bottom:16px;font-size:13px"><strong>Referral:</strong> ${sanitize(r.name)} · <span style="color:var(--muted)">${r.referralReason?.slice(0,80)||''}</span></div>
   <div class="form-group"><label>Allocate to Worker *</label>${workerSelectHTML('al-worker','al-worker-new', r.allocatedTo||'')}</div>
   <div class="form-group"><label>Programs to Assign</label>
     <div style="display:flex;gap:16px;flex-wrap:wrap;padding:6px 0">
@@ -6449,7 +6449,7 @@ function openReferralStatusModal(id) {
 // ---- CONVERT TO CLIENT ----
 function convertToClient(id) {
   const r = referrals.find(rf=>rf.id===id); if(!r) return;
-  if(!confirm(`Create a full client record for ${r.name}?\n\nAll referral information will be copied across.`)) return;
+  if(!confirm(`Create a full client record for ${sanitize(r.name)}?\n\nAll referral information will be copied across.`)) return;
   const newClient = {
     id:uid(), created:today(), status:'active',
     fullName:r.name, preferredName:r.preferred||'', dob:r.dob||'', gender:r.gender||'',
@@ -6466,7 +6466,7 @@ function convertToClient(id) {
   if(!r.actions) r.actions=[];
   r.actions.push({ id:uid(), type:'Converted', text:`Client record created — ID ${newClient.clientId}`, worker:'System', date:today() });
   saveAll(); saveReferrals();
-  showToast(`✅ Client record created for ${r.name}`);
+  showToast(`✅ Client record created for ${sanitize(r.name)}`);
   // Open the new client profile
   setTimeout(()=>openClientProfile(newClient.id), 300);
 }
@@ -6474,7 +6474,7 @@ function convertToClient(id) {
 // ---- DELETE ----
 function deleteReferral(id) {
   const r = referrals.find(rf=>rf.id===id);
-  if(!confirm(`Delete referral for ${r?.name}? This cannot be undone.`)) return;
+  if(!confirm(`Delete referral for ${sanitize(r?.name)}? This cannot be undone.`)) return;
   referrals = referrals.filter(rf=>rf.id!==id); saveReferrals(); showPage('referrals');
 }
 
@@ -6542,14 +6542,14 @@ function renderSessions() {
           ${cl?`<div class="avatar" style="width:36px;height:36px;font-size:13px;flex-shrink:0;background:var(--primary-light)">${initials(cl.fullName)}</div>`:''}
           <div style="flex:1;min-width:0">
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-              ${cl?`<span style="font-weight:700;font-size:14px;cursor:pointer" onclick="openClientProfile('${cl.id}')">${cl.fullName}</span>`:'<span style="color:var(--muted)">No client</span>'}
+              ${cl?`<span style="font-weight:700;font-size:14px;cursor:pointer" onclick="openClientProfile('${cl.id}')">${sanitize(cl.fullName)}</span>`:'<span style="color:var(--muted)">No client</span>'}
               <span class="section-badge badge-${n.type||'general'}">${(n.type||'general').toUpperCase()}</span>
               ${tl||n.duration?`<span class="time-chip">${tl?.minutes||n.duration||0} min</span>`:''}
               ${locked?'<span style="font-size:11px;color:var(--muted)">🔒 Locked</span>':''}
             </div>
             <div class="session-meta">
               <span>📅 ${fmtdt(n.created)}</span>
-              ${n.worker?`<span>👤 ${n.worker}</span>`:''}
+              ${n.worker?`<span>👤 ${sanitize(n.worker)}</span>`:''}
               ${n.contactType?`<span>📍 ${n.contactType}</span>`:''}
               ${n.location?`<span>🏠 ${n.location}</span>`:''}
             </div>
@@ -6582,7 +6582,7 @@ function searchSessions(q) {
 // UNIFIED SESSION MODAL (replaces separate Note + Time modals)
 // ============================================================
 function openSessionModal(clientId, defaultType) {
-  const clientOpts = clients.map(c=>`<option value="${c.id}" ${c.id===clientId?'selected':''}>${c.fullName}</option>`).join('');
+  const clientOpts = clients.map(c=>`<option value="${c.id}" ${c.id===clientId?'selected':''}>${sanitize(c.fullName)}</option>`).join('');
   const ndisOpts = NDIS_CATALOGUE.map(i=>`<option value="${i.c} — ${(i.n||'').replace(/"/g,'')} (${i.u}) — ${ndisMoney(i.p)}">`).join('');
   const html = `
   <div class="grid-2" style="margin-bottom:4px">
@@ -6744,7 +6744,7 @@ function openSessionModal(clientId, defaultType) {
         const cl=clients.find(c=>c.id===clientId);
         const typeMap={sewb:'appointment',aod:'aod',justice:'justice',cultural:'cultural',disability:'appointment',workfoundations:'appointment',general:'appointment'};
         calEvents.push({ id:uid(), type:typeMap[type]||'appointment',
-          title:`${contact||'Session'} — ${cl?.fullName||'Client'}`,
+          title:`${contact||'Session'} — ${sanitize(cl?.fullName||'Client')}`,
           clientId, date:noteDateStr, startTime:`${startH}:${startM}`,
           endTime:minsToTime(noteD.getHours()*60+noteD.getMinutes()+mins),
           notes:text.slice(0,150), worker, status:'completed', fromNote:true });
@@ -6861,9 +6861,9 @@ function renderWalkins() {
         <tbody>
         ${sorted.map(w=>`<tr>
           <td style="font-size:12px">${fmtdt(w.date+'T'+(w.time||'00:00'))}</td>
-          <td><strong>${w.name||'Anonymous'}</strong>${w.phone?`<br><span style="font-size:11px;color:var(--muted)">${w.phone}</span>`:''}</td>
+          <td><strong>${sanitize(w.name||'Anonymous')}</strong>${w.phone?`<br><span style="font-size:11px;color:var(--muted)">${w.phone}</span>`:''}</td>
           <td style="font-size:12px;max-width:220px">${w.reason||'—'}</td>
-          <td style="font-size:12px">${w.worker||'—'}</td>
+          <td style="font-size:12px">${sanitize(w.worker||'—')}</td>
           <td><span style="font-size:11px;padding:2px 8px;border-radius:12px;background:${w.outcome==='Referred'?'#dbeafe':w.outcome==='Appointment Made'?'#d1fae5':w.outcome==='Information Given'?'#fef3c7':'#f3f4f6'};color:#374151">${w.outcome||'—'}</span></td>
           <td>${w.converted?`<span style="color:#16a34a;font-size:12px">✅ Client</span>`:`<button class="btn btn-sm btn-outline" onclick="convertWalkin('${w.id}')">Create Client</button>`}</td>
           <td>
@@ -6902,7 +6902,7 @@ function openWalkinModal() {
     <div class="form-group"><label>Existing Client?</label>
       <select id="wi-existingClient">
         <option value="">— Not an existing client —</option>
-        ${clients.map(c=>`<option value="${c.id}">${c.fullName}</option>`).join('')}
+        ${clients.map(c=>`<option value="${c.id}">${sanitize(c.fullName)}</option>`).join('')}
       </select>
     </div>
     <div class="form-group"><label>Programs of Interest</label>
@@ -6942,7 +6942,7 @@ function openWalkinModal() {
 
 function convertWalkin(id) {
   const w=walkins.find(wi=>wi.id===id); if(!w) return;
-  if(!confirm(`Create a client record for ${w.name||'this walk-in'}?`)) return;
+  if(!confirm(`Create a client record for ${sanitize(w.name||'this walk-in')}?`)) return;
   const nc={ id:uid(), created:today(), status:'active', fullName:w.name||'', phone:w.phone||'',
     riskLevel:'medium', referralSource:'Walk-in', referralDate:w.date, referralReason:w.reason||'',
     keyWorker:w.worker||'', attachments:[], goalPlan:[],
@@ -6994,7 +6994,7 @@ function renderDisability() {
       <tbody>
       ${dc.length===0?`<tr><td colspan="7"><div class="empty-state"><div class="icon">♿</div><p>No disability clients enrolled</p></div></td></tr>`:
         dc.map(c=>{ const f=ndisClientFunding(c); return `<tr>
-          <td style="cursor:pointer" onclick="openClientProfile('${c.id}')">${c.fullName}</td>
+          <td style="cursor:pointer" onclick="openClientProfile('${c.id}')">${sanitize(c.fullName)}</td>
           <td style="font-size:12px">${(c.dis?.disabilityType||'—').slice(0,30)}</td>
           <td style="font-size:12px">${c.ndis||c.dis?.ndisNum||'—'}</td>
           <td style="font-size:12px">${c.dis?.supportCoord||'—'}</td>
@@ -7284,7 +7284,7 @@ function ndisGenerateInvoice(clientId, claimOrId){
 
   const w = window.open('','_blank');
   if(!w){ showToast('⚠️ Pop-up blocked — allow pop-ups for this site to open documents'); return; }
-  w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>NDIS Invoice ${invNo} — ${c.fullName||''}</title>
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>NDIS Invoice ${invNo} — ${sanitize(c.fullName||'')}</title>
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
     body{font-family:'Segoe UI',Arial,sans-serif;font-size:12px;color:#1a1a1a;padding:32px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
@@ -7315,7 +7315,7 @@ function ndisGenerateInvoice(clientId, claimOrId){
       <div class="inv-meta"><div class="t">TAX INVOICE</div><div><strong>Invoice #:</strong> ${invNo}</div><div><strong>Issue date:</strong> ${fmt(today())}</div></div>
     </div>
     <div class="parties">
-      <div class="party"><h4>Bill To — NDIS Participant</h4><div><strong>${c.fullName||'—'}</strong><br>NDIS No: ${dis.ndisNum||c.ndis||'—'}<br>Plan management: ${dis.planMgmt||'—'}${dis.supportCoord?'<br>Support Coordinator: '+dis.supportCoord:''}</div></div>
+      <div class="party"><h4>Bill To — NDIS Participant</h4><div><strong>${sanitize(c.fullName||'—')}</strong><br>NDIS No: ${dis.ndisNum||c.ndis||'—'}<br>Plan management: ${dis.planMgmt||'—'}${dis.supportCoord?'<br>Support Coordinator: '+dis.supportCoord:''}</div></div>
       <div class="party"><h4>Service Provider</h4><div><strong>${org}</strong><br>${abn?'ABN: '+abn+'<br>':''}${reg?'NDIS Reg: '+reg+'<br>':''}admin@worngundidj.org.au</div></div>
     </div>
     <table>
@@ -7486,7 +7486,7 @@ function renderDisabilityTab(c) {
     </div>
     ${disNotes.length===0?'<p style="color:var(--muted);font-size:13px">No disability notes recorded</p>':
       disNotes.map(n=>`<div class="note-entry disability" style="border-left-color:#8b5cf6">
-        <div class="note-meta"><span>${fmtdt(n.created)}</span><span>${n.worker||''}</span><span>${n.contactType||''}</span></div>
+        <div class="note-meta"><span>${fmtdt(n.created)}</span><span>${sanitize(n.worker||'')}</span><span>${n.contactType||''}</span></div>
         <div class="note-text">${(n.text||'').replace(/\n/g,'<br>')}</div>
       </div>`).join('')
     }
@@ -7544,11 +7544,11 @@ function renderWorkFoundations() {
       </tr></thead>
       <tbody>
         ${wc.map(c=>`<tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="openClientProfile('${c.id}')">
-          <td style="padding:8px 10px;font-weight:600">${c.fullName}</td>
+          <td style="padding:8px 10px;font-weight:600">${sanitize(c.fullName)}</td>
           <td style="padding:8px 10px;color:var(--muted)">${c.wf?.employmentGoal||'—'}</td>
           <td style="padding:8px 10px;color:var(--muted)">${c.wf?.barriers||'—'}</td>
           <td style="padding:8px 10px">${c.wf?.status?`<span style="background:#dbeafe;color:#1e40af;padding:2px 8px;border-radius:10px;font-size:11px">${c.wf.status}</span>`:'—'}</td>
-          <td style="padding:8px 10px;color:var(--muted)">${c.keyWorker||'—'}</td>
+          <td style="padding:8px 10px;color:var(--muted)">${sanitize(c.keyWorker||'—')}</td>
         </tr>`).join('')}
       </tbody>
     </table></div>`}
@@ -7634,7 +7634,7 @@ function renderWorkFoundationsTab(c) {
     </div>
     ${wfNotes.length===0?'<p style="color:var(--muted);font-size:13px">No work foundations notes recorded</p>':
       wfNotes.map(n=>`<div class="note-entry" style="border-left:4px solid #2563eb">
-        <div class="note-meta"><span>${fmtdt(n.created)}</span><span>${n.worker||''}</span></div>
+        <div class="note-meta"><span>${fmtdt(n.created)}</span><span>${sanitize(n.worker||'')}</span></div>
         <div class="note-text">${(n.text||'').replace(/\n/g,'<br>')}</div>
       </div>`).join('')}
   </div>
@@ -8060,8 +8060,8 @@ function renderHomeOwnership() {
         <div style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--bg);border-radius:8px;border:1px solid var(--border);flex-wrap:wrap">
           <div class="avatar" style="background:var(--primary);width:38px;height:38px;font-size:14px">${initials(a.primaryFirstName+' '+a.primaryLastName)}</div>
           <div style="flex:1;min-width:160px">
-            <div style="font-weight:700;font-size:14px">${a.primaryFirstName||''} ${a.primaryLastName||''}</div>
-            <div style="font-size:12px;color:var(--muted)">${a.purchaseSuburb||'Suburb not specified'} &bull; ${a.coApplicantCount||0} co-applicant(s) &bull; Created ${fmt(a.created)}${(a.attachments||[]).length?` &bull; 📎 ${a.attachments.length} doc${a.attachments.length!==1?'s':''}`:''}</div>
+            <div style="font-weight:700;font-size:14px">${sanitize(a.primaryFirstName||'')} ${sanitize(a.primaryLastName||'')}</div>
+            <div style="font-size:12px;color:var(--muted)">${sanitize(a.purchaseSuburb||'Suburb not specified')} &bull; ${a.coApplicantCount||0} co-applicant(s) &bull; Created ${fmt(a.created)}${(a.attachments||[]).length?` &bull; 📎 ${a.attachments.length} doc${a.attachments.length!==1?'s':''}`:''}</div>
           </div>
           <span style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:12px;${statusStyle[a.status]||statusStyle.draft}">${(a.status||'draft').toUpperCase()}</span>
           <div style="display:flex;gap:8px">
@@ -8096,7 +8096,7 @@ function openFPHOClientModal(id){
       <div class="form-group"><label>Stage</label><select id="fphc-stage">${FPHO_STAGES.map(s=>`<option ${c.stage===s?'selected':''}>${s}</option>`).join('')}</select></div>
       <div class="form-group"><label>ACCO Home Ownership Officer</label><input id="fphc-officer" value="${esc(c.officer)}"></div>
       <div class="form-group"><label>ATSI Status</label><select id="fphc-atsi"><option value="">—</option>${['Aboriginal','Torres Strait Islander','Both','Neither'].map(s=>`<option ${c.atsi===s?'selected':''}>${s}</option>`).join('')}</select></div>
-      <div class="form-group"><label>Linked Application</label><select id="fphc-appId"><option value="">— None —</option>${fphoApplications.map(a=>`<option value="${a.id}" ${c.appId===a.id?'selected':''}>${a.primaryFirstName||''} ${a.primaryLastName||''} (${(a.status||'draft')})</option>`).join('')}</select></div>
+      <div class="form-group"><label>Linked Application</label><select id="fphc-appId"><option value="">— None —</option>${fphoApplications.map(a=>`<option value="${a.id}" ${c.appId===a.id?'selected':''}>${sanitize(a.primaryFirstName||'')} ${sanitize(a.primaryLastName||'')} (${(a.status||'draft')})</option>`).join('')}</select></div>
     </div>
     <div class="form-group"><label>Notes</label><textarea id="fphc-notes" style="min-height:70px">${c.notes||''}</textarea></div>`;
   showModal(id?'✏️ Edit FPHO Client':'👥 Add FPHO Client', html, () => {
@@ -8149,7 +8149,7 @@ function buildFPHOReport(){
     <table><tr><th>Name</th><th>Region</th><th>Stage</th><th>Officer</th><th>ATSI</th><th>Linked Application</th></tr>
     ${[...fphoClients].sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(c=>{
       const app = fphoApplications.find(a=>a.id===c.appId);
-      return `<tr><td>${c.name||'—'}</td><td>${c.region||'—'}</td><td>${c.stage||'—'}</td><td>${c.officer||'—'}</td><td>${c.atsi||'—'}</td><td>${app?`${app.primaryFirstName||''} ${app.primaryLastName||''} (${app.status||'draft'})`:'—'}</td></tr>`;
+      return `<tr><td>${sanitize(c.name||'—')}</td><td>${c.region||'—'}</td><td>${c.stage||'—'}</td><td>${c.officer||'—'}</td><td>${c.atsi||'—'}</td><td>${app?`${app.primaryFirstName||''} ${app.primaryLastName||''} (${app.status||'draft'})`:'—'}</td></tr>`;
     }).join('')||'<tr><td colspan="6">No clients</td></tr>'}</table>`;
   body += `<h2>Indicative Grant Exposure</h2>
     <p style="font-size:12px">Programme maximums per application: Home Buyer Booster $2,500 · Stamp Duty Helper up to $10,000 · Deposit Contribution up to $20,000 · New Build Bonus $5,000 (max <strong>$${maxPerApp.toLocaleString()}</strong> per application).</p>
@@ -8278,7 +8278,7 @@ function openFPHOForm(id) {
     <div class="fpho-field" style="margin-top:8px"><label>Link to Client File</label>
       <select id="fpho-clientId">
         <option value="">— Not linked —</option>
-        ${[...clients].sort((x,y)=>x.fullName.localeCompare(y.fullName)).map(c=>`<option value="${c.id}" ${a.clientId===c.id?'selected':''}>${c.fullName}</option>`).join('')}
+        ${[...clients].sort((x,y)=>x.fullName.localeCompare(y.fullName)).map(c=>`<option value="${c.id}" ${a.clientId===c.id?'selected':''}>${sanitize(c.fullName)}</option>`).join('')}
       </select>
     </div>
 
@@ -8297,7 +8297,7 @@ function openFPHOForm(id) {
     <!-- PURCHASE DETAILS -->
     <div class="fpho-section-title">Purchase Details</div>
     <div class="fpho-grid">
-      <div class="fpho-field"><label>Victorian Suburb/Town/City to Purchase In *</label><input id="fpho-suburb" value="${a.purchaseSuburb||''}" placeholder="e.g. Warrnambool"></div>
+      <div class="fpho-field"><label>Victorian Suburb/Town/City to Purchase In *</label><input id="fpho-suburb" value="${sanitize(a.purchaseSuburb||'')}" placeholder="e.g. Warrnambool"></div>
       <div class="fpho-field"><label>Amount of Deposit Saved *</label><input id="fpho-deposit" value="${a.depositSaved||''}" placeholder="e.g. 20000"></div>
       <div class="fpho-field"><label>New Build? (extra $5,000 bonus)</label>
         <select id="fpho-newbuild"><option value="">—</option><option value="Yes" ${a.newBuild==='Yes'?'selected':''}>Yes — building or buying newly constructed</option><option value="No" ${a.newBuild==='No'?'selected':''}>No — existing home</option></select>
@@ -8395,7 +8395,7 @@ function openFPHOForm(id) {
     <!-- WORKER NOTES -->
     <div class="fpho-section-title">Worker Notes</div>
     <div class="fpho-field"><label>Internal notes (not printed on application)</label>
-      <textarea id="fpho-notes" style="min-height:80px;width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:13px">${a.workerNotes||''}</textarea>
+      <textarea id="fpho-notes" style="min-height:80px;width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:13px">${sanitize(a.workerNotes||'')}</textarea>
     </div>
 
     <!-- DECLARATIONS -->
@@ -8599,7 +8599,7 @@ function printFPHO(id) {
     ].join(''));
   };
 
-  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>FPHO Application — ${a.primaryFirstName} ${a.primaryLastName}</title>
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>FPHO Application — ${sanitize(a.primaryFirstName)} ${sanitize(a.primaryLastName)}</title>
   <style>body{font-family:Arial,sans-serif;margin:0;padding:20px;color:#222;-webkit-print-color-adjust:exact;print-color-adjust:exact}@page{margin:20mm}tr:nth-child(even){background:#f9f9f9}.badge{display:inline-block;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700}</style>
   </head><body>
   <div style="text-align:center;margin-bottom:24px;padding:20px;background:linear-gradient(135deg,#1a3a2a,#2d6a4f);color:#fff;border-radius:8px">
@@ -8680,7 +8680,7 @@ function renderWFNotes(c) {
     <p style="font-size:12px;color:var(--muted);margin-bottom:12px">Log all Work Foundations / employment support sessions here. Notes are automatically time-tracked.</p>
     ${wfNotes.length===0?'<div class="empty-state"><div class="icon">💼</div><p>No Work Foundations notes yet</p></div>':
       wfNotes.map(n=>`<div class="note-entry workfoundations" style="border-left-color:#d97706">
-        <div class="note-meta"><span class="section-badge" style="background:#fef3c7;color:#92400e">WORK FOUNDATIONS</span><span>${fmtdt(n.created)}</span><span>${n.worker||''}</span>${n.duration?`<span>⏱️ ${n.duration} min</span>`:''}</div>
+        <div class="note-meta"><span class="section-badge" style="background:#fef3c7;color:#92400e">WORK FOUNDATIONS</span><span>${fmtdt(n.created)}</span><span>${sanitize(n.worker||'')}</span>${n.duration?`<span>⏱️ ${n.duration} min</span>`:''}</div>
         <div class="note-text">${(n.text||'').replace(/\n/g,'<br>')}</div>
         ${n.followup?`<div style="margin-top:6px;padding:6px 10px;background:#fef3c7;border-radius:4px;font-size:12px">📌 ${sanitize(n.followup)}</div>`:''}
       </div>`).join('')
@@ -9142,7 +9142,7 @@ function renderResourcesList() {
       return `<div style="display:flex;align-items:center;gap:12px;padding:10px 14px;background:var(--bg);border-radius:8px;border:1px solid var(--border)">
         <span style="font-size:24px">${icon}</span>
         <div style="flex:1;min-width:0">
-          <div style="font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.name}</div>
+          <div style="font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${sanitize(r.name)}</div>
           <div style="font-size:11px;color:var(--muted)">${size} &bull; Uploaded ${r.uploaded||''}</div>
         </div>
         <div style="display:flex;gap:6px;flex-shrink:0">
@@ -9185,14 +9185,14 @@ async function downloadResource(id) {
 
 function deleteResource(id) {
   const r = resources.find(x=>x.id===id);
-  if(!r || !confirm(`Delete "${r.name}"?`)) return;
+  if(!r || !confirm(`Delete "${sanitize(r.name)}"?`)) return;
   if(r.storagePath) FSYNC.deleteStorageFile(r.storagePath);
   resources = resources.filter(x=>x.id!==id);
   saveResources();
   const el = document.getElementById('resources-list');
   if(el) el.innerHTML = renderResourcesList();
   audit('Resource deleted', r.name);
-  showToast(`"${r.name}" deleted`);
+  showToast(`"${sanitize(r.name)}" deleted`);
 }
 
 // ===== OUTLOOK / MICROSOFT GRAPH SYNC =====
@@ -9422,7 +9422,7 @@ function openEditStaffModal(userId) {
   const u = userProfiles.find(p=>p.id===userId); if(!u) return;
   const html = `
     <div class="grid-2">
-      <div class="form-group"><label>Full Name</label><input id="se-name" value="${u.name||''}"></div>
+      <div class="form-group"><label>Full Name</label><input id="se-name" value="${sanitize(u.name||'')}"></div>
       <div class="form-group"><label>Role</label>
         <select id="se-role">${Object.entries(ROLES).map(([k,v])=>`<option value="${k}" ${u.role===k?'selected':''}>${v.icon} ${v.label}</option>`).join('')}</select></div>
       <div class="form-group"><label>Email Address</label><input type="email" id="se-email" value="${u.email||''}"></div>
@@ -9460,11 +9460,11 @@ async function saveStaffEdit(userId) {
 
 function removeStaffAccount(userId) {
   const u = userProfiles.find(p=>p.id===userId); if(!u) return;
-  if(!confirm(`Remove ${u.name} from the CMS?\n\nThis removes their profile from this system. Their Firebase Authentication account will remain — delete it from the Firebase Console if needed.`)) return;
+  if(!confirm(`Remove ${sanitize(u.name)} from the CMS?\n\nThis removes their profile from this system. Their Firebase Authentication account will remain — delete it from the Firebase Console if needed.`)) return;
   userProfiles = userProfiles.filter(p=>p.id!==userId);
   saveUserProfiles();
   if(FSYNC.isReady()) FSYNC.push('userProfiles', userProfiles);
-  showToast(`${u.name} removed from CMS`);
+  showToast(`${sanitize(u.name)} removed from CMS`);
   navigate('settings');
 }
 
@@ -9677,7 +9677,7 @@ function openChat(convId) {
   _renderConvList(); // re-render to show active highlight
 
   const conv = _chatConversations.find(c=>c.id===convId); if(!conv) return;
-  const name = conv.type==='group' ? `👥 ${conv.name}` : `👤 ${_dmName(conv)}`;
+  const name = conv.type==='group' ? `👥 ${sanitize(conv.name)}` : `👤 ${_dmName(conv)}`;
   const members = (conv.members||[]).map(id=>userProfiles.find(u=>u.id===id)?.name||'?').join(', ');
 
   const header = document.getElementById('chat-msg-header');
@@ -9756,7 +9756,7 @@ function openNewConvModal() {
     <div class="form-group"><label>Send message to *</label>
       <select id="dm-target">
         <option value="">— Select worker —</option>
-        ${others.map(u=>`<option value="${u.id}">${ROLES[u.role]?.icon||'👤'} ${u.name}</option>`).join('')}
+        ${others.map(u=>`<option value="${u.id}">${ROLES[u.role]?.icon||'👤'} ${sanitize(u.name)}</option>`).join('')}
       </select>
     </div>
     <div class="form-group"><label>First message</label>
@@ -9797,7 +9797,7 @@ function openNewGroupModal() {
       <div style="display:flex;flex-direction:column;gap:6px;padding:8px;border:1px solid var(--border);border-radius:6px;max-height:200px;overflow-y:auto">
         ${others.map(u=>`<label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
           <input type="checkbox" class="grp-member-cb" value="${u.id}">
-          <span>${ROLES[u.role]?.icon||'👤'} ${u.name}</span>
+          <span>${ROLES[u.role]?.icon||'👤'} ${sanitize(u.name)}</span>
         </label>`).join('')}
       </div>
     </div>
@@ -10091,7 +10091,7 @@ function showLoginScreen() {
           <select id="login-user" style="width:100%;padding:11px 14px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;box-sizing:border-box">
             <option value="">— Select your name —</option>
             ${userProfiles.length > 0
-              ? userProfiles.map(u=>`<option value="${u.id}">${ROLES[u.role]?.icon||'👤'} ${u.name}</option>`).join('')
+              ? userProfiles.map(u=>`<option value="${u.id}">${ROLES[u.role]?.icon||'👤'} ${sanitize(u.name)}</option>`).join('')
               : `<option value="__new_jon">👤 Jon Benson (System Manager)</option>
                  <option value="__new_jade">👤 Jade Atkinson</option>
                  <option value="__new_brett_c">👤 Brett Clarke</option>
@@ -10549,17 +10549,17 @@ function getWorkflowAlerts() {
   // Overdue referrals
   referrals.filter(r=>r.status==='new'&&r.created<todayStr).forEach(r=>{
     const age=Math.floor((Date.now()-new Date(r.created))/(24*3600*1000));
-    if(age>=1) alerts.push({type:'referral',level:age>=3?'high':'medium',msg:`Referral for ${r.name} unactioned (${age} day${age>1?'s':''})`,link:'referrals',id:r.id});
+    if(age>=1) alerts.push({type:'referral',level:age>=3?'high':'medium',msg:`Referral for ${sanitize(r.name)} unactioned (${age} day${age>1?'s':''})`,link:'referrals',id:r.id});
   });
   // Safety plan reviews overdue
   clients.filter(c=>c.status==='active'&&c.sfNext&&c.sfNext<todayStr).forEach(c=>{
-    alerts.push({type:'safety',level:'high',msg:`Safety plan overdue for ${c.fullName}`,link:'clients',id:c.id});
+    alerts.push({type:'safety',level:'high',msg:`Safety plan overdue for ${sanitize(c.fullName)}`,link:'clients',id:c.id});
   });
   // High-risk clients with no recent notes (7+ days)
   clients.filter(c=>c.status==='active'&&c.riskLevel==='high').forEach(c=>{
     const lastNote=notes.filter(n=>n.clientId===c.id).sort((a,b)=>b.created.localeCompare(a.created))[0];
     if(!lastNote||lastNote.created.split('T')[0]<addDaysStr(todayStr,-7)){
-      alerts.push({type:'contact',level:'high',msg:`No contact logged for ${c.fullName} (high risk) in 7+ days`,link:'clients',id:c.id});
+      alerts.push({type:'contact',level:'high',msg:`No contact logged for ${sanitize(c.fullName)} (high risk) in 7+ days`,link:'clients',id:c.id});
     }
   });
   // Upcoming court dates (next 7 days)
@@ -10567,7 +10567,7 @@ function getWorkflowAlerts() {
     const lines=c.jusCourts.split(/\n|,|;/).map(l=>l.trim()).filter(Boolean);
     lines.forEach(line=>{
       const m=line.match(/(\d{1,2}[\s\/\-]\w+[\s\/\-]\d{2,4}|\d{4}-\d{2}-\d{2})/i);
-      if(m){const d=new Date(m[1]);if(!isNaN(d)){const diff=Math.floor((d-new Date())/(24*3600*1000));if(diff>=0&&diff<=7)alerts.push({type:'court',level:'high',msg:`Court date in ${diff===0?'today':diff+' days'}: ${c.fullName} — ${line.slice(0,50)}`,link:'clients',id:c.id});}}
+      if(m){const d=new Date(m[1]);if(!isNaN(d)){const diff=Math.floor((d-new Date())/(24*3600*1000));if(diff>=0&&diff<=7)alerts.push({type:'court',level:'high',msg:`Court date in ${diff===0?'today':diff+' days'}: ${sanitize(c.fullName)} — ${line.slice(0,50)}`,link:'clients',id:c.id});}}
     });
   });
   // Manual workflow tasks
@@ -10676,18 +10676,18 @@ function globalSearch(query) {
   const results=[];
   clients.forEach(c=>{
     if((c.fullName||'').toLowerCase().includes(q)||(c.mob||'').toLowerCase().includes(q)||(c.community||'').toLowerCase().includes(q)||(c.phone||'').includes(q)||(c.clientId||'').toLowerCase().includes(q)){
-      results.push({type:'client',icon:'👤',label:c.fullName,sub:`${c.mob||''} ${c.community||''}`,action:`openClientProfile('${c.id}')`});
+      results.push({type:'client',icon:'👤',label:c.fullName,sub:`${sanitize(c.mob||'')} ${sanitize(c.community||'')}`,action:`openClientProfile('${c.id}')`});
     }
   });
   notes.forEach(n=>{
     if((n.text||'').toLowerCase().includes(q)){
       const c=clients.find(cl=>cl.id===n.clientId);
-      results.push({type:'note',icon:'📝',label:`Note: ${(n.text||'').slice(0,60)}…`,sub:`${c?.fullName||'Unknown'} — ${fmtdt(n.created)}`,action:`openClientProfile('${n.clientId}')`});
+      results.push({type:'note',icon:'📝',label:`Note: ${(n.text||'').slice(0,60)}…`,sub:`${sanitize(c?.fullName||'Unknown')} — ${fmtdt(n.created)}`,action:`openClientProfile('${n.clientId}')`});
     }
   });
   referrals.forEach(r=>{
     if((r.name||'').toLowerCase().includes(q)||(r.referralReason||'').toLowerCase().includes(q)){
-      results.push({type:'referral',icon:'📥',label:`Referral: ${r.name}`,sub:r.referralSource||'',action:`setRefFilter('all');showPage('referrals')`});
+      results.push({type:'referral',icon:'📥',label:`Referral: ${sanitize(r.name)}`,sub:r.referralSource||'',action:`setRefFilter('all');showPage('referrals')`});
     }
   });
   return results.slice(0,12);
