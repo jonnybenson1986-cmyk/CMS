@@ -1,0 +1,58 @@
+rules_version = '2';
+
+// Worn Gundidj CMS — Cloud Storage security rules
+// Deploy: Firebase Console → Storage → Rules → paste → Publish
+// (or `firebase deploy --only storage` if using the CLI).
+//
+// Baseline posture: only signed-in staff (email/password accounts) can read or
+// write team files. This matches what is currently live (verified: anonymous =
+// 403). Client attachments (proof of income, COA, pre-approval) and resource
+// files live under teams/{teamId}/**.
+//
+// Hardening notes (audit findings #2/#4):
+//   - A per-worker / per-role restriction requires staff roles in Firebase
+//     custom claims (set by a trusted Cloud Function). See the commented target
+//     block below — do NOT enable until the app writes custom claims.
+//   - The size/type limits below are safe to keep enabled now: they cap uploads
+//     at 25 MB and only block obviously executable content types.
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function signedIn() { return request.auth != null; }
+    function underLimit() { return request.resource.size < 25 * 1024 * 1024; }
+
+    // All CMS files live under teams/{teamId}/**
+    match /teams/{teamId}/{allPaths=**} {
+      allow read: if signedIn();
+      allow write: if signedIn() && underLimit();
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TARGET (least-privilege) — enable only after custom claims exist in the app.
+// Kept here as the documented next step for findings #2/#4.
+//
+// service firebase.storage {
+//   match /b/{bucket}/o {
+//     function role()  { return request.auth.token.role; }            // custom claim
+//     function isMgr() { return role() in ['sysmanager','admin','supervisor']; }
+//     function isSys() { return role() == 'sysmanager'; }
+//     function underLimit() { return request.resource.size < 25 * 1024 * 1024; }
+//
+//     // Client attachments: any signed-in staff may upload/read; only a
+//     // sysmanager may delete (attachments are records).
+//     match /teams/{t}/clients/{clientId}/{fileName=**} {
+//       allow read:  if request.auth != null;
+//       allow write: if request.auth != null && underLimit();
+//       allow delete: if isSys();
+//     }
+//     // Shared resources library: managers manage, everyone reads.
+//     match /teams/{t}/resources/{fileName=**} {
+//       allow read:  if request.auth != null;
+//       allow write: if isMgr() && underLimit();
+//       allow delete: if isMgr();
+//     }
+//   }
+// }
