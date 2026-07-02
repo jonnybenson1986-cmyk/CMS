@@ -642,7 +642,12 @@ const FSYNC = (() => {
   // ===== FIREBASE STORAGE (large files: client attachments, resources) =====
   // Files go to the cloud bucket instead of being base64-stuffed into the
   // record, so storage is effectively unlimited and shared across all staff.
-  function storageReady(){ return !!(db && window.firebase && firebase.storage); }
+  // Ready only when the SDK is loaded AND a Firebase user is signed in —
+  // Storage rules require auth, so an unauthenticated put() would just 403.
+  function storageReady(){
+    try { return !!(db && window.firebase && firebase.storage && firebase.auth().currentUser); }
+    catch(e){ return false; }
+  }
   function _storageRef(path){ return firebase.storage().ref().child('teams/'+(teamId||'worngundidj')+'/'+path); }
   // Upload a File/Blob to "folder"; resolves to {storagePath, url, name, type, size}
   async function uploadFile(folder, file, onProgress){
@@ -870,6 +875,9 @@ let currentPage = 'dashboard';
 
 function showPage(page) {
   currentPage = page;
+  // Background refreshes (e.g. sync snapshots) can fire while the login screen
+  // has replaced #main — nothing to render onto yet, so bail out safely.
+  if(!document.getElementById('page-title')) return;
   setMobTab(page);
   document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
   const items = document.querySelectorAll('.nav-item');
@@ -2212,7 +2220,7 @@ function renderProfileTab(tab, c, clientNotes, clientTime) {
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
       <div style="font-size:13px;color:var(--muted)">Worn Gundidj SEWB Feedback Form</div>
       <div style="display:flex;gap:8px">
-        <button class="btn btn-outline btn-sm" onclick="openNewFeedbackModal('${c.id}')">📋 View History (${fbHistory.length})</button>
+        <button class="btn btn-outline btn-sm" onclick="viewFeedbackHistory()">📋 View History (${fbHistory.length})</button>
         <button class="btn btn-outline btn-sm" onclick="printFeedback('${c.id}')">🖨️ Print Form</button>
         <button class="btn btn-primary btn-sm" onclick="saveFeedback('${c.id}')">💾 Save &amp; Record</button>
       </div>
@@ -2304,7 +2312,7 @@ function renderProfileTab(tab, c, clientNotes, clientTime) {
     </div>
 
     ${fbHistory.length>0?`
-    <div class="card">
+    <div class="card" id="fb-history-card">
       <div class="card-header"><div class="card-title">📋 Previous Feedback Records (${fbHistory.length})</div></div>
       ${fbHistory.map((h,i)=>`<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)">
         <div style="flex:1">
@@ -2394,6 +2402,13 @@ function saveFeedback(id) {
   saveAll(); showToast('Feedback saved and recorded ✓');
 }
 
+// Scroll to the previous-feedback card on the Feedback tab
+function viewFeedbackHistory() {
+  const card = document.getElementById('fb-history-card');
+  if(card) card.scrollIntoView({behavior:'smooth', block:'start'});
+  else showToast('No previous feedback records yet — save a feedback form first');
+}
+
 function loadFeedbackHistory(id, idx) {
   const c = clients.find(cl=>cl.id===id); if(!c) return;
   if(!confirm('Load this previous feedback? Current unsaved data will be lost.')) return;
@@ -2407,6 +2422,7 @@ function printWorkFoundations(id) {
   const c = clients.find(cl=>cl.id===id); if(!c) return;
   const wf = c.wf||{};
   const w = window.open('','_blank');
+  if(!w){ showToast('⚠️ Pop-up blocked — allow pop-ups for this site to open documents'); return; }
   const caItems = [['caSkills','You feel you have skills to offer'],['caLearn','You can learn what you need to'],['caJobs','You believe there are attainable jobs out there to suit you'],['caHelp','You can ask for help'],['caSayNo','Saying No'],['caRights','You feel confident stating your rights and needs'],['caConvo','You can start and keep a conversation going'],['caAcceptCrit','You can accept criticism'],['caGiveCrit','You can give constructive criticism'],['caAnger','Express anger or frustration in a healthy way'],['caOpinion','You can express your opinion']];
   const ratingOpts = ['Strongly Agree','Agree','Neutral','Disagree','Strongly Disagree'];
   const brand089 = printBrandHeader('#7c2d12');
@@ -2448,6 +2464,7 @@ function printFeedback(id) {
   const c = clients.find(cl=>cl.id===id); if(!c) return;
   const fb = c.feedback||{};
   const w = window.open('','_blank');
+  if(!w){ showToast('⚠️ Pop-up blocked — allow pop-ups for this site to open documents'); return; }
   const brandFb = printBrandHeader('#1a3a2a');
   w.document.write(`<!DOCTYPE html><html><head><title>SEWB Feedback — ${c.fullName}</title>
   <style>body{font-family:Arial,sans-serif;font-size:11px;color:#111;padding:20px;-webkit-print-color-adjust:exact;print-color-adjust:exact}h1{font-size:16px;background:#1a3a2a;color:#fff;padding:10px 16px;border-radius:4px}h2{font-size:12px;background:#d1fae5;padding:5px 10px;margin:12px 0 6px;border-left:4px solid #2d6a4f}.field{display:flex;gap:8px;margin-bottom:5px}.label{font-weight:bold;width:280px;flex-shrink:0}.footer{margin-top:24px;padding-top:10px;border-top:1px solid #ddd;font-size:9px;color:#999}${brandFb.css}</style>
@@ -2502,9 +2519,19 @@ function formatBytes(b) {
 // unlimited), otherwise falls back to inline base64 in local storage.
 async function cmsUploadAttachment(folder, file) {
   const who = currentUser?.name || DB.load('workerName','');
-  if (FSYNC.storageReady()) {
-    const m = await FSYNC.uploadFile(folder, file);
-    return { id:uid(), name:m.name, type:m.type, size:m.size, storagePath:m.storagePath, url:m.url, uploadedAt:today(), uploadedBy:who };
+  if (FSYNC.storageReady() && navigator.onLine !== false) {
+    try {
+      // Guard with a timeout so a stalled network can't hang the save —
+      // on any cloud failure the file falls back to local storage instead.
+      const m = await Promise.race([
+        FSYNC.uploadFile(folder, file),
+        new Promise((_,rej)=>setTimeout(()=>rej(new Error('Cloud upload timed out')), 60000)),
+      ]);
+      return { id:uid(), name:m.name, type:m.type, size:m.size, storagePath:m.storagePath, url:m.url, uploadedAt:today(), uploadedBy:who };
+    } catch(e) {
+      console.warn('Cloud upload failed — storing file locally instead:', e.message);
+      showToast('⚠️ Cloud upload failed — file saved locally');
+    }
   }
   const data = await new Promise((res,rej)=>{ const r=new FileReader(); r.onload=e=>res(e.target.result); r.onerror=rej; r.readAsDataURL(file); });
   return { id:uid(), name:file.name, type:file.type, size:file.size, data, uploadedAt:today(), uploadedBy:who };
@@ -2700,6 +2727,7 @@ function saveIntake(id, quiet=false) {
 function printIntake(id) {
   const c = clients.find(cl=>cl.id===id); if(!c) return;
   const win = window.open('','_blank');
+  if(!win){ showToast('⚠️ Pop-up blocked — allow pop-ups for this site to open documents'); return; }
   const brandIntake = printBrandHeader('#1a3a2a');
   win.document.write(`<html><head><title>WG Intake — ${c.fullName}</title>
   <style>body{font-family:Arial,sans-serif;font-size:12px;padding:20px;color:#111;-webkit-print-color-adjust:exact;print-color-adjust:exact}h2{font-size:16px;margin:16px 0 6px}h3{font-size:13px;margin:12px 0 4px;color:#2d6a4f}table{width:100%;border-collapse:collapse}td{padding:5px 8px;border:1px solid #ddd;vertical-align:top}td:first-child{font-weight:bold;width:35%;background:#f9f9f9}.chk{display:inline-block;width:12px;height:12px;border:1px solid #666;margin-right:4px}${brandIntake.css}</style>
@@ -4108,6 +4136,7 @@ function reportFooter() {
 
 function openReport(html) {
   const w = window.open('','_blank');
+  if(!w){ showToast('⚠️ Pop-up blocked — allow pop-ups for this site to open documents'); return; }
   w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Worn Gundidj Report</title>${reportStyles()}</head><body><div class="page">${html}${reportFooter()}</div><script>window.onload=()=>window.print()<\/script></body></html>`);
   w.document.close();
 }
@@ -5893,6 +5922,13 @@ function calJumpTo(dateStr) {
   showPage('calendar');
 }
 
+// Tint the event-type select with the chosen type's calendar colour
+function updateEventColour() {
+  const sel = document.getElementById('em-type'); if(!sel) return;
+  const t = EVT_TYPES[sel.value];
+  if(t){ sel.style.background = t.bg; sel.style.color = t.color; sel.style.fontWeight = '600'; }
+}
+
 // ===== EVENT MODAL =====
 function openEventModal(date, startTime) {
   const clientOpts = [['','— No specific client —'], ...clients.map(c=>[c.id, c.fullName])];
@@ -7247,6 +7283,7 @@ function ndisGenerateInvoice(clientId, claimOrId){
   </tr>`).join('');
 
   const w = window.open('','_blank');
+  if(!w){ showToast('⚠️ Pop-up blocked — allow pop-ups for this site to open documents'); return; }
   w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>NDIS Invoice ${invNo} — ${c.fullName||''}</title>
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
@@ -7506,7 +7543,7 @@ function renderWorkFoundations() {
         <th style="text-align:left;padding:8px 10px;border-bottom:1px solid var(--border)">Worker</th>
       </tr></thead>
       <tbody>
-        ${wc.map(c=>`<tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="openClient('${c.id}')">
+        ${wc.map(c=>`<tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="openClientProfile('${c.id}')">
           <td style="padding:8px 10px;font-weight:600">${c.fullName}</td>
           <td style="padding:8px 10px;color:var(--muted)">${c.wf?.employmentGoal||'—'}</td>
           <td style="padding:8px 10px;color:var(--muted)">${c.wf?.barriers||'—'}</td>
@@ -8624,6 +8661,7 @@ function printFPHO(id) {
   </body></html>`;
 
   const w = window.open('', '_blank');
+  if(!w){ showToast('⚠️ Pop-up blocked — allow pop-ups for this site to open documents'); return; }
   w.document.write(html);
   w.document.close();
 }
@@ -9530,8 +9568,9 @@ let _chatMessages = {};        // { [convId]: [msg, ...] }
 
 function chatCol(name) {
   if(!FSYNC.isReady()) return null;
-  const cfg = JSON.parse(localStorage.getItem('fb_cfg')||'null');
-  const teamId = cfg?.teamId||'wg_default';
+  // Use the built-in config's team so chat lives in the same bucket as all
+  // other data ('worngundidj') — localStorage fb_cfg is cleared at boot.
+  const teamId = FSYNC.getCfg()?.teamId || 'worngundidj';
   return firebase.firestore().collection('teams').doc(teamId).collection(name);
 }
 
@@ -9582,6 +9621,7 @@ function _chatUnsubAll() {
 function _chatListenConvs() {
   const col = chatCol('chatConvs'); if(!col) return;
   const myId = currentUser?.id;
+  if(!myId) return; // not signed in yet — Firestore rejects undefined in where()
   const unsub = col.where('members','array-contains', myId)
     .orderBy('lastAt','desc')
     .onSnapshot(snap=>{
