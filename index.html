@@ -10207,6 +10207,18 @@ async function doLogin() {
       } else {
         u.firebaseUid = cred.user.uid;
       }
+      // Server-set role wins: once the role Cloud Function is deployed
+      // (SECURITY-DEPLOY.md), the signed token carries {role, name} custom
+      // claims that a devtools localStorage edit can't forge. No claims yet
+      // (functions not deployed) → keep the local profile role as before.
+      try {
+        const tok = await cred.user.getIdTokenResult();
+        if (tok.claims && tok.claims.role) {
+          u.role = tok.claims.role;
+          if (tok.claims.name) u.name = tok.claims.name;
+          saveUserProfiles();
+        }
+      } catch(_) {}
       _clearFailedLogins(email); saveCurrentUser(u); _auditLogin(u); initApp();
     } catch(e) {
       btn.disabled=false; btn.textContent='Sign In →';

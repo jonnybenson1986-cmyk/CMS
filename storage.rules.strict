@@ -1,0 +1,26 @@
+rules_version = '2';
+
+// Worn Gundidj CMS — STRICT Storage rules (Stage 1: claims-based)
+// ⚠️ Same prerequisite as firestore.rules.strict: deploy functions/ and
+// bootstrap the first sysmanager BEFORE publishing, then staff re-login once.
+//
+// Adds over the baseline: only managers can DELETE files (client attachments
+// are records — proof of income, COA forms, reports), and uploads keep the
+// 25 MB cap.
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function signedIn()   { return request.auth != null; }
+    function hasRole()    { return signedIn() && 'role' in request.auth.token; }
+    function isMgr()      { return hasRole() && request.auth.token.role in ['sysmanager','admin','supervisor']; }
+    function underLimit() { return request.resource.size < 25 * 1024 * 1024; }
+
+    match /teams/{teamId}/{allPaths=**} {
+      allow read: if signedIn();
+      // create/update (upload & replace)
+      allow write: if signedIn() && underLimit();
+      allow delete: if isMgr();
+    }
+  }
+}

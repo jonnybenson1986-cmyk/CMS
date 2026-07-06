@@ -1,0 +1,125 @@
+rules_version = '2';
+
+// Worn Gundidj CMS — STRICT Firestore rules (Stage 1: claims-based)
+//
+// ⚠️ PREREQUISITE: deploy functions/ and run scripts/bootstrap-sysmanager.js
+// FIRST, and have every staff member sign out/in once so their token carries
+// the role claim. Publishing these rules before that will lock managers out
+// of deletes and the audit log. See SECURITY-DEPLOY.md.
+//
+// Designed against the app's actual sync behaviour:
+//   • FSYNC pushAll()/pushNotes()/pushAudit() re-write EXISTING docs verbatim
+//     (batch.set, full overwrite) — so updates are allowed when the data is
+//     byte-identical ("idempotent re-push"), which is a no-op, while real
+//     tampering is blocked.
+//   • assignedWorkers / note.worker store display NAMES → the name custom
+//     claim must equal the worker's CMS display name (setUserRole sets both).
+//   • There is deliberately NO catch-all match: a collection not listed here
+//     is denied. All collections the app uses are listed.
+//
+// What this stops that `auth != null` didn't:
+//   • a worker/reception account deleting clients, notes, or files
+//   • anyone (including admins) editing or deleting audit-log entries
+//   • anyone editing another worker's case note (or their own after the fact)
+//   • devtools role escalation — the role now lives in the signed token
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn()  { return request.auth != null; }
+    function hasRole()   { return signedIn() && 'role' in request.auth.token; }
+    function role()      { return request.auth.token.role; }
+    function myName()    { return ('name' in request.auth.token) ? request.auth.token.name : ''; }
+    function isMgr()     { return hasRole() && role() in ['sysmanager','admin','supervisor']; }
+    function isSys()     { return hasRole() && role() == 'sysmanager'; }
+    // Byte-identical re-write: what FSYNC's routine "push everything" does.
+    function unchanged() { return request.resource.data == resource.data; }
+
+    match /teams/{teamId}/clients/{id} {
+      allow read, create: if signedIn();
+      allow update: if signedIn();          // all staff maintain client records
+      allow delete: if isMgr();             // deleting a client = manager action
+    }
+
+    match /teams/{teamId}/notes/{id} {
+      allow read, create: if signedIn();
+      // Case notes are clinical/legal records:
+      //   unchanged   → routine sync re-push (no-op)
+      //   author      → the app's own 24-h edit window still works
+      //   sysmanager  → corrections with full audit trail
+      allow update: if signedIn() && (
+        unchanged()
+        || resource.data.get('worker','') == myName()
+        || resource.data.get('author','') == myName()
+        || isSys()
+      );
+      allow delete: if isSys();
+    }
+
+    match /teams/{teamId}/timelogs/{id} {
+      allow read, create, update: if signedIn();
+      allow delete: if isMgr();
+    }
+
+    match /teams/{teamId}/referrals/{id} {
+      allow read, create, update: if signedIn();
+      allow delete: if isMgr();
+    }
+
+    match /teams/{teamId}/workersList/{id} {
+      allow read, create: if signedIn();
+      allow update: if signedIn() && (unchanged() || isMgr());
+      allow delete: if isMgr();
+    }
+
+    match /teams/{teamId}/workflowTasks/{id} {
+      allow read, create, update: if signedIn();
+      allow delete: if signedIn();          // staff manage their own tasks
+    }
+
+    match /teams/{teamId}/chatConvs/{id} {
+      allow read, create, update: if signedIn();
+      allow delete: if isMgr();
+    }
+
+    match /teams/{teamId}/chatMsgs/{id} {
+      allow read, create: if signedIn();
+      allow update, delete: if isSys();     // messages are never edited by the app
+    }
+
+    // Audit log: append-only for EVERYONE, including admins. The in-app
+    // "Clear audit log" only clears the local copy — the cloud record stays.
+    // (Known trade-off: the login entry's IP backfill won't replicate to the
+    // cloud copy; the original entry is preserved as first written.)
+    match /teams/{teamId}/auditlog/{id} {
+      allow read: if isMgr();
+      allow create: if signedIn();
+      allow update: if signedIn() && unchanged();   // idempotent re-push only
+      allow delete: if false;                        // nobody — not even sysmanager
+    }
+
+    // Role mirror: written exclusively by the Cloud Functions (Admin SDK
+    // bypasses rules). Clients may read it, never write it.
+    match /teams/{teamId}/roles/{uid} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STAGE 2 (future) — per-worker client visibility.
+// Do NOT enable yet: the app currently listens to the WHOLE clients collection
+// and filters locally (index.html ~line 1013). Firestore rules are not
+// filters — a full-collection query under this rule is rejected outright, so
+// the app must first switch its listener to:
+//   col('clients').where('assignedWorkers','array-contains', myName)
+// (plus a separate manager path), and every client doc must have
+// assignedWorkers populated. Then replace the clients block above with:
+//
+//   match /teams/{teamId}/clients/{id} {
+//     allow read: if isMgr() || (signedIn() && myName() in resource.data.get('assignedWorkers', []));
+//     allow create, update: if signedIn();
+//     allow delete: if isMgr();
+//   }
+// ─────────────────────────────────────────────────────────────────────────────
