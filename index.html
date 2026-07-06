@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Worn Gundidj — SEWB AOD Justice CMS</title>
+<title>Worn Gundidj CMS — Client & Case Management</title>
 
 <!-- PWA — manifest and icons embedded; no external files needed -->
 <link rel="manifest" href="data:application/manifest+json,%7B%22name%22%3A%20%22Worn%20Gundidj%20CMS%22%2C%20%22short_name%22%3A%20%22WG%20CMS%22%2C%20%22description%22%3A%20%22Worn%20Gundidj%20SEWB%20AOD%20Justice%20Client%20Management%20System%22%2C%20%22start_url%22%3A%20%22./%22%2C%20%22display%22%3A%20%22standalone%22%2C%20%22orientation%22%3A%20%22portrait-primary%22%2C%20%22background_color%22%3A%20%22%231a3a2a%22%2C%20%22theme_color%22%3A%20%22%231a3a2a%22%2C%20%22categories%22%3A%20%5B%22medical%22%2C%20%22productivity%22%5D%2C%20%22lang%22%3A%20%22en-AU%22%2C%20%22icons%22%3A%20%5B%7B%22src%22%3A%20%22data%3Aimage/png%3Bbase64%2CiVBORw0KGgoAAAANSUhEUgAAAMAAAADACAYAAABS3GwHAAACbUlEQVR42u3dQQ2EQBQFQVyQrAQcsNbWDKIQgBNQsAkHLkzXoQ38vMocZ/p8l1OqNjmCAJAAkACQAJAAkACQAJAAkACQAJAAkACQAJAAkACQAJAAkACQAJAAkACQAJAAkACQAJAAkACQAJAAiHX8VncAYNxxP5V7ApAbPQwAGD0MABg%2BCAAYPggAGD4IABg%2BCAAYPwQAGD8EABg%2BCAAYPwQAGD8EABg/BAAYPwQAGD8EAAAAAADGDwEAxg8BAMYPAQCGDkAWgJFDAIAAKAIwbggAEABFAEYNAQACoAjAmCEAQAAAIABiAIwYAgAEAAACIAbAeCEAQAAAIAAAEAAACAAABAAAAgAAAQCAADB%2BJRF4AeQFAEAAACAAABAAAAgAAAQAAAIAAAEAAAAAQGD8AAAAAAAAAAAABMYPAAAAAAAAAABAYPwAAAAAABAYPwAAAAAABMYPAAAAAACB8QMAAAAAQGD8AEBg/ABAYPwAAAAAABAYPwAQGD8AEBg/ABAYPwAQGD8AIBg%2BABAYPwAQGD8AIBg%2BACAYPgAgGD4AILg/AD0M7gxADoN7AjAsEncAQAJAAkACQAJAAkACQAJAAkB6N4B9m6W/ASAAABAAAAgAAAQAAAIAAAEAgAAAQAAAIAAAEAAACAAABAAAAgAAAQCAAABAAAAgAAAQAAAIAAAEAAACAAABAIAAAEAAACAAABAAAAgAAAQAAAIAAAEAgAAAQAAAIAAkXyRJAEgASABIAEgASABIAEgASABIAEgASABIAEgASABIAEgASABIAEgASABIAEgASABIAEgASABIAEgASABIAEgASDe6ADQpyZ/4H7uEAAAAAElFTkSuQmCC%22%2C%20%22sizes%22%3A%20%22192x192%22%2C%20%22type%22%3A%20%22image/png%22%2C%20%22purpose%22%3A%20%22any%20maskable%22%7D%2C%20%7B%22src%22%3A%20%22data%3Aimage/png%3Bbase64%2CiVBORw0KGgoAAAANSUhEUgAAAgAAAAIACAYAAAD0eNT6AAAKYElEQVR42u3WQQ3AIBBFwXXRpBJwUKzVTEVVAE5aE4TAMocxsAn8F2ctHwCwl3AEABAAAIAAAAAEAAAgAAAAAQAACAAAQAAAAAIAABAAAIAAAAAEAAAgAAAAAQAACAAAQAAAAAIAABAAACAAAAABAAAIAABAAAAAAgAAEAAAgAAAAAQAACAAAAABAAAIAABAAAAAAgAAEAAAgAAAAAQAACAAAEAAAAACAAAQAACAAAAABAAAIAAAAAEAAAgAAEAAAAACAAAQAACAAAAABAAAIAAAAAEAAAgAAEAAAIAAAAAEAAAgAAAAAQAACAAAQAAAAAIAABAAAIAAAAAEAAAgAAAAAQAACAAAQAAAAAIAABAAAIAAAAAB4BAAIAAAAAEAAAgAAEAAAAACAAAQAACAAAAABAAAIAAAAAEAAAgAAEAAAB20%2B3IHEADAykM%2BmruDAACSjrw4AAEAGHxBAAIAMPiCAAQAYPAFAQgAwOiLARAAYPgNuxAAAQBGHzEAAgAMP0IABAAYfcQACAAw/AgBEABg%2BBECIADA8CMEQACA4UcIgAAA4y8CAAEAhl8IAAIADL8QAAEAGH8RAAIADD9CAAQAGH9EAAgAMPwIARAAYPwRASAAwPgjAkAAgOFHCIAAAOOPCAABAMYfEQACAIw/IgAEABh%2BhAAIADD%2BiAAQAGD8EQEgADD%2BxgkRAAIA4w8iAAQAxh9EAAgAjD%2BIAASAQ2D8QQQgAMD4gwhAAIDxBxGAAADjDyIAAQACAAQAAgCMP3ivCAAw/ogAEABg/BEBIADA%2BCMCQACAAEAAgADA%2BBsPRAAIAIw/iAAQABh/EAEgABAAIABAAGD8QQSAAMD4gwgAAYAAAAGAAHAEjD%2BIAAQAGH8QAQgAEAAgABAAYPxBBCAAQACAAEAAgPEHEYAAAOMPIgABAAIABAACAOMPiAAEAAIABID/AQGA8QcRAAIAAQACAAQAxh9EAAgABAAIABAAGH8QASAAEAAgAEAAIABAAIAAwPiDCEAAgAAAAYAAAOMPIgABAAIABAACAAQACAAEABh/EAEIAPBxgwBAAGD8ARGAAEAAAAIAAYAAAAQAAgDjD4gABAACABAACAAEAAgAEAAIABAAIAAw/iACQAAgAEAAgABAAIAAAAGAAAABgAAA4w8iAAEAAgAEAAIABAAIAAQACAAQAAgAjL9PGUQAAgABAAgABAACABAACAAEACAAEAAIAEAAIAAQAIAAQAAgAAABgADA%2BAMiAAGAAAABAAIAAQACAAQAAgAEAAgABAAIABAACAAQAAgAEAAgABAAIABAACAAQACAAEAAgAAAAYAAQAD4iEEAIAAQAIAAQAAgAAABgABAAAACAAGA8QdEAAIAEQAYfwQAAgAQAAgABAAgABAACAAQACAAEAAgAEAAIABAAIAAQACAAAABgAAAAYAAcAgEAAgABAAIABAACAAQACAAEAAgAEAAIADARwwCAAGAAAAEAAIAEQAYfwQAAgAQAAgABAAgABAACABAACAAEACAAEAAIAAAAYAAQACAAAABgAgA4w8CAAEAAgAEAAIABAAIAAQACAAEgCMgAsD4IwBAAIAAQACAAAABgAAAAQACAAEAIgCMPwIABAAIAAQAAgAQAAgABAAgABAAiADA%2BCMAEACAAEAAIAAAAYAAQASA8QcBgAAAAQACABEAxh8EAAIABAAIAAQACAAQAIgAMP4gABAAIAAQACACwPgjAEAAgABAAIAAAAGAAAARAMYfAQACAAQAAgBEABh/BAAIABAACABEAGD8EQAIAEAAIAAQAWD8QQAgAEAAgABABIDxBwGACADjDwIAAQACAAQAIgCMPwgABAAIABAAiAAw/ggAEAFg/BEAIABAACAAQASA8UcAgAgA448AAAEAAgABACIAjD8CAEQAxh8EAIgAjD8IABAACAAQACACMP4gAEAEYPxBACACwPiDAEAEgPEHAYAAAAEAAgARAMYfBAAiAIw/CABEABh/BACIADD%2BCAAQAWD8EQAgAsD4IwBABGD8QQCACMD4gwAAEYDxBwEAIgDjDwIAhACGHwQAiACMPwgAEAEYfxAAIAIw/iAAQAhg%2BEEAgAjA%2BIMAABGA8QcBAEIAww8CAEQAxh8EAAgBww8CwCFABBh/EACAEDD8IABACGD4QQCACMD4gwAAIYDhBwEAQgDDDwIAhACGHwQACAEMPwgAEAMYfRAAIAQw/CAAQAwYfUAAgBAw/IAAADFg9AEBAILA4AMCAASBwQcEAAgCgw8IABAHRh4EgCPA3uHgDiAAAAABAAAIAABAAAAAAgAAEAAAgAAAAAQAACAAAAABAAAIAABAAAAAAgAAEAAAgAAAAAQAACAAAEAAAAACAAAQAACAAAAABAAAIAAAAAEAAAgAAEAArOZ9DgAmZKMEgAAAEAAIAAEAIAAQAAIAQAAgAAQAgAAQAAgAAAEgABAAAAJAACAAAASAABAAAAgAASAAABAAAkAAACAABIAAAEAACAABAIAAEAACAAABIAAEAAACQAAIAAAEgAAQAAAIAAEgAAAQAAJAAAAIAASAAAAQAAgAAQAgABAAAgBAAAgABACAABAACAAAASAAEAAAAkAACAAABIAAEAAACAABIAAAEAACQAAAIAAEgAAAQAAIAAEAgAAQAAIAAAEgAAQAAAJAAAgAAASAABAAAAgAASAAAAQAAkAAAAgABIAAABAACAABACAABAACAEAACAAEAIAAEAAIAAABIAAEAAACQAAIAAAEgAAQAAAIAAEgAAAQAAJAAAAgAASAAABAAAgAAQCAABAAAgAAASAABAAAAkAACAAABIAAEAAAAgABIAAABAACQAAACAAEgAAAEAACAAEAIAAEAAIAQAAIAAQAgAAQAAIAAAEgAAQAAAJAAAgAAASAABAAAAgAASAAABAAAkAAACAABIAAAEAACAABAIAAEAACAAABIAAEAAACQAAIAAABgAAQAAACAAEgAAAEAAJAAAAIAAHgCAIAQAAIAAQAgAAQAAgAAAEgAPDIAASAABAAAAgAASAAABAAAkAAACAABIAAAEAACAABAIAAEAACAAABIAAEAAACQAAIAAAEgAAQAAAIAAEgAACwUQJAAAAIAAQAACAAAAABAAACAAAQAACAAAAABAAAIAAAAAEAAAgAAEAAAAACAAAQAACAAAAABAAAIAAAAAEAAAgAAEAAAAACAAAEAAAgAAAAAQAACAAAQAAAAAIAABAAAIAAAAAEAAAgAAAAAQAACAAAQAAAAAIAABAAAIAAAAAEAAAIAABAAAAAAgAAEAAAgAAAAAQAACAAAAABAAAIAABAAAAAAgAAEAAAgAAAAAQAACAAAAABAAAIAAAQAACAAAAABAAAIAAAAAEAAAgAAEAAAAACAAAQAACAAAAABAAAIAAAAAEAAAgAAEAAAAACAAAQAAAgABwBAAQAACAAAAABAAAIAABAAAAAAgAAEAAAgAAAAAQAACAAAAABAAAIAABAAAAAAgAAEAAAgAAAAAQAAAgAAEAAAAACAABI4gdxYoDCkL0TDQAAAABJRU5ErkJggg%3D%3D%22%2C%20%22sizes%22%3A%20%22512x512%22%2C%20%22type%22%3A%20%22image/png%22%2C%20%22purpose%22%3A%20%22any%20maskable%22%7D%5D%7D">
@@ -337,7 +337,7 @@
     <div style="background:#fff;border-radius:8px;padding:8px 10px;margin-bottom:8px;display:flex;align-items:center;justify-content:center;">
       <img src="data:image/png;base64,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" alt="Worn Gundidj" style="width:100%;max-width:180px;height:auto;display:block;">
     </div>
-    <p style="font-size:10px;opacity:0.6;text-align:center;letter-spacing:0.5px">SEWB · AOD · JUSTICE · CULTURAL STRENGTHENING</p>
+    <p style="font-size:10px;opacity:0.6;text-align:center;letter-spacing:0.5px">SEWB · AOD · JUSTICE · CULTURAL · NDIS · FPHO</p>
   </div>
   <div class="nav-section">
     <div class="nav-section-label">Main</div>
@@ -390,10 +390,10 @@
       <span class="icon">📅</span><span>Calendar</span>
     </div>
     <div class="nav-item" onclick="showPage('resources')">
-      <span class="icon">📁</span><span>Resources</span>
+      <span class="icon">🗂️</span><span>Resources</span>
     </div>
     <div class="nav-item" onclick="showPage('reports')">
-      <span class="icon">📊</span><span>Reports</span>
+      <span class="icon">📈</span><span>Reports</span>
     </div>
     <div class="nav-item" onclick="showPage('auditlog')">
       <span class="icon">🔍</span><span>Audit Log</span>
@@ -714,7 +714,7 @@ const FSYNC = (() => {
       saveCfg(cfg);
       showToast('Config saved — connecting…');
       FSYNC.init().then(ok=>{
-        if(ok){showToast('☁️ Firebase connected! Staff accounts can now use email/password login.');showPage('settings');}
+        if(ok){showToast('☁️ Cloud Sync connected! Staff accounts can now use email/password login.');showPage('settings');}
         else showToast('⚠️ Could not connect — check your config');
       });
       return true;
@@ -836,7 +836,7 @@ function toggleVoiceInput(textareaId, btnId) {
     ta.scrollTop = ta.scrollHeight;
     if(statusEl) statusEl.textContent = interim ? `🎤 Hearing: "${interim.slice(0,60)}…"` : '🎤 Listening…';
   };
-  _voiceRecog.onerror = (ev) => { if(ev.error!=='no-speech'){stopVoiceInput();showToast('Voice error: '+ev.error);} };
+  _voiceRecog.onerror = (ev) => { if(ev.error!=='no-speech'){stopVoiceInput();console.warn('Voice input error:', ev.error); showToast("Voice input didn't work — please try again.");} };
   _voiceRecog.onend = () => { if(_voiceRecog) stopVoiceInput(); };
   _voiceRecog.start();
 }
@@ -920,7 +920,7 @@ function showPage(page) {
 
   const pages = { dashboard: renderDashboard, referrals: renderReferrals, clients: renderClients, closedclients: renderClosedClients, sessions: renderSessions, walkins: renderWalkins, sewb: renderSEWB, aod: renderAOD, justice: renderJustice, cultural: renderCultural, disability: renderDisability, workfoundations: renderWorkFoundations, homeownership: renderHomeOwnership, reports: renderReportsPage, calendar: renderCalendarPage, resources: renderResourcesPage, auditlog: renderAuditLog, settings: renderSettings, chat: renderChatPage };
   const fn = pages[page];
-  document.getElementById('content').innerHTML = fn ? fn() : '<p>Coming soon</p>';
+  document.getElementById('content').innerHTML = fn ? fn() : '<div class="empty-state"><p>This page could not be opened. Please refresh, or contact your system manager if it keeps happening.</p></div>';
   attachPageEvents(page);
 }
 
@@ -968,13 +968,13 @@ function renderDashboard() {
   <div class="grid-4" style="margin-bottom:20px">
     <div class="stat-card"><div class="label">Active Clients</div><div class="value" style="color:var(--primary-light)">${active}</div><div class="sub">${clients.length} total</div></div>
     <div class="stat-card"><div class="label">Notes This Month</div><div class="value" style="color:var(--info)">${thisMonth}</div><div class="sub">${notes.length} total</div></div>
-    <div class="stat-card"><div class="label">Time Logged</div><div class="value" style="color:var(--accent)">${hrs}h ${mins}m</div><div class="sub">all time</div></div>
+    ${(()=>{ const k=fundingKPI(['sewb','aod','justice']); return `<div class="stat-card" style="cursor:pointer" onclick="showPage('reports')" title="Open Reports for the full KPI tracker"><div class="label">Episodes of Care</div><div class="value" style="color:var(--accent)">${k.episodesFY} / ${k.target}</div><div class="sub">${k.pct}% of annual target (${sanitize(k.fy.label)})</div></div>`; })()}
     <div class="stat-card"><div class="label">High Risk</div><div class="value" style="color:var(--danger)">${highRisk}</div><div class="sub">clients flagged</div></div>
   </div>
   <div class="grid-2">
     <div class="card">
       <div class="card-header"><div class="card-title">📋 Recent Clients</div><button class="btn-ghost" onclick="showPage('clients')">View all →</button></div>
-      ${recentClients.length === 0 ? '<div class="empty-state"><div class="icon">👥</div><p>No clients yet</p></div>' :
+      ${recentClients.length === 0 ? '<div class="empty-state"><div class="icon">👥</div><p>No clients yet — open <strong>Clients</strong> and choose <strong>New Client</strong> to create the first file</p></div>' :
         recentClients.map(c=>`<div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border);cursor:pointer" onclick="openClientProfile('${c.id}')">
           <div class="avatar">${initials(c.fullName)}</div>
           <div style="flex:1">
@@ -987,7 +987,7 @@ function renderDashboard() {
     </div>
     <div class="card">
       <div class="card-header"><div class="card-title">📝 Recent Notes</div><button class="btn-ghost" onclick="showPage('notes')">View all →</button></div>
-      ${recentNotes.length === 0 ? '<div class="empty-state"><div class="icon">📝</div><p>No notes yet</p></div>' :
+      ${recentNotes.length === 0 ? '<div class="empty-state"><div class="icon">📝</div><p>Case notes will appear here as your team records them</p></div>' :
         recentNotes.map(n=>{
           const c = clients.find(cl=>cl.id===n.clientId);
           return `<div class="note-entry ${n.type||'general'}" style="margin-bottom:8px;cursor:pointer" onclick="openClientProfile('${n.clientId}')">
@@ -2156,7 +2156,7 @@ function renderProfileTab(tab, c, clientNotes, clientTime) {
         </label>`).join('')}
       </div>
       <div class="grid-2">
-        <div class="form-group"><label>Signature (note)</label><input id="wf-signature" value="${sanitize(wf.signature||'')}" placeholder="Client name or 'Signed'"></div>
+        <div class="form-group"><label>Client Signature (note)</label><input id="wf-signature" value="${sanitize(wf.signature||'')}" placeholder="Client name or 'Signed'"></div>
         <div class="form-group"><label>Date Signed</label><input type="date" id="wf-signDate" value="${sanitize(wf.signDate||today())}"></div>
         <div class="form-group"><label>Pathways Coordinator</label>${workerSelectHTML('wf-coordinator','wf-coordinator-new',wf.coordinator||'')}</div>
         <div class="form-group"><label>Date Completed</label><input type="date" id="wf-completedDate" value="${sanitize(wf.completedDate||today())}"></div>
@@ -2306,7 +2306,7 @@ function renderProfileTab(tab, c, clientNotes, clientTime) {
     <div class="card" style="background:#fef9f5">
       <div class="card-header"><div class="card-title">✍️ Signature</div></div>
       <div class="grid-2">
-        <div class="form-group"><label>Participant Signature (note)</label><input id="fb-signature" value="${sanitize(fb.signature||'')}" placeholder="Name or 'Signed'"></div>
+        <div class="form-group"><label>Client Signature (note)</label><input id="fb-signature" value="${sanitize(fb.signature||'')}" placeholder="Name or 'Signed'"></div>
         <div class="form-group"><label>Date</label><input type="date" id="fb-signDate" value="${sanitize(fb.signDate||today())}"></div>
       </div>
     </div>
@@ -2547,13 +2547,13 @@ async function handleFileUpload(clientId, input) {
   // The 8 MB cap only applies to local (base64) storage; Cloud Storage is unlimited
   if(!FSYNC.storageReady()) {
     const total = c.attachments.reduce((a,f)=>a+(f.size||0),0) + files.reduce((a,f)=>a+f.size,0);
-    if(total>8*1024*1024){ showToast('⚠️ Local file limit reached — connect Cloud Storage for unlimited files'); return; }
+    if(total>8*1024*1024){ showToast('⚠️ Local file limit reached — connect Cloud Storage for unlimited storage'); return; }
   }
   showToast(FSYNC.storageReady()?'☁️ Uploading…':'Attaching…');
   let ok=0;
   for(const file of files){
     try { c.attachments.push(await cmsUploadAttachment('clients/'+clientId, file)); ok++; }
-    catch(e){ showToast('Upload failed: '+(e.message||e)); }
+    catch(e){ console.warn('Upload failed:', e); showToast("Upload failed — the file wasn't saved. Please check your connection and try again."); }
   }
   if(ok){ saveAll(); showToast(`${ok} file${ok!==1?'s':''} attached`); }
   openClientProfile(clientId);
@@ -2892,7 +2892,7 @@ function setSEWBRating(id, domainIdx, rating) {
     dot.classList.toggle('active', i+1===rating);
   });
 }
-function saveSEWBDomains(id) { alert('Domains auto-saved on click'); }
+function saveSEWBDomains(id) { showToast('Ratings save automatically as you tap them'); }
 function saveSEWBGoals(id) {
   const c = clients.find(cl=>cl.id===id); if(!c) return;
   c.sewbStrengths = document.getElementById('sewb-strengths')?.value||'';
@@ -2977,7 +2977,7 @@ function openNewClientModal() {
     c.id = uid(); c.created = now(); c.status = 'active';
     clients.push(c); saveAll();
     audit('Created client', c.fullName, c.id);
-    showToast('Client created'); return true;
+    showToast('Client record created'); return true;
   });
 }
 
@@ -3364,7 +3364,7 @@ function renderTime() {
 function renderSEWB() {
   const sewbClients = clients.filter(c=>c.sewb);
   return `
-  <div class="alert alert-info">💚 The SEWB framework recognises seven dimensions of life that affect wellbeing for Aboriginal and Torres Strait Islander peoples — including connection to body, mind, family, community, culture, country, and spirituality. Care is holistic and self-determined.</div>
+  <div class="alert alert-info">💚 The SEWB framework recognises eight domains of life that affect wellbeing for Aboriginal and Torres Strait Islander peoples — connection to body, mind and emotions, family and kinship, community, culture, Country, spirit, and sovereignty. Care is holistic and self-determined.</div>
   <div class="grid-4" style="margin-bottom:20px">
     <div class="stat-card"><div class="label">SEWB Clients</div><div class="value" style="color:#16a34a">${sewbClients.length}</div></div>
     <div class="stat-card"><div class="label">Active</div><div class="value">${sewbClients.filter(c=>c.status==='active').length}</div></div>
@@ -3937,7 +3937,7 @@ function renderReportsPage() {
     </div>
     <div class="form-group">
       <label>Paste client data here (CSV, tab-separated, Excel paste, or plain name list)</label>
-      <textarea id="bulk-paste" style="min-height:160px;font-family:monospace;font-size:12px" placeholder="E.g. paste a spreadsheet selection, CSV export, or just a list of names — one client per line…" oninput="bulkPreview()"></textarea>
+      <textarea id="bulk-paste" style="min-height:160px;font-family:monospace;font-size:12px" placeholder="e.g. paste a spreadsheet selection, CSV export, or just a list of names — one client per line…" oninput="bulkPreview()"></textarea>
     </div>
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
       <div class="form-group" style="margin:0">
@@ -6196,7 +6196,7 @@ function renderReferrals() {
 
   <!-- REFERRAL CARDS -->
   ${sorted.length===0
-    ? `<div class="empty-state"><div class="icon">📥</div><p>No referrals${filterStatus!=='all'?' in this category':' yet'}</p><button class="btn btn-primary" onclick="openReferralModal()" style="margin-top:12px">➕ Add First Referral</button></div>`
+    ? `<div class="empty-state"><div class="icon">📥</div><p>No referrals${filterStatus!=='all'?' in this category':' yet'}</p><button class="btn btn-primary" onclick="openReferralModal()" style="margin-top:12px">Add First Referral</button></div>`
     : `<div style="display:grid;gap:12px">${sorted.map(r=>renderReferralCard(r)).join('')}</div>`
   }`;
 }
@@ -6786,13 +6786,13 @@ async function sessHandleFiles(input){
   if(input.value!==undefined) input.value='';
   if(!FSYNC.storageReady()){
     const total=_sessionAttachments.reduce((a,f)=>a+(f.size||0),0)+files.reduce((a,f)=>a+f.size,0);
-    if(total>8*1024*1024){ showToast('⚠️ Local file limit — connect Cloud Storage for unlimited files'); return; }
+    if(total>8*1024*1024){ showToast('⚠️ Local file limit reached — connect Cloud Storage for unlimited storage'); return; }
   }
   if(FSYNC.storageReady()) showToast('☁️ Uploading…');
   let ok=0;
   for(const file of files){
     try { _sessionAttachments.push(await cmsUploadAttachment('sessions', file)); ok++; }
-    catch(e){ showToast('Upload failed: '+(e.message||e)); }
+    catch(e){ console.warn('Upload failed:', e); showToast("Upload failed — the file wasn't saved. Please check your connection and try again."); }
   }
   sessRenderAttachments();
   if(ok) showToast(`${ok} file${ok!==1?'s':''} attached`);
@@ -8152,7 +8152,7 @@ function buildFPHOReport(){
       return `<tr><td>${sanitize(c.name||'—')}</td><td>${sanitize(c.region||'—')}</td><td>${sanitize(c.stage||'—')}</td><td>${sanitize(c.officer||'—')}</td><td>${sanitize(c.atsi||'—')}</td><td>${app?`${sanitize(app.primaryFirstName||'')} ${sanitize(app.primaryLastName||'')} (${sanitize(app.status||'draft')})`:'—'}</td></tr>`;
     }).join('')||'<tr><td colspan="6">No clients</td></tr>'}</table>`;
   body += `<h2>Indicative Grant Exposure</h2>
-    <p style="font-size:12px">Programme maximums per application: Home Buyer Booster $2,500 · Stamp Duty Helper up to $10,000 · Deposit Contribution up to $20,000 · New Build Bonus $5,000 (max <strong>$${maxPerApp.toLocaleString()}</strong> per application).</p>
+    <p style="font-size:12px">Program maximums per application: Home Buyer Booster $2,500 · Stamp Duty Helper up to $10,000 · Deposit Contribution up to $20,000 · New Build Bonus $5,000 (max <strong>$${maxPerApp.toLocaleString()}</strong> per application). <em>Always confirm current program names and amounts with the FPHO coordinator before quoting them to clients.</em></p>
     <table><tr><td><strong>Approved applications</strong></td><td>${approved}</td></tr>
     <tr><td><strong>Indicative maximum grant value (approved × max)</strong></td><td>$${(approved*maxPerApp).toLocaleString()}</td></tr></table>
     <p style="font-size:11px;color:#6b7280">Indicative only — actual grant amounts depend on each participant's eligibility and assessed entitlements.</p>`;
@@ -8519,13 +8519,13 @@ async function fphoHandleFiles(input) {
   if(input.value!==undefined) input.value='';
   if(!FSYNC.storageReady()){
     const total=_fphoAttachments.reduce((a,f)=>a+(f.size||0),0)+files.reduce((a,f)=>a+f.size,0);
-    if(total>8*1024*1024){ showToast('⚠️ Local file limit — connect Cloud Storage for unlimited documents'); return; }
+    if(total>8*1024*1024){ showToast('⚠️ Local file limit reached — connect Cloud Storage for unlimited storage'); return; }
   }
   if(FSYNC.storageReady()) showToast('☁️ Uploading…');
   let ok=0;
   for(const file of files){
     try { _fphoAttachments.push(await cmsUploadAttachment('fpho', file)); ok++; }
-    catch(e){ showToast('Upload failed: '+(e.message||e)); }
+    catch(e){ console.warn('Upload failed:', e); showToast("Upload failed — the file wasn't saved. Please check your connection and try again."); }
   }
   fphoRenderAttachments();
   if(ok) showToast(`${ok} file${ok!==1?'s':''} attached`);
@@ -8970,9 +8970,9 @@ function renderSettings() {
 
   <div class="card">
     <div class="card-title" style="margin-bottom:16px">💾 Data Management</div>
-    <p style="font-size:13px;color:var(--muted);margin-bottom:16px">All data is stored locally in your browser. Export regularly to back up client records.</p>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:16px">Create a password-protected, encrypted backup (AES-256) of all client records at any time. Export regularly and store the file somewhere safe.</p>
     <div style="display:flex;gap:10px;flex-wrap:wrap">
-      <button class="btn btn-outline" onclick="exportData()">📤 Export All Data (JSON)</button>
+      <button class="btn btn-outline" onclick="exportData()">🔒 Export Encrypted Backup</button>
       <button class="btn btn-outline" onclick="document.getElementById('import-file').click()">📥 Import Data</button>
       <input type="file" id="import-file" accept=".json" style="display:none" onchange="importData(event)">
       <button class="btn btn-danger" onclick="clearData()">🗑️ Clear All Data</button>
@@ -9005,7 +9005,7 @@ function renderSettings() {
   <!-- CLOUD SYNC CARD -->
   <div class="card" id="cloud-sync-card" style="border-left:4px solid ${FSYNC.isReady()?'#16a34a':'#d97706'}">
     <div class="card-header">
-      <div class="card-title">☁️ Cloud Sync <span id="sync-status-badge" style="font-size:12px;padding:2px 10px;border-radius:12px;font-weight:700;${FSYNC.isReady()?'background:#d1fae5;color:#065f46':'background:#fef3c7;color:#92400e'}">${FSYNC.isReady()?'● Connected':'○ Not connected'}</span></div>
+      <div class="card-title">☁️ Cloud Sync — hosted in Australia (Sydney) <span id="sync-status-badge" style="font-size:12px;padding:2px 10px;border-radius:12px;font-weight:700;${FSYNC.isReady()?'background:#d1fae5;color:#065f46':'background:#fef3c7;color:#92400e'}">${FSYNC.isReady()?'● Connected':'○ Not connected'}</span></div>
       <div style="display:flex;gap:8px">
         ${FSYNC.getCfg()?.apiKey ? `<button class="btn btn-sm btn-outline" onclick="checkFbConnection()">🔍 Test</button>` : ''}
         <button class="btn btn-primary btn-sm" onclick="FSYNC.showSetupModal()">⚙️ ${FSYNC.getCfg()?.apiKey?'Edit Config':'Set Up Sync'}</button>
@@ -9019,7 +9019,7 @@ function renderSettings() {
       </div>
       <button class="btn btn-sm btn-danger" onclick="FSYNC.clearConfig()">🗑️ Disconnect Firebase</button>
     `:`
-      <p style="font-size:13px;color:var(--muted);margin-bottom:12px">Paste your Firebase config below to connect cloud sync. All staff will share the same client records in real time.</p>
+      <p style="font-size:13px;color:var(--muted);margin-bottom:12px">Connect once to securely share the same client records across all staff devices, in real time. Data is stored on Australian servers (Sydney). Paste your Firebase config below to connect.</p>
       <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px">
         <label style="font-size:12px;font-weight:700;color:#374151;display:block;margin-bottom:6px">📋 Paste your Firebase config here</label>
         <textarea id="inline-fb-paste" rows="7"
@@ -9096,10 +9096,11 @@ function renderSettings() {
   <div class="card">
     <div class="card-title" style="margin-bottom:12px">ℹ️ About</div>
     <p style="font-size:13px;line-height:1.8;color:var(--muted)">
-      <strong>SEWB AOD Justice Client Management System</strong><br>
+      <strong>Worn Gundidj CMS — Client &amp; Case Management</strong> · Version 2.0<br>
       Built for Aboriginal and Torres Strait Islander health and wellbeing services.<br>
-      Supports best-practice holistic care across SEWB, AOD, Justice, and Cultural Strengthening programs.<br><br>
-      Data is stored locally in your browser. Enable Cloud Sync above to share across devices.
+      Covers SEWB, AOD, Justice, Cultural Strengthening, Disability/NDIS (including compliant NDIS tax invoicing), Work Foundations and First Peoples Home Ownership.<br><br>
+      <strong>Security &amp; compliance:</strong> data hosted in Australia (Sydney, australia-southeast1) via Cloud Sync; password-protected encrypted backups (AES-256); role-based access; full audit log; built to the Australian Privacy Principles (Privacy Act 1988).<br><br>
+      Support: contact your System Manager.
     </p>
   </div>`;
 }
@@ -9160,13 +9161,13 @@ async function uploadResources(input) {
   if(!files.length) return;
   if(!FSYNC.storageReady()) {
     const total = resources.reduce((a,r)=>a+(r.size||0),0) + files.reduce((a,f)=>a+f.size,0);
-    if(total>8*1024*1024){ showToast('⚠️ Local file limit — connect Cloud Storage for unlimited resources'); return; }
+    if(total>8*1024*1024){ showToast('⚠️ Local file limit reached — connect Cloud Storage for unlimited storage'); return; }
   }
   showToast(FSYNC.storageReady()?'☁️ Uploading…':'Uploading…');
   let ok=0;
   for(const file of files){
     try { const m=await cmsUploadAttachment('resources', file); resources.push({ id:m.id, name:m.name, size:m.size, type:m.type, data:m.data, storagePath:m.storagePath, url:m.url, uploaded:today() }); ok++; }
-    catch(e){ showToast('Upload failed: '+(e.message||e)); }
+    catch(e){ console.warn('Upload failed:', e); showToast("Upload failed — the file wasn't saved. Please check your connection and try again."); }
   }
   if(ok){
     saveResources();
@@ -9232,7 +9233,7 @@ async function outlookConnect() {
     showToast(`Connected as ${result.account.name} ✓`);
     showPage('settings');
   } catch(e) {
-    showToast('Connection failed: ' + (e.message||e));
+    console.warn('Outlook connection failed:', e); showToast("Couldn't connect to Outlook — please try again.");
   }
 }
 
@@ -9259,7 +9260,7 @@ async function _getOutlookToken() {
     try {
       const result = await msalApp.acquireTokenPopup({ scopes: ['Calendars.ReadWrite'], account: accounts[0] });
       return result.accessToken;
-    } catch(e) { showToast('Auth failed: ' + (e.message||e)); return null; }
+    } catch(e) { console.warn('Outlook sign-in failed:', e); showToast('Outlook sign-in failed — please reconnect in Settings.'); return null; }
   }
 }
 
@@ -9281,7 +9282,7 @@ async function outlookSync() {
   }
   const ts = new Date().toLocaleString('en-AU');
   DB.save('msalLastSync', ts);
-  showToast(`Synced ${ok} event${ok!==1?'s':''} to Outlook${fail?` (${fail} failed)`:''}  ✓`);
+  showToast(`Synced ${ok} event${ok!==1?'s':''} to Outlook${fail?` (${fail} failed)`:''} ✓`);
   audit('Outlook sync', `${ok} events synced`);
   showPage('settings');
 }
@@ -9506,7 +9507,7 @@ async function exportData() {
       const env = await _encryptExport(json, pw);
       blob = new Blob([JSON.stringify(env)], {type:'application/json'});
       name = `wg-cms-backup-${today()}.wgenc.json`;
-    } catch(err) { alert('Encryption failed: ' + err.message); return; }
+    } catch(err) { console.warn('Backup encryption failed:', err); alert('The backup could not be encrypted on this device. No file was saved — please try again.'); return; }
     audit('Exported data (encrypted)', `${clients.length} clients, ${notes.length} notes`);
   } else {
     if (!confirm('Export WITHOUT encryption?\n\nThe file will hold client health information in plain text — anyone who opens it can read every record.')) return;
@@ -9798,7 +9799,7 @@ async function _chatMarkRead(convId) {
 }
 
 function openNewConvModal() {
-  if(!FSYNC.isReady()){ alert('Firebase Cloud Sync must be enabled to use chat. Set it up in Settings.'); return; }
+  if(!FSYNC.isReady()){ alert('Cloud Sync must be enabled to use Messages — ask your system manager to set it up in Settings.'); return; }
   const myId = currentUser?.id;
   const others = userProfiles.filter(u=>u.id!==myId);
   showModal('💬 New Direct Message', `
@@ -9835,7 +9836,7 @@ function openNewConvModal() {
 }
 
 function openNewGroupModal() {
-  if(!FSYNC.isReady()){ alert('Firebase Cloud Sync must be enabled to use chat. Set it up in Settings.'); return; }
+  if(!FSYNC.isReady()){ alert('Cloud Sync must be enabled to use Messages — ask your system manager to set it up in Settings.'); return; }
   const myId = currentUser?.id;
   const others = userProfiles.filter(u=>u.id!==myId);
   showModal('👥 New Group Chat', `
@@ -9956,7 +9957,7 @@ function showPrivacyPolicy() {
     <div style="font-size:13px;line-height:1.8;color:#374151;max-height:70vh;overflow-y:auto;padding-right:8px">
       <p style="background:#fef3c7;border:1px solid #fde68a;border-radius:6px;padding:10px 14px;margin-bottom:16px;font-size:12px">
         This policy is made available free of charge in compliance with <strong>Australian Privacy Principle 1.5</strong>.
-        Last updated: ${new Date().toLocaleDateString('en-AU',{day:'numeric',month:'long',year:'numeric'})}.
+        Last updated: 6 July 2026.
       </p>
 
       <h3 style="color:var(--primary);margin:16px 0 6px">1. About This Policy (APP 1)</h3>
@@ -10016,7 +10017,7 @@ async function checkFbConnection() {
     if (badge)  { badge.textContent='● Connected'; badge.style.background='#d1fae5'; badge.style.color='#065f46'; }
     if (card)   card.style.borderLeftColor = '#16a34a';
     if (detail) detail.innerHTML = `✅ Connected to project: <strong>${cfg?.projectId}</strong> &nbsp;·&nbsp; Team: <strong>${cfg?.teamId||'worngundidj'}</strong>`;
-    showToast('☁️ Firebase connected!');
+    showToast('☁️ Cloud Sync connected!');
     setTimeout(()=>showPage('settings'), 800);
   } else {
     if (badge)  { badge.textContent='○ Not connected'; badge.style.background='#fee2e2'; badge.style.color='#991b1b'; }
@@ -10057,7 +10058,7 @@ async function inlineConnectFb() {
   if (st) { st.textContent = '⏳ Connecting…'; st.style.color = '#6b7280'; }
   FSYNC.saveCfg(cfg);
   const ok = await FSYNC.init();
-  if (ok) { showToast('☁️ Firebase connected!'); showPage('settings'); }
+  if (ok) { showToast('☁️ Cloud Sync connected!'); showPage('settings'); }
   else {
     if (st) { st.innerHTML = '⚠️ Check the error detail above — it will tell you exactly what to fix in Firebase Console.'; st.style.color = '#dc2626'; }
   }
@@ -10096,7 +10097,7 @@ function loginSaveFb() {
   FSYNC.saveCfg(cfg);
   showToast('Firebase config saved — connecting…');
   FSYNC.init().then(ok => {
-    if (ok) { showToast('☁️ Firebase connected!'); showLoginScreen(); }
+    if (ok) { showToast('☁️ Cloud Sync connected!'); showLoginScreen(); }
     else showToast('⚠️ Could not connect — check your config');
   });
 }
@@ -10117,8 +10118,8 @@ function showLoginScreen() {
       <div style="text-align:center;margin-bottom:24px">
         <img src="${document.querySelector('#sidebar img')?.src||''}" alt="WG" style="height:60px;margin-bottom:12px">
         <h1 style="font-size:20px;font-weight:700;color:var(--primary)">Worn Gundidj CMS</h1>
-        <p style="font-size:13px;color:#6b7280;margin-top:4px">${useFirebase ? 'Sign in with your staff account' : 'Select your name to sign in'}</p>
-        ${useFirebase ? `<p id="login-fb-badge" style="font-size:11px;background:#d1fae5;color:#065f46;border-radius:6px;padding:4px 10px;margin-top:6px;display:inline-block">${fbReady ? '☁️ Secure login via Firebase' : '⏳ Connecting to secure server…'}</p>` : ''}
+        <p style="font-size:13px;color:#6b7280;margin-top:4px">${useFirebase ? 'Client & Case Management — SEWB · AOD · Justice · Disability · FPHO' : 'Select your name to sign in'}</p>
+        ${useFirebase ? `<p id="login-fb-badge" style="font-size:11px;background:#d1fae5;color:#065f46;border-radius:6px;padding:4px 10px;margin-top:6px;display:inline-block">${fbReady ? '🔒 Secure sign-in · Data stored in Australia' : '⏳ Connecting to secure server…'}</p>` : ''}
       </div>
       ${useFirebase ? `
         <div class="form-group" style="margin-bottom:14px">
@@ -10231,7 +10232,7 @@ async function doLogin() {
         'auth/sdk-unavailable':   'Still connecting to the secure server — please wait a moment and try again.',
       };
       if (['auth/wrong-password','auth/invalid-credential','auth/user-not-found'].includes(e.code)) _recordFailedLogin(email);
-      errEl.textContent = msgs[e.code] || ('Error: ' + e.message);
+      console.warn('Login error:', e); errEl.textContent = msgs[e.code] || 'Sign-in failed — please try again. If this keeps happening, contact your system manager.';
     }
     return;
   }
