@@ -905,6 +905,7 @@ function initials(name) { return name.split(' ').filter(Boolean).map(w=>w[0]).sl
 let currentPage = 'dashboard';
 
 function showPage(page) {
+  if(!pageAllowed(page)) { showToast("You don't have access to that section — ask your System Manager."); page = 'dashboard'; }
   currentPage = page;
   // Background refreshes (e.g. sync snapshots) can fire while the login screen
   // has replaced #main — nothing to render onto yet, so bail out safely.
@@ -3921,6 +3922,13 @@ function renderReportsPage() {
         <label>Paste data here</label>
         <textarea id="bulk-paste" style="min-height:180px;font-family:monospace;font-size:12px" placeholder="Paste CSV, Excel rows, or free text here…" oninput="bulkImportPreview()"></textarea>
       </div>
+      <div class="form-group" style="max-width:420px">
+        <label>Import into</label>
+        <select id="bulk-dest" onchange="bulkImportPreview()">
+          <option value="active">Active clients — current caseload</option>
+          <option value="closed">Closed clients — historical / archived records</option>
+        </select>
+      </div>
       <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">
         <button class="btn btn-primary" onclick="bulkImportPreview()">🔍 Preview</button>
         <button class="btn btn-outline" onclick="document.getElementById('bulk-paste').value='';document.getElementById('bulk-preview').innerHTML=''">🗑 Clear</button>
@@ -4323,6 +4331,7 @@ function bulkImportPreview() {
   el.innerHTML = `
     <div style="font-weight:700;font-size:13px;margin-bottom:10px">
       Found <strong>${rows.length}</strong> record${rows.length!==1?'s':''} — review below, then click Import.
+      ${document.getElementById('bulk-dest')?.value==='closed'?`<div style="color:#92400e;margin-top:4px;font-weight:500">📁 These records will be filed straight into <strong>Closed Clients</strong> — they won't appear in the active caseload.</div>`:''}
     </div>
     <div style="overflow-x:auto">
     <table style="width:100%;border-collapse:collapse;font-size:12px">
@@ -4368,11 +4377,12 @@ function bulkImportConfirm() {
   const raw = document.getElementById('bulk-paste')?.value?.trim();
   if(!raw) return;
   const rows = _bulkParseRows(raw);
+  const dest = document.getElementById('bulk-dest')?.value || 'active';
   let added = 0, skipped = 0;
   rows.forEach(r => {
     if(clients.find(c=>c.fullName?.toLowerCase()===r.fullName?.toLowerCase())) { skipped++; return; }
     const newClient = {
-      id: uid(), created: today(), status: 'active', riskLevel: 'medium',
+      id: uid(), created: today(), status: dest==='closed' ? 'closed' : 'active', riskLevel: 'medium',
       fullName: r.fullName || '', preferredName: r.preferredName || '',
       dob: r.dob || '', gender: r.gender || '', phone: r.phone || '',
       email: r.email || '', address: r.address || '', mob: r.mob || '',
@@ -4384,16 +4394,17 @@ function bulkImportConfirm() {
       cultural: r.cultural || false, disability: r.disability || false,
       attachments: [], goalPlan: [], caseNotes: [],
     };
+    if (dest==='closed') { newClient.closedDate = today(); newClient.closedReason = 'Historical record — bulk import'; }
     clients.push(newClient);
-    audit('Bulk imported client', newClient.fullName, newClient.id);
+    audit(dest==='closed' ? 'Bulk imported client (closed/archive)' : 'Bulk imported client', newClient.fullName, newClient.id);
     added++;
   });
   if(added) {
-    saveClients();
-    showToast(`✅ Imported ${added} client${added!==1?'s':''}${skipped?` (${skipped} skipped — already exist)`:''}`);
+    saveAll();
+    showToast(`✅ Imported ${added} client${added!==1?'s':''} into ${dest==='closed'?'Closed Clients':'the active caseload'}${skipped?` (${skipped} skipped — already exist)`:''}`);
     document.getElementById('bulk-paste').value = '';
     document.getElementById('bulk-preview').innerHTML = '';
-    showPage('clients');
+    showPage(dest==='closed' ? 'closedclients' : 'clients');
   } else {
     showToast('No new clients to import — all already exist.', 'warn');
   }
@@ -8982,7 +8993,7 @@ function renderSettings() {
             <tr style="border-bottom:1px solid var(--border)">
               <td style="padding:8px 10px;font-weight:600">${ROLES[u.role]?.icon||'👤'} ${sanitize(u.name)}</td>
               <td style="padding:8px 10px;color:var(--muted)">${sanitize(u.email)||'<em>no email set</em>'}</td>
-              <td style="padding:8px 10px"><span style="background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:2px 8px;font-size:11px">${ROLES[u.role]?.label||u.role}</span></td>
+              <td style="padding:8px 10px"><span style="background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:2px 8px;font-size:11px">${ROLES[u.role]?.label||u.role}</span>${(u.hiddenPages||[]).length?`<div style="font-size:10px;color:#92400e;margin-top:3px">🔒 ${u.hiddenPages.length} section${u.hiddenPages.length!==1?'s':''} hidden</div>`:''}</td>
               <td style="padding:8px 10px">${u.firebaseUid
                 ? '<span style="color:#16a34a;font-size:12px">✓ Linked</span>'
                 : '<span style="color:#d97706;font-size:12px">○ Not linked</span>'}</td>
@@ -9442,9 +9453,9 @@ async function createStaffAccount() {
       userProfiles.push({ id: cred.user.uid, name, email, role, firebaseUid: cred.user.uid });
     }
     saveUserProfiles();
-    if(FSYNC.isReady()) FSYNC.push('userProfiles', userProfiles);
+    /* userProfiles stay per-device; section access syncs via the userAccess collection */
     showToast(`✓ Account created for ${name}`);
-    navigate('settings');
+    showPage('settings');
     return true;
   } catch(e) {
     const msgs = {
@@ -9468,8 +9479,19 @@ function openEditStaffModal(userId) {
       <div class="form-group"><label>Reset Password (leave blank to keep)</label>
         <input type="password" id="se-pass" placeholder="New password (8+ chars)"></div>
     </div>
+    ${currentUser?.role==='sysmanager' ? `
+    <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px">
+      <label style="font-weight:700;font-size:13px">🔒 Section access</label>
+      <p style="font-size:12px;color:var(--muted);margin:4px 0 10px">Ticked sections are visible to ${sanitize(u.name)}. Untick anything they should not see — hidden sections disappear from their menu and are blocked if opened directly. System Managers always see everything.</p>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:6px">
+        ${Object.entries(RESTRICTABLE_PAGES).map(([k,label])=>`
+          <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:400;margin:0">
+            <input type="checkbox" class="se-page" value="${k}" ${(u.hiddenPages||[]).includes(k)?'':'checked'}> ${label}
+          </label>`).join('')}
+      </div>
+    </div>` : ''}
     <p id="se-error" style="color:#dc2626;font-size:13px;margin-top:8px;min-height:18px"></p>`;
-  showModal('✏️ Edit Staff — ' + u.name, html, ()=>saveStaffEdit(userId), '560px');
+  showModal('✏️ Edit Staff — ' + u.name, html, ()=>saveStaffEdit(userId), '640px');
 }
 
 async function saveStaffEdit(userId) {
@@ -9481,19 +9503,30 @@ async function saveStaffEdit(userId) {
   const errEl = document.getElementById('se-error');
   if(!name){errEl.textContent='Name is required';return false;}
   u.name=name; u.email=email||u.email; u.role=role;
+  const pageBoxes = [...document.querySelectorAll('.se-page')];
+  if (pageBoxes.length && currentUser?.role==='sysmanager') {
+    u.hiddenPages = pageBoxes.filter(b=>!b.checked).map(b=>b.value);
+    if (u.email && FSYNC.isReady()) {
+      _accessDocRef(u.email)?.set({
+        email: u.email.toLowerCase(), hiddenPages: u.hiddenPages,
+        updatedBy: currentUser?.name||'', updatedAt: new Date().toISOString(),
+      }).catch(e=>console.warn('Access-rule sync failed:', e.message));
+    }
+    if (u.hiddenPages.length) audit('Section access changed', `${u.name}: hidden — ${u.hiddenPages.join(', ')}`);
+  }
   if(pass && pass.length>=8 && u.firebaseUid) {
     errEl.textContent='Updating password…';
     // Password reset via Firebase requires Admin SDK; instruct user to use Firebase console
     errEl.style.color='#d97706';
     errEl.textContent='⚠️ To reset a password, go to Firebase Console → Authentication → Users → Reset password. Profile saved.';
     saveUserProfiles();
-    if(FSYNC.isReady()) FSYNC.push('userProfiles', userProfiles);
+    /* userProfiles stay per-device; section access syncs via the userAccess collection */
     return false; // keep modal open so user can see the message
   }
   saveUserProfiles();
-  if(FSYNC.isReady()) FSYNC.push('userProfiles', userProfiles);
+  /* userProfiles stay per-device; section access syncs via the userAccess collection */
   showToast('Staff profile updated ✓');
-  navigate('settings');
+  showPage('settings');
   return true;
 }
 
@@ -9502,9 +9535,9 @@ function removeStaffAccount(userId) {
   if(!confirm(`Remove ${sanitize(u.name)} from the CMS?\n\nThis removes their profile from this system. Their Firebase Authentication account will remain — delete it from the Firebase Console if needed.`)) return;
   userProfiles = userProfiles.filter(p=>p.id!==userId);
   saveUserProfiles();
-  if(FSYNC.isReady()) FSYNC.push('userProfiles', userProfiles);
+  /* userProfiles stay per-device; section access syncs via the userAccess collection */
   showToast(`${sanitize(u.name)} removed from CMS`);
-  navigate('settings');
+  showPage('settings');
 }
 
 // ── Encrypted backup helpers (WebCrypto AES-GCM + PBKDF2) ───────────────────
@@ -10299,6 +10332,12 @@ async function doLogin() {
           saveUserProfiles();
         }
       } catch(_) {}
+      // Pull this person's section-access rules (set by the System Manager)
+      // so restrictions follow them onto any device they sign in from.
+      try {
+        const acc = await _accessDocRef(email)?.get();
+        if (acc && acc.exists) { u.hiddenPages = acc.data().hiddenPages || []; saveUserProfiles(); }
+      } catch(_) {}
       _clearFailedLogins(email); saveCurrentUser(u); _auditLogin(u); initApp();
     } catch(e) {
       btn.disabled=false; btn.textContent='Sign In →';
@@ -10460,6 +10499,43 @@ function canAccess(feature) {
   return true;
 }
 
+// ===== PER-USER SECTION ACCESS =====
+// The System Manager can hide whole sections of the CMS from individual staff
+// (Settings → Staff Accounts → Edit). Choices are stored on the profile AND in
+// the synced teams/{team}/userAccess collection, so they follow the person to
+// any device they sign in on. System Managers always see everything.
+const RESTRICTABLE_PAGES = {
+  referrals:'Referral Holding Bay', clients:'Clients', closedclients:'Closed Clients',
+  sessions:'Session Log', sewb:'SEWB Program', aod:'AOD Program', justice:'Justice Program',
+  cultural:'Cultural Strengthening', disability:'Disability Program',
+  workfoundations:'Work Foundations', homeownership:'First Peoples Home Ownership',
+  chat:'Messages', calendar:'Calendar', resources:'Resources', reports:'Reports', auditlog:'Audit Log',
+};
+function _myHiddenPages(){
+  if(!currentUser || currentUser.role==='sysmanager') return [];
+  const prof = userProfiles.find(p=>p.id===currentUser.id || (currentUser.email && p.email===currentUser.email));
+  return (prof?.hiddenPages) || currentUser.hiddenPages || [];
+}
+function pageAllowed(page){ return !_myHiddenPages().includes(page); }
+// Hide restricted sections from the sidebar and the mobile tab bar.
+function applyNavRestrictions(){
+  const hidden = _myHiddenPages();
+  document.querySelectorAll('.nav-item, .mob-tab').forEach(el=>{
+    const m = (el.getAttribute('onclick')||'').match(/showPage\('([^']+)'\)/);
+    el.style.display = (m && hidden.includes(m[1])) ? 'none' : '';
+  });
+}
+// Synced storage for access rules (doc per email) so restrictions set by the
+// System Manager reach the staff member's own device at their next login.
+function _accessDocRef(email){
+  try {
+    if(!window.firebase || !firebase.firestore || !email) return null;
+    const teamId = FSYNC.getCfg()?.teamId || 'worngundidj';
+    const key = email.toLowerCase().trim().replace(/[^a-z0-9@._+-]/g,'_');
+    return firebase.firestore().collection('teams').doc(teamId).collection('userAccess').doc(key);
+  } catch(e){ return null; }
+}
+
 // ===== VOICE TO TEXT =====
 const _voiceSupported = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
 let _voiceActive = null;
@@ -10536,6 +10612,7 @@ function _observeVoice() {
 function initApp() {
   // Reveal the app chrome (sidebar, topbar, mobile nav) now that the user is authenticated.
   document.body.classList.add('app-authed');
+  applyNavRestrictions();
   const sidebar = document.getElementById('sidebar');
   const main = document.getElementById('main');
 

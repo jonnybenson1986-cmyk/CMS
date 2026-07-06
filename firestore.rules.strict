@@ -98,6 +98,13 @@ service cloud.firestore {
       allow delete: if false;                        // nobody — not even sysmanager
     }
 
+    // Per-user section-access rules (which CMS pages are hidden from whom).
+    // Set only by the System Manager in Settings → Staff Accounts → Edit.
+    match /teams/{teamId}/userAccess/{id} {
+      allow read: if signedIn();
+      allow write: if isSys();
+    }
+
     // Role mirror: written exclusively by the Cloud Functions (Admin SDK
     // bypasses rules). Clients may read it, never write it.
     match /teams/{teamId}/roles/{uid} {
