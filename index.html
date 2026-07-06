@@ -9469,20 +9469,68 @@ function removeStaffAccount(userId) {
   navigate('settings');
 }
 
-function exportData() {
-  audit('Exported data', `${clients.length} clients, ${notes.length} notes`);
+// ── Encrypted backup helpers (WebCrypto AES-GCM + PBKDF2) ───────────────────
+// Client PHI must not leave the app as a plain-text file. Exports are encrypted
+// with a password the user sets; imports transparently decrypt. Base64 is
+// chunked so large datasets don't overflow the call stack.
+function _b64enc(buf){ let s='', b=new Uint8Array(buf); const CH=0x8000; for(let i=0;i<b.length;i+=CH){ s+=String.fromCharCode.apply(null, b.subarray(i,i+CH)); } return btoa(s); }
+function _b64dec(str){ return Uint8Array.from(atob(str), c=>c.charCodeAt(0)); }
+async function _deriveExportKey(pw, salt){
+  const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(pw), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey({ name:'PBKDF2', salt, iterations:250000, hash:'SHA-256' },
+    base, { name:'AES-GCM', length:256 }, false, ['encrypt','decrypt']);
+}
+async function _encryptExport(plaintext, pw){
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const iv   = crypto.getRandomValues(new Uint8Array(12));
+  const key  = await _deriveExportKey(pw, salt);
+  const ct   = await crypto.subtle.encrypt({ name:'AES-GCM', iv }, key, new TextEncoder().encode(plaintext));
+  return { _wgenc:1, alg:'AES-GCM', kdf:'PBKDF2-SHA256', iter:250000,
+           salt:_b64enc(salt), iv:_b64enc(iv), data:_b64enc(ct) };
+}
+async function _decryptExport(env, pw){
+  const key = await _deriveExportKey(pw, _b64dec(env.salt));
+  const pt  = await crypto.subtle.decrypt({ name:'AES-GCM', iv:_b64dec(env.iv) }, key, _b64dec(env.data));
+  return new TextDecoder().decode(pt);
+}
+
+async function exportData() {
   const data = { clients, notes, timeLogs, exportDate: now() };
-  const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
+  const json = JSON.stringify(data, null, 2);
+  const pw = prompt('Set a password to encrypt this backup.\n\nThis file contains client health information — leave blank only if you understand it will be UNENCRYPTED.');
+  if (pw === null) return; // cancelled
+  let blob, name;
+  if (pw) {
+    if (!crypto?.subtle) { alert('This browser cannot encrypt exports (needs HTTPS + WebCrypto).'); return; }
+    try {
+      const env = await _encryptExport(json, pw);
+      blob = new Blob([JSON.stringify(env)], {type:'application/json'});
+      name = `wg-cms-backup-${today()}.wgenc.json`;
+    } catch(err) { alert('Encryption failed: ' + err.message); return; }
+    audit('Exported data (encrypted)', `${clients.length} clients, ${notes.length} notes`);
+  } else {
+    if (!confirm('Export WITHOUT encryption?\n\nThe file will hold client health information in plain text — anyone who opens it can read every record.')) return;
+    blob = new Blob([json], {type:'application/json'});
+    name = `sewb-cms-export-${today()}.json`;
+    audit('Exported data (UNENCRYPTED)', `${clients.length} clients, ${notes.length} notes`);
+  }
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-  a.download = `sewb-cms-export-${today()}.json`; a.click();
+  a.download = name; a.click();
 }
 
 function importData(e) {
   const file = e.target.files[0]; if(!file) return;
   const reader = new FileReader();
-  reader.onload = ev => {
+  reader.onload = async ev => {
     try {
-      const data = JSON.parse(ev.target.result);
+      let parsed = JSON.parse(ev.target.result);
+      if (parsed && parsed._wgenc) {              // encrypted backup — decrypt first
+        const pw = prompt('This backup is encrypted. Enter its password:');
+        if (pw === null) return;
+        try { parsed = JSON.parse(await _decryptExport(parsed, pw)); }
+        catch { alert('Wrong password, or the file is corrupted.'); return; }
+      }
+      const data = parsed;
       if(data.clients) clients = data.clients;
       if(data.notes) notes = data.notes;
       if(data.timeLogs) timeLogs = data.timeLogs;
@@ -10159,6 +10207,18 @@ async function doLogin() {
       } else {
         u.firebaseUid = cred.user.uid;
       }
+      // Server-set role wins: once the role Cloud Function is deployed
+      // (SECURITY-DEPLOY.md), the signed token carries {role, name} custom
+      // claims that a devtools localStorage edit can't forge. No claims yet
+      // (functions not deployed) → keep the local profile role as before.
+      try {
+        const tok = await cred.user.getIdTokenResult();
+        if (tok.claims && tok.claims.role) {
+          u.role = tok.claims.role;
+          if (tok.claims.name) u.name = tok.claims.name;
+          saveUserProfiles();
+        }
+      } catch(_) {}
       _clearFailedLogins(email); saveCurrentUser(u); _auditLogin(u); initApp();
     } catch(e) {
       btn.disabled=false; btn.textContent='Sign In →';

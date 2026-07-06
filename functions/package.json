@@ -1,0 +1,11 @@
+{
+  "name": "wg-cms-functions",
+  "description": "Worn Gundidj CMS — role management Cloud Functions (custom claims)",
+  "engines": { "node": "20" },
+  "main": "index.js",
+  "dependencies": {
+    "firebase-admin": "^12.0.0",
+    "firebase-functions": "^5.0.0"
+  },
+  "private": true
+}
