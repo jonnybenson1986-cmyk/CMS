@@ -639,6 +639,37 @@ const FSYNC = (() => {
   async function pushAudit()    { await _batch('auditlog',auditLog,a=>a.id); }
   async function deleteDoc(colName,id) { if(db&&id) col(colName).doc(id).delete().catch(()=>{}); }
 
+  // ── GO-LIVE RESET helpers ──────────────────────────────────────────────────
+  // Delete every document in the named team collections (batched, 400/commit).
+  // Only used by the sysmanager Go-Live Reset: clearing local data alone is not
+  // enough, because the cloud copy would sync straight back on next login.
+  async function wipeCollections(names){
+    if(!db) throw new Error('Cloud Sync is not connected');
+    let deleted = 0;
+    for (const name of names){
+      const snap = await col(name).get();
+      for (let i=0; i<snap.docs.length; i+=400){
+        const batch = db.batch();
+        snap.docs.slice(i,i+400).forEach(d=>batch.delete(d.ref));
+        await batch.commit();
+      }
+      deleted += snap.docs.length;
+    }
+    return deleted;
+  }
+  // Recursively delete every file under teams/{team}/{folder} in Cloud Storage.
+  async function wipeStorageFolder(folder){
+    if(!storageReady()) return 0;
+    let n = 0;
+    async function walk(ref){
+      const res = await ref.listAll();
+      for (const item of res.items){ await item.delete().catch(()=>{}); n++; }
+      for (const p of res.prefixes){ await walk(p); }
+    }
+    await walk(_storageRef(folder));
+    return n;
+  }
+
   // ===== FIREBASE STORAGE (large files: client attachments, resources) =====
   // Files go to the cloud bucket instead of being base64-stuffed into the
   // record, so storage is effectively unlimited and shared across all staff.
@@ -742,7 +773,7 @@ const FSYNC = (() => {
   }
 
   return { init, isReady, pushAll, pushClients, pushNotes, pushReferrals, pushWorkers, pushTasks, pushAudit, pushBrokerage, deleteDoc, getCfg, saveCfg, showSetupModal, clearConfig,
-    storageReady, uploadFile, deleteStorageFile, getStorageURL };
+    storageReady, uploadFile, deleteStorageFile, getStorageURL, wipeCollections, wipeStorageFolder };
 })();
 
 let clients = DB.load('clients', []);
@@ -8975,8 +9006,14 @@ function renderSettings() {
       <button class="btn btn-outline" onclick="exportData()">🔒 Export Encrypted Backup</button>
       <button class="btn btn-outline" onclick="document.getElementById('import-file').click()">📥 Import Data</button>
       <input type="file" id="import-file" accept=".json" style="display:none" onchange="importData(event)">
-      <button class="btn btn-danger" onclick="clearData()">🗑️ Clear All Data</button>
+      <button class="btn btn-danger" onclick="clearData()">🗑️ Clear Local Data (this device only)</button>
     </div>
+    ${currentUser?.role==='sysmanager' ? `
+    <div style="margin-top:16px;padding:14px;border:1px solid #fecaca;background:#fef2f2;border-radius:8px">
+      <div style="font-weight:700;font-size:13px;color:#991b1b;margin-bottom:6px">🚀 Going live?</div>
+      <p style="font-size:12.5px;color:#7f1d1d;margin-bottom:10px">The Go-Live Reset permanently removes <strong>all</strong> training/practice data — every client, note, session, referral, task, chat message, audit entry and client file — from this device <strong>and the cloud</strong>, so real records start clean. Staff accounts, org settings, the workers list and the resources library are kept. System Manager only; asks for typed confirmation.</p>
+      <button class="btn btn-danger" onclick="goLiveReset()">🚀 Go-Live Reset — remove ALL training data</button>
+    </div>` : ''}
   </div>
 
   <div class="card">
@@ -9543,10 +9580,52 @@ function importData(e) {
 }
 
 function clearData() {
-  if(!confirm('This will permanently delete ALL client data. Are you sure?')) return;
-  if(!confirm('This cannot be undone. Delete everything?')) return;
-  audit('Cleared all data', `Deleted ${clients.length} clients, ${notes.length} notes`);
-  clients=[]; notes=[]; timeLogs=[]; saveAll(); showToast('Data cleared'); showPage('dashboard');
+  if(!confirm('This clears client data from THIS DEVICE ONLY — if Cloud Sync is connected, the records will download again at next login.\n\nFor a permanent wipe of training data before go-live, use the Go-Live Reset instead.\n\nClear this device now?')) return;
+  if(!confirm('This cannot be undone on this device. Continue?')) return;
+  audit('Cleared local data', `Removed ${clients.length} clients, ${notes.length} notes from this device`);
+  clients=[]; notes=[]; timeLogs=[]; saveAll(); showToast('Local data cleared'); showPage('dashboard');
+}
+
+// ===== GO-LIVE RESET =====
+// Permanently removes ALL client/training data from this device AND the cloud
+// (Firestore collections + client files in Storage) so the system can go live
+// clean. Keeps: staff accounts & profiles, org settings, workers list, the
+// resources library, and Cloud Sync configuration.
+async function goLiveReset(){
+  if (currentUser?.role !== 'sysmanager'){ showToast('Only the System Manager can run the Go-Live Reset'); return; }
+  if (!FSYNC.isReady()){
+    alert('Cloud Sync must be connected (and you signed in) before running the Go-Live Reset — otherwise the cloud copy survives and the training data downloads again at next login.');
+    return;
+  }
+  const counts = `${clients.length} clients, ${notes.length} notes, ${timeLogs.length} sessions, ${referrals.length} referrals`;
+  if (!confirm(`GO-LIVE RESET\n\nThis permanently deletes ALL client data — ${counts}, plus tasks, chat messages, the audit log and every client file — from this device AND the cloud.\n\nKept: staff accounts, org settings, workers list, resources library.\n\nContinue?`)) return;
+  const typed = prompt('This cannot be undone. Type DELETE ALL to confirm:');
+  if (typed !== 'DELETE ALL'){ showToast('Go-Live Reset cancelled'); return; }
+
+  showToast('🧹 Removing training data — please keep this tab open…');
+  try {
+    // 1. Cloud database (batched deletes; workersList deliberately kept)
+    const docsGone = await FSYNC.wipeCollections(['clients','notes','timelogs','referrals','workflowTasks','chatConvs','chatMsgs','auditlog']);
+    // 2. Client files in Cloud Storage (resources library kept)
+    let filesGone = 0;
+    for (const folder of ['clients','fpho','sessions']) {
+      filesGone += await FSYNC.wipeStorageFolder(folder).catch(()=>0);
+    }
+    // 3. This device
+    clients=[]; notes=[]; timeLogs=[]; referrals=[]; workflowTasks=[];
+    fphoApplications=[]; fphoClients=[]; walkins=[]; calEvents=[]; noticeboards=[]; adminNotes=''; auditLog=[];
+    ['clients','notes','timelogs','referrals','workflowTasks','fphoApplications','fphoClients','walkins','calevents','noticeboards','adminnotes','auditlog','reminders']
+      .forEach(k=>DB.save(k, k==='adminnotes' ? '' : []));
+    // 4. Start the live audit trail with the reset itself
+    audit('Go-Live Reset', `Removed ${docsGone} cloud records and ${filesGone} client files. System is now live.`);
+    FSYNC.pushAudit();
+    showToast(`✅ Go-Live Reset complete — ${docsGone} records and ${filesGone} files removed`);
+    alert('Go-Live Reset complete.\n\nIMPORTANT: ask every staff member to sign out and sign back in on their devices — signing out clears the old training data from their browsers.');
+    showPage('dashboard');
+  } catch(e){
+    console.warn('Go-Live Reset error:', e);
+    alert('The reset could not finish: ' + (e.message||'unknown error') + '\n\nNothing more was deleted. Please try again, or run it from a device with a stable connection.');
+  }
 }
 
 // ===== DEMO / TRAINING DATA =====
