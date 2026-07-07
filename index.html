@@ -10562,12 +10562,12 @@ function _afN(id,label,w){ return '<div class="form-group" style="max-width:'+(w
 function _afA(id,label,r){ return '<div class="form-group"><label>'+label+'</label><textarea data-f="'+id+'" rows="'+(r||2)+'"></textarea></div>'; }
 function _afR(id,label,opts,vals){ // radio row; vals optional parallel values
   return '<div class="form-group"><label>'+label+'</label><div style="display:flex;gap:14px;flex-wrap:wrap;padding:4px 0">'+
-    opts.map(function(o,i){ var v = vals?vals[i]:o; return '<label style="display:flex;gap:5px;align-items:center;font-weight:400;font-size:13px;margin:0"><input type="radio" name="f_'+id+'" data-f="'+id+'" value="'+v+'">'+o+'</label>'; }).join('')+'</div></div>';
+    opts.map(function(o,i){ var v = vals?vals[i]:o; return '<label class="aodf-opt" style="margin:0 !important"><input type="radio" name="f_'+id+'" data-f="'+id+'" value="'+v+'"> <span>'+o+'</span></label>'; }).join('')+'</div></div>';
 }
 function _afYN(id,label){ return _afR(id,label,['Yes','No']); }
-function _afC(id,label){ return '<label style="display:flex;gap:6px;align-items:center;font-weight:400;font-size:13px;margin:4px 0"><input type="checkbox" data-f="'+id+'"> '+label+'</label>'; }
+function _afC(id,label){ return '<label class="aodf-opt"><input type="checkbox" data-f="'+id+'"> <span>'+label+'</span></label>'; }
 function _afScale(id,label){ // 0-10 poor→good
-  var cells=''; for(var i=0;i<=10;i++) cells+='<label style="display:flex;flex-direction:column;align-items:center;font-size:11px;font-weight:400;margin:0"><input type="radio" name="f_'+id+'" data-f="'+id+'" value="'+i+'">'+i+'</label>';
+  var cells=''; for(var i=0;i<=10;i++) cells+='<label class="aodf-scale"><input type="radio" name="f_'+id+'" data-f="'+id+'" value="'+i+'">'+i+'</label>';
   return '<div class="form-group"><label>'+label+'</label><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span style="font-size:11px;color:var(--muted)">POOR</span>'+cells+'<span style="font-size:11px;color:var(--muted)">GOOD</span></div></div>';
 }
 function _afSec(title,inner){ return '<div class="card" style="margin-bottom:16px"><div class="card-title" style="margin-bottom:12px">'+title+'</div>'+inner+'</div>'; }
@@ -10588,7 +10588,7 @@ function _afGridRows(rows){
   return rows.map(function(r){
     var opts=r[2], vals=r[3]||opts.map(function(_,i){return i;});
     return '<div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px"><div style="font-size:13px;font-weight:600;margin-bottom:6px">'+r[1]+'</div><div style="display:flex;gap:12px;flex-wrap:wrap">'+
-      opts.map(function(o,i){ return '<label style="display:flex;gap:5px;align-items:center;font-weight:400;font-size:12.5px;margin:0"><input type="radio" name="f_'+r[0]+'" data-f="'+r[0]+'" value="'+vals[i]+'">'+o+' <span style="color:var(--muted);font-size:10px">('+vals[i]+')</span></label>'; }).join('')+'</div></div>';
+      opts.map(function(o,i){ return '<label class="aodf-opt" style="margin:0 !important"><input type="radio" name="f_'+r[0]+'" data-f="'+r[0]+'" value="'+vals[i]+'"> <span>'+o+' <em style="color:var(--muted);font-size:10px;font-style:normal">('+vals[i]+')</em></span></label>'; }).join('')+'</div></div>';
   }).join('');
 }
 // free-text table: rows[[id,label]], cols[[suffix,label,width]]
@@ -10653,6 +10653,13 @@ function openAODForm(type){
         '<button class="btn btn-outline" onclick="printAODForm()">🖨️ Print</button>'+
         '<button class="btn btn-primary" onclick="saveAODForm()">💾 Save Form</button>'+
       '</div></div>'+
+    '<style>'+
+      '#aodform-root .aodf-opt{display:flex !important;gap:7px;align-items:center;justify-content:flex-start !important;font-weight:400 !important;font-size:13px !important;text-transform:none !important;letter-spacing:0 !important;color:var(--text) !important;margin:4px 0 !important;cursor:pointer;line-height:1.4}'+
+      '#aodform-root .aodf-opt input{width:auto !important;min-width:0 !important;margin:0 !important;flex:0 0 auto;accent-color:#2d6a4f}'+
+      '#aodform-root .aodf-scale{display:flex !important;flex-direction:column;align-items:center;font-size:11px !important;font-weight:400 !important;text-transform:none !important;letter-spacing:0 !important;color:var(--text) !important;margin:0 !important;cursor:pointer}'+
+      '#aodform-root .aodf-scale input{width:auto !important;margin:0 0 3px !important}'+
+      '#aodform-root table input[type=radio]{width:auto !important;margin:0 !important}'+
+    '</style>'+
     '<div id="aodform-root">'+builder()+'</div>'+
     '<div class="no-print" style="margin:16px 0"><button class="btn btn-primary" onclick="saveAODForm()">💾 Save Form</button></div>';
   _aodPopulate(saved ? saved.data : _aodPrefill(c));
@@ -10727,7 +10734,7 @@ function printAODForm(){
     else if(el.tagName==='TEXTAREA'){ el.textContent=el.value; }
     else { el.setAttribute('value',el.value); }
   });
-  var css='<style>#aodform-root input[type=text],#aodform-root input:not([type]),#aodform-root input[type=date],#aodform-root input[type=number]{border:none;border-bottom:1px solid #999;font:inherit;background:none} #aodform-root textarea{border:1px solid #bbb;font:inherit;width:100%} .card{border:1px solid #ddd;border-radius:8px;padding:12px;margin-bottom:12px;page-break-inside:avoid} .card-title{font-weight:700;margin-bottom:8px} label{font-size:11px} table{page-break-inside:avoid}</style>';
+  var css='<style>#aodform-root .aodf-opt{display:flex;gap:7px;align-items:center;font-weight:400;font-size:12px;text-transform:none;margin:3px 0}#aodform-root .aodf-opt input{width:auto;margin:0}#aodform-root .aodf-scale{display:inline-flex;flex-direction:column;align-items:center;font-size:10px;margin:0 4px}#aodform-root input[type=text],#aodform-root input:not([type]),#aodform-root input[type=date],#aodform-root input[type=number]{border:none;border-bottom:1px solid #999;font:inherit;background:none} #aodform-root textarea{border:1px solid #bbb;font:inherit;width:100%} .card{border:1px solid #ddd;border-radius:8px;padding:12px;margin-bottom:12px;page-break-inside:avoid} .card-title{font-weight:700;margin-bottom:8px} label{font-size:11px} table{page-break-inside:avoid}</style>';
   openReport(reportHeader(AODF_TITLES[_aodForm.type], 'Victorian AOD Intake & Assessment suite', c?c.fullName:'') + css + '<div id="aodform-root">'+document.getElementById('aodform-root').innerHTML+'</div>');
 }
 
