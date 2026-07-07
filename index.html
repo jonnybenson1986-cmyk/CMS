@@ -905,6 +905,7 @@ function initials(name) { return name.split(' ').filter(Boolean).map(w=>w[0]).sl
 let currentPage = 'dashboard';
 
 function showPage(page) {
+  if(!pageAllowed(page)) { showToast("You don't have access to that section — ask your System Manager."); page = 'dashboard'; }
   currentPage = page;
   // Background refreshes (e.g. sync snapshots) can fire while the login screen
   // has replaced #main — nothing to render onto yet, so bail out safely.
@@ -3433,6 +3434,7 @@ function renderAOD() {
     <div class="stat-card"><div class="label">High Risk</div><div class="value" style="color:var(--danger)">${aodClients.filter(c=>c.riskLevel==='high').length}</div></div>
     <div class="stat-card"><div class="label">AOD Notes</div><div class="value">${notes.filter(n=>n.type==='aod').length}</div></div>
   </div>
+  ${_aodFormsCard(aodClients)}
   <div class="card" style="padding:0;overflow:hidden">
     <div style="padding:16px 20px;font-weight:600;border-bottom:1px solid var(--border)">AOD Client List</div>
     <div class="table-wrap"><table>
@@ -3921,6 +3923,13 @@ function renderReportsPage() {
         <label>Paste data here</label>
         <textarea id="bulk-paste" style="min-height:180px;font-family:monospace;font-size:12px" placeholder="Paste CSV, Excel rows, or free text here…" oninput="bulkImportPreview()"></textarea>
       </div>
+      <div class="form-group" style="max-width:420px">
+        <label>Import into</label>
+        <select id="bulk-dest" onchange="bulkImportPreview()">
+          <option value="active">Active clients — current caseload</option>
+          <option value="closed">Closed clients — historical / archived records</option>
+        </select>
+      </div>
       <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">
         <button class="btn btn-primary" onclick="bulkImportPreview()">🔍 Preview</button>
         <button class="btn btn-outline" onclick="document.getElementById('bulk-paste').value='';document.getElementById('bulk-preview').innerHTML=''">🗑 Clear</button>
@@ -4323,6 +4332,7 @@ function bulkImportPreview() {
   el.innerHTML = `
     <div style="font-weight:700;font-size:13px;margin-bottom:10px">
       Found <strong>${rows.length}</strong> record${rows.length!==1?'s':''} — review below, then click Import.
+      ${document.getElementById('bulk-dest')?.value==='closed'?`<div style="color:#92400e;margin-top:4px;font-weight:500">📁 These records will be filed straight into <strong>Closed Clients</strong> — they won't appear in the active caseload.</div>`:''}
     </div>
     <div style="overflow-x:auto">
     <table style="width:100%;border-collapse:collapse;font-size:12px">
@@ -4368,11 +4378,12 @@ function bulkImportConfirm() {
   const raw = document.getElementById('bulk-paste')?.value?.trim();
   if(!raw) return;
   const rows = _bulkParseRows(raw);
+  const dest = document.getElementById('bulk-dest')?.value || 'active';
   let added = 0, skipped = 0;
   rows.forEach(r => {
     if(clients.find(c=>c.fullName?.toLowerCase()===r.fullName?.toLowerCase())) { skipped++; return; }
     const newClient = {
-      id: uid(), created: today(), status: 'active', riskLevel: 'medium',
+      id: uid(), created: today(), status: dest==='closed' ? 'closed' : 'active', riskLevel: 'medium',
       fullName: r.fullName || '', preferredName: r.preferredName || '',
       dob: r.dob || '', gender: r.gender || '', phone: r.phone || '',
       email: r.email || '', address: r.address || '', mob: r.mob || '',
@@ -4384,16 +4395,17 @@ function bulkImportConfirm() {
       cultural: r.cultural || false, disability: r.disability || false,
       attachments: [], goalPlan: [], caseNotes: [],
     };
+    if (dest==='closed') { newClient.closedDate = today(); newClient.closedReason = 'Historical record — bulk import'; }
     clients.push(newClient);
-    audit('Bulk imported client', newClient.fullName, newClient.id);
+    audit(dest==='closed' ? 'Bulk imported client (closed/archive)' : 'Bulk imported client', newClient.fullName, newClient.id);
     added++;
   });
   if(added) {
-    saveClients();
-    showToast(`✅ Imported ${added} client${added!==1?'s':''}${skipped?` (${skipped} skipped — already exist)`:''}`);
+    saveAll();
+    showToast(`✅ Imported ${added} client${added!==1?'s':''} into ${dest==='closed'?'Closed Clients':'the active caseload'}${skipped?` (${skipped} skipped — already exist)`:''}`);
     document.getElementById('bulk-paste').value = '';
     document.getElementById('bulk-preview').innerHTML = '';
-    showPage('clients');
+    showPage(dest==='closed' ? 'closedclients' : 'clients');
   } else {
     showToast('No new clients to import — all already exist.', 'warn');
   }
@@ -8982,7 +8994,7 @@ function renderSettings() {
             <tr style="border-bottom:1px solid var(--border)">
               <td style="padding:8px 10px;font-weight:600">${ROLES[u.role]?.icon||'👤'} ${sanitize(u.name)}</td>
               <td style="padding:8px 10px;color:var(--muted)">${sanitize(u.email)||'<em>no email set</em>'}</td>
-              <td style="padding:8px 10px"><span style="background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:2px 8px;font-size:11px">${ROLES[u.role]?.label||u.role}</span></td>
+              <td style="padding:8px 10px"><span style="background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:2px 8px;font-size:11px">${ROLES[u.role]?.label||u.role}</span>${(u.hiddenPages||[]).length?`<div style="font-size:10px;color:#92400e;margin-top:3px">🔒 ${u.hiddenPages.length} section${u.hiddenPages.length!==1?'s':''} hidden</div>`:''}</td>
               <td style="padding:8px 10px">${u.firebaseUid
                 ? '<span style="color:#16a34a;font-size:12px">✓ Linked</span>'
                 : '<span style="color:#d97706;font-size:12px">○ Not linked</span>'}</td>
@@ -9442,9 +9454,9 @@ async function createStaffAccount() {
       userProfiles.push({ id: cred.user.uid, name, email, role, firebaseUid: cred.user.uid });
     }
     saveUserProfiles();
-    if(FSYNC.isReady()) FSYNC.push('userProfiles', userProfiles);
+    /* userProfiles stay per-device; section access syncs via the userAccess collection */
     showToast(`✓ Account created for ${name}`);
-    navigate('settings');
+    showPage('settings');
     return true;
   } catch(e) {
     const msgs = {
@@ -9468,8 +9480,19 @@ function openEditStaffModal(userId) {
       <div class="form-group"><label>Reset Password (leave blank to keep)</label>
         <input type="password" id="se-pass" placeholder="New password (8+ chars)"></div>
     </div>
+    ${currentUser?.role==='sysmanager' ? `
+    <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px">
+      <label style="font-weight:700;font-size:13px">🔒 Section access</label>
+      <p style="font-size:12px;color:var(--muted);margin:4px 0 10px">Ticked sections are visible to ${sanitize(u.name)}. Untick anything they should not see — hidden sections disappear from their menu and are blocked if opened directly. System Managers always see everything.</p>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:6px">
+        ${Object.entries(RESTRICTABLE_PAGES).map(([k,label])=>`
+          <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:400;margin:0">
+            <input type="checkbox" class="se-page" value="${k}" ${(u.hiddenPages||[]).includes(k)?'':'checked'}> ${label}
+          </label>`).join('')}
+      </div>
+    </div>` : ''}
     <p id="se-error" style="color:#dc2626;font-size:13px;margin-top:8px;min-height:18px"></p>`;
-  showModal('✏️ Edit Staff — ' + u.name, html, ()=>saveStaffEdit(userId), '560px');
+  showModal('✏️ Edit Staff — ' + u.name, html, ()=>saveStaffEdit(userId), '640px');
 }
 
 async function saveStaffEdit(userId) {
@@ -9481,19 +9504,30 @@ async function saveStaffEdit(userId) {
   const errEl = document.getElementById('se-error');
   if(!name){errEl.textContent='Name is required';return false;}
   u.name=name; u.email=email||u.email; u.role=role;
+  const pageBoxes = [...document.querySelectorAll('.se-page')];
+  if (pageBoxes.length && currentUser?.role==='sysmanager') {
+    u.hiddenPages = pageBoxes.filter(b=>!b.checked).map(b=>b.value);
+    if (u.email && FSYNC.isReady()) {
+      _accessDocRef(u.email)?.set({
+        email: u.email.toLowerCase(), hiddenPages: u.hiddenPages,
+        updatedBy: currentUser?.name||'', updatedAt: new Date().toISOString(),
+      }).catch(e=>console.warn('Access-rule sync failed:', e.message));
+    }
+    if (u.hiddenPages.length) audit('Section access changed', `${u.name}: hidden — ${u.hiddenPages.join(', ')}`);
+  }
   if(pass && pass.length>=8 && u.firebaseUid) {
     errEl.textContent='Updating password…';
     // Password reset via Firebase requires Admin SDK; instruct user to use Firebase console
     errEl.style.color='#d97706';
     errEl.textContent='⚠️ To reset a password, go to Firebase Console → Authentication → Users → Reset password. Profile saved.';
     saveUserProfiles();
-    if(FSYNC.isReady()) FSYNC.push('userProfiles', userProfiles);
+    /* userProfiles stay per-device; section access syncs via the userAccess collection */
     return false; // keep modal open so user can see the message
   }
   saveUserProfiles();
-  if(FSYNC.isReady()) FSYNC.push('userProfiles', userProfiles);
+  /* userProfiles stay per-device; section access syncs via the userAccess collection */
   showToast('Staff profile updated ✓');
-  navigate('settings');
+  showPage('settings');
   return true;
 }
 
@@ -9502,9 +9536,9 @@ function removeStaffAccount(userId) {
   if(!confirm(`Remove ${sanitize(u.name)} from the CMS?\n\nThis removes their profile from this system. Their Firebase Authentication account will remain — delete it from the Firebase Console if needed.`)) return;
   userProfiles = userProfiles.filter(p=>p.id!==userId);
   saveUserProfiles();
-  if(FSYNC.isReady()) FSYNC.push('userProfiles', userProfiles);
+  /* userProfiles stay per-device; section access syncs via the userAccess collection */
   showToast(`${sanitize(u.name)} removed from CMS`);
-  navigate('settings');
+  showPage('settings');
 }
 
 // ── Encrypted backup helpers (WebCrypto AES-GCM + PBKDF2) ───────────────────
@@ -10299,6 +10333,12 @@ async function doLogin() {
           saveUserProfiles();
         }
       } catch(_) {}
+      // Pull this person's section-access rules (set by the System Manager)
+      // so restrictions follow them onto any device they sign in from.
+      try {
+        const acc = await _accessDocRef(email)?.get();
+        if (acc && acc.exists) { u.hiddenPages = acc.data().hiddenPages || []; saveUserProfiles(); }
+      } catch(_) {}
       _clearFailedLogins(email); saveCurrentUser(u); _auditLogin(u); initApp();
     } catch(e) {
       btn.disabled=false; btn.textContent='Sign In →';
@@ -10460,6 +10500,517 @@ function canAccess(feature) {
   return true;
 }
 
+// ===== PER-USER SECTION ACCESS =====
+// The System Manager can hide whole sections of the CMS from individual staff
+// (Settings → Staff Accounts → Edit). Choices are stored on the profile AND in
+// the synced teams/{team}/userAccess collection, so they follow the person to
+// any device they sign in on. System Managers always see everything.
+const RESTRICTABLE_PAGES = {
+  referrals:'Referral Holding Bay', clients:'Clients', closedclients:'Closed Clients',
+  sessions:'Session Log', sewb:'SEWB Program', aod:'AOD Program', justice:'Justice Program',
+  cultural:'Cultural Strengthening', disability:'Disability Program',
+  workfoundations:'Work Foundations', homeownership:'First Peoples Home Ownership',
+  chat:'Messages', calendar:'Calendar', resources:'Resources', reports:'Reports', auditlog:'Audit Log',
+};
+function _myHiddenPages(){
+  if(!currentUser || currentUser.role==='sysmanager') return [];
+  const prof = userProfiles.find(p=>p.id===currentUser.id || (currentUser.email && p.email===currentUser.email));
+  return (prof?.hiddenPages) || currentUser.hiddenPages || [];
+}
+function pageAllowed(page){ return !_myHiddenPages().includes(page); }
+// Hide restricted sections from the sidebar and the mobile tab bar.
+function applyNavRestrictions(){
+  const hidden = _myHiddenPages();
+  document.querySelectorAll('.nav-item, .mob-tab').forEach(el=>{
+    const m = (el.getAttribute('onclick')||'').match(/showPage\('([^']+)'\)/);
+    el.style.display = (m && hidden.includes(m[1])) ? 'none' : '';
+  });
+}
+// Synced storage for access rules (doc per email) so restrictions set by the
+// System Manager reach the staff member's own device at their next login.
+function _accessDocRef(email){
+  try {
+    if(!window.firebase || !firebase.firestore || !email) return null;
+    const teamId = FSYNC.getCfg()?.teamId || 'worngundidj';
+    const key = email.toLowerCase().trim().replace(/[^a-z0-9@._+-]/g,'_');
+    return firebase.firestore().collection('teams').doc(teamId).collection('userAccess').doc(key);
+  } catch(e){ return null; }
+}
+
+
+// ===== VICTORIAN AOD FORMS (fillable) =====
+// Digital, fillable versions of the three official Victorian AOD forms:
+//   screen        — Step 1: Self-Complete Initial Screen (ASSIST-lite, AUDIT, DUDIT, K10)
+//   intake        — Victorian AOD Intake Tool (v2)
+//   comprehensive — Victorian AOD Comprehensive Assessment (v2)
+// Answers save onto the client record (c.aodForms[type]) so they sync with
+// Cloud Sync, reopen for editing, auto-score AUDIT/DUDIT/K10, and print
+// through the standard branded report window.
+let _aodSelClient = null;
+let _aodForm = null; // {type, cid} while a form is open
+
+const AODF_TITLES = {
+  screen: 'Step 1 — Self-Complete Initial Screen for AOD Problems',
+  intake: 'Victorian AOD Intake Tool',
+  comprehensive: 'Victorian AOD Comprehensive Assessment',
+};
+
+// ── tiny field helpers (concatenation-based; every input carries data-f) ────
+function _afT(id,label,w){ return '<div class="form-group" style="'+(w?'max-width:'+w+'px':'')+'"><label>'+label+'</label><input data-f="'+id+'"></div>'; }
+function _afD(id,label){ return '<div class="form-group" style="max-width:200px"><label>'+label+'</label><input type="date" data-f="'+id+'"></div>'; }
+function _afN(id,label,w){ return '<div class="form-group" style="max-width:'+(w||140)+'px"><label>'+label+'</label><input type="number" data-f="'+id+'"></div>'; }
+function _afA(id,label,r){ return '<div class="form-group"><label>'+label+'</label><textarea data-f="'+id+'" rows="'+(r||2)+'"></textarea></div>'; }
+function _afR(id,label,opts,vals){ // radio row; vals optional parallel values
+  return '<div class="form-group"><label>'+label+'</label><div style="display:flex;gap:14px;flex-wrap:wrap;padding:4px 0">'+
+    opts.map(function(o,i){ var v = vals?vals[i]:o; return '<label style="display:flex;gap:5px;align-items:center;font-weight:400;font-size:13px;margin:0"><input type="radio" name="f_'+id+'" data-f="'+id+'" value="'+v+'">'+o+'</label>'; }).join('')+'</div></div>';
+}
+function _afYN(id,label){ return _afR(id,label,['Yes','No']); }
+function _afC(id,label){ return '<label style="display:flex;gap:6px;align-items:center;font-weight:400;font-size:13px;margin:4px 0"><input type="checkbox" data-f="'+id+'"> '+label+'</label>'; }
+function _afScale(id,label){ // 0-10 poor→good
+  var cells=''; for(var i=0;i<=10;i++) cells+='<label style="display:flex;flex-direction:column;align-items:center;font-size:11px;font-weight:400;margin:0"><input type="radio" name="f_'+id+'" data-f="'+id+'" value="'+i+'">'+i+'</label>';
+  return '<div class="form-group"><label>'+label+'</label><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span style="font-size:11px;color:var(--muted)">POOR</span>'+cells+'<span style="font-size:11px;color:var(--muted)">GOOD</span></div></div>';
+}
+function _afSec(title,inner){ return '<div class="card" style="margin-bottom:16px"><div class="card-title" style="margin-bottom:12px">'+title+'</div>'+inner+'</div>'; }
+// Likert grid: rows [[id,label]], cols [label], values 0..n (or custom vals)
+function _afGrid(rows,cols,vals){
+  var h='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px"><thead><tr><th style="text-align:left;padding:6px;border:1px solid var(--border);min-width:220px"></th>';
+  cols.forEach(function(c){ h+='<th style="padding:6px;border:1px solid var(--border);font-size:11px">'+c+'</th>'; });
+  h+='</tr></thead><tbody>';
+  rows.forEach(function(r){
+    h+='<tr><td style="padding:6px;border:1px solid var(--border)">'+r[1]+'</td>';
+    cols.forEach(function(c,i){ var v=vals?vals[i]:i; h+='<td style="text-align:center;padding:6px;border:1px solid var(--border)"><input type="radio" name="f_'+r[0]+'" data-f="'+r[0]+'" value="'+v+'"></td>'; });
+    h+='</tr>';
+  });
+  return h+'</tbody></table></div>';
+}
+// grid where each row has its own option labels: rows [[id,label,[opts],[vals]]]
+function _afGridRows(rows){
+  return rows.map(function(r){
+    var opts=r[2], vals=r[3]||opts.map(function(_,i){return i;});
+    return '<div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px"><div style="font-size:13px;font-weight:600;margin-bottom:6px">'+r[1]+'</div><div style="display:flex;gap:12px;flex-wrap:wrap">'+
+      opts.map(function(o,i){ return '<label style="display:flex;gap:5px;align-items:center;font-weight:400;font-size:12.5px;margin:0"><input type="radio" name="f_'+r[0]+'" data-f="'+r[0]+'" value="'+vals[i]+'">'+o+' <span style="color:var(--muted);font-size:10px">('+vals[i]+')</span></label>'; }).join('')+'</div></div>';
+  }).join('');
+}
+// free-text table: rows[[id,label]], cols[[suffix,label,width]]
+function _afTable(rows,cols){
+  var h='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr><th style="text-align:left;padding:6px;border:1px solid var(--border);min-width:170px">&nbsp;</th>';
+  cols.forEach(function(c){ h+='<th style="padding:6px;border:1px solid var(--border);font-size:10.5px;min-width:'+(c[2]||90)+'px">'+c[1]+'</th>'; });
+  h+='</tr></thead><tbody>';
+  rows.forEach(function(r){
+    h+='<tr><td style="padding:6px;border:1px solid var(--border);font-size:11.5px;font-weight:600">'+r[1]+'</td>';
+    cols.forEach(function(c){ h+='<td style="padding:3px;border:1px solid var(--border)"><input data-f="'+r[0]+'_'+c[0]+'" style="width:100%;border:none;background:transparent;font-size:12px;padding:4px"></td>'; });
+    h+='</tr>';
+  });
+  return h+'</tbody></table></div>';
+}
+function _afStaffBlock(pfx){
+  return _afSec('👤 For staff use',
+    '<div class="grid-2">'+_afT(pfx+'_clinician','Clinician name')+_afT(pfx+'_position','Position / Agency')+
+    _afT(pfx+'_catchment','Catchment')+_afT(pfx+'_ur','UR number')+_afD(pfx+'_date','Date')+'</div>');
+}
+
+// ── AOD page card ────────────────────────────────────────────────────────────
+function _aodFormsCard(aodClients){
+  var sel = _aodSelClient && aodClients.find(function(c){return c.id===_aodSelClient;}) ? _aodSelClient : (aodClients[0] ? aodClients[0].id : '');
+  _aodSelClient = sel;
+  var c = clients.find(function(x){return x.id===sel;});
+  var saved = (c && c.aodForms) || {};
+  function btn(type,icon,desc){
+    var sv = saved[type];
+    return '<div class="report-card" onclick="openAODForm(\''+type+'\')" style="cursor:pointer">'+
+      '<div class="rc-icon">'+icon+'</div><div class="rc-title">'+AODF_TITLES[type]+'</div><div class="rc-desc">'+desc+'</div>'+
+      (sv?'<span class="rc-badge" style="background:#d1fae5;color:#065f46">✓ Saved '+fmt(sv.savedAt)+' — '+sanitize(sv.savedBy||'')+'</span>':'<span class="rc-badge" style="background:var(--bg);color:var(--muted)">Not yet completed</span>')+'</div>';
+  }
+  return '<div class="card" style="margin-bottom:20px;border-left:4px solid #dc2626">'+
+    '<div class="card-header"><div class="card-title">📋 Victorian AOD Intake &amp; Assessment Forms</div></div>'+
+    '<p style="font-size:13px;color:var(--muted);margin-bottom:12px">Official Victorian AOD forms, fillable on screen. Answers save to the client\'s record (synced across devices), AUDIT / DUDIT / K10 scores calculate automatically, and each form prints with the org letterhead.</p>'+
+    (aodClients.length===0 ? '<div class="empty-state"><p>No AOD clients enrolled yet — enrol a client in the AOD program to start a form</p></div>' :
+    '<div class="form-group" style="max-width:380px"><label>Client</label><select id="aodform-client" onchange="_aodSelClient=this.value;showPage(\'aod\')">'+
+      aodClients.map(function(x){ return '<option value="'+sanitize(x.id)+'" '+(x.id===sel?'selected':'')+'>'+sanitize(x.fullName)+'</option>'; }).join('')+
+    '</select></div>'+
+    '<div class="grid-3">'+
+      btn('screen','📝','Client self-complete screen — demographics, ASSIST-lite substance use, AUDIT (alcohol), DUDIT (other drugs) and K10 wellbeing, all auto-scored')+
+      btn('intake','📥','Staff intake — demographics, substance use, risk &amp; complexity, family violence screen, and the outcome / prioritisation of intake')+
+      btn('comprehensive','📚','Full clinical assessment — substance use table &amp; history, psychosocial, medical, mental health &amp; mental state, medications, suicide &amp; FV safety plans, final case summary')+
+    '</div>')+'</div>';
+}
+
+// ── open / save / print ──────────────────────────────────────────────────────
+function openAODForm(type){
+  var cid = document.getElementById('aodform-client') ? document.getElementById('aodform-client').value : _aodSelClient;
+  var c = clients.find(function(x){return x.id===cid;});
+  if(!c){ showToast('Select a client first'); return; }
+  _aodForm = { type:type, cid:cid };
+  var saved = (c.aodForms||{})[type];
+  var builder = { screen:_aodHTML_screen, intake:_aodHTML_intake, comprehensive:_aodHTML_comprehensive }[type];
+  document.getElementById('page-title').textContent = AODF_TITLES[type];
+  document.getElementById('content').innerHTML =
+    '<div style="display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap" class="no-print">'+
+      '<button class="btn btn-outline" onclick="showPage(\'aod\')">← Back to AOD</button>'+
+      '<div style="font-weight:700">'+sanitize(c.fullName)+'</div>'+
+      (saved?'<span style="font-size:12px;color:#065f46;background:#d1fae5;border-radius:12px;padding:2px 10px">Last saved '+fmtdt(saved.savedAt)+' by '+sanitize(saved.savedBy||'')+'</span>':'<span style="font-size:12px;color:var(--muted)">New form</span>')+
+      '<div style="margin-left:auto;display:flex;gap:8px">'+
+        '<button class="btn btn-outline" onclick="printAODForm()">🖨️ Print</button>'+
+        '<button class="btn btn-primary" onclick="saveAODForm()">💾 Save Form</button>'+
+      '</div></div>'+
+    '<div id="aodform-root">'+builder()+'</div>'+
+    '<div class="no-print" style="margin:16px 0"><button class="btn btn-primary" onclick="saveAODForm()">💾 Save Form</button></div>';
+  _aodPopulate(saved ? saved.data : _aodPrefill(c));
+  _aodUpdateScores();
+  document.getElementById('content').addEventListener('change', _aodUpdateScores);
+  window.scrollTo(0,0);
+}
+function _aodPrefill(c){
+  var parts=(c.fullName||'').trim().split(/\s+/);
+  return { s_family: parts.length>1?parts[parts.length-1]:'', s_given: parts.slice(0,-1).join(' ')||parts[0]||'',
+    s_dob:c.dob||'', s_addr:c.address||'', s_mobile:c.phone||'', s_cultural:c.mob||c.community||'',
+    i_family: parts.length>1?parts[parts.length-1]:'', i_given: c.preferredName||parts[0]||'', i_dob:c.dob||'', i_addr:c.address||'', i_mobile:c.phone||'' };
+}
+function _aodCollect(){
+  var data={};
+  document.querySelectorAll('#aodform-root [data-f]').forEach(function(el){
+    var k=el.dataset.f;
+    if(el.type==='radio'){ if(el.checked) data[k]=el.value; }
+    else if(el.type==='checkbox'){ if(el.checked) data[k]=true; }
+    else if((el.value||'').trim()!=='') data[k]=el.value;
+  });
+  return data;
+}
+function _aodPopulate(data){
+  if(!data) return;
+  document.querySelectorAll('#aodform-root [data-f]').forEach(function(el){
+    var v=data[el.dataset.f]; if(v===undefined) return;
+    if(el.type==='radio'){ if(String(el.value)===String(v)) el.checked=true; }
+    else if(el.type==='checkbox'){ el.checked=!!v; }
+    else el.value=v;
+  });
+}
+function _aodScoreOf(data,prefix,n){
+  var s=0,answered=0;
+  for(var i=1;i<=n;i++){ var v=data[prefix+i]; if(v!==undefined){ s+=Number(v); answered++; } }
+  return answered? s : null;
+}
+function _aodScores(data){
+  return { audit:_aodScoreOf(data,'audit_q',10), dudit:_aodScoreOf(data,'dudit_q',11), k10:_aodScoreOf(data,'k10_q',10) };
+}
+function _aodBand(kind,v){
+  if(v===null||v===undefined) return '';
+  if(kind==='audit') return v>=20?'dependence likely':v>=16?'high risk':v>=8?'moderate risk':'low risk';
+  if(kind==='dudit') return v>24?'dependence likely':'dependence unlikely (0–24)';
+  if(kind==='k10') return v>=30?'high distress':v>=25?'moderate distress':v>=20?'mild distress':'low distress';
+  return '';
+}
+function _aodUpdateScores(){
+  var d=_aodCollect(), sc=_aodScores(d);
+  ['audit','dudit','k10'].forEach(function(k){
+    var el=document.getElementById('aodscore-'+k); if(!el) return;
+    el.textContent = sc[k]===null ? '—' : sc[k]+'  ('+_aodBand(k,sc[k])+')';
+  });
+}
+function saveAODForm(){
+  if(!_aodForm) return;
+  var c=clients.find(function(x){return x.id===_aodForm.cid;}); if(!c) return;
+  var data=_aodCollect();
+  if(!c.aodForms) c.aodForms={};
+  var rec={ data:data, savedAt:now(), savedBy:currentUser?currentUser.name:'' };
+  if(_aodForm.type==='screen') rec.scores=_aodScores(data);
+  c.aodForms[_aodForm.type]=rec;
+  saveAll();
+  audit('AOD form saved', AODF_TITLES[_aodForm.type]+' — '+c.fullName, c.id);
+  showToast('✅ '+AODF_TITLES[_aodForm.type].split('—')[0].trim()+' saved for '+sanitize(c.fullName));
+}
+function printAODForm(){
+  if(!_aodForm) return;
+  var c=clients.find(function(x){return x.id===_aodForm.cid;});
+  document.querySelectorAll('#aodform-root input, #aodform-root textarea, #aodform-root select').forEach(function(el){
+    if(el.type==='radio'||el.type==='checkbox'){ if(el.checked) el.setAttribute('checked','checked'); else el.removeAttribute('checked'); }
+    else if(el.tagName==='TEXTAREA'){ el.textContent=el.value; }
+    else { el.setAttribute('value',el.value); }
+  });
+  var css='<style>#aodform-root input[type=text],#aodform-root input:not([type]),#aodform-root input[type=date],#aodform-root input[type=number]{border:none;border-bottom:1px solid #999;font:inherit;background:none} #aodform-root textarea{border:1px solid #bbb;font:inherit;width:100%} .card{border:1px solid #ddd;border-radius:8px;padding:12px;margin-bottom:12px;page-break-inside:avoid} .card-title{font-weight:700;margin-bottom:8px} label{font-size:11px} table{page-break-inside:avoid}</style>';
+  openReport(reportHeader(AODF_TITLES[_aodForm.type], 'Victorian AOD Intake & Assessment suite', c?c.fullName:'') + css + '<div id="aodform-root">'+document.getElementById('aodform-root').innerHTML+'</div>');
+}
+
+// ── FORM 1: Step 1 Self-Complete Initial Screen ─────────────────────────────
+function _aodHTML_screen(){
+  var freq=['Never','Once or twice','Weekly','Daily'];
+  var assist=[['as_tobacco','a) Tobacco products (cigarettes, chewing tobacco, cigars etc.)'],['as_alcohol','b) Alcoholic beverages (beer, wine, spirits etc.)'],['as_cannabis','c) Cannabis (marijuana, pot, hash, synthetic cannabis etc.)'],['as_cocaine','d) Cocaine (coke, crack etc.)'],['as_ats','e) Amphetamine type stimulants (speed, meth, ice, ecstasy etc.)'],['as_inhalants','f) Inhalants (nitrous, glue, petrol, paint thinner etc.)'],['as_sedatives','g) Sedatives or sleeping pills (benzodiazepines, xanax, valium etc.)'],['as_hallucinogens','h) Hallucinogens (LSD, acid, mushrooms, PCP, Special K etc.)'],['as_opioids','i) Opioids (heroin, codeine, morphine, methadone etc.)'],['as_other','j) Other (specify below)']];
+  var lm=['Never','Less than monthly','Monthly','Weekly','Daily or almost daily'];
+  var yn3=['No','Yes, but not in the last year','Yes, during the last year'];
+  return _afSec('ℹ️ About this form','<p style="font-size:13px;color:var(--muted)">Client self-complete screen. "Please complete the following form as best you can to help us understand you and your needs. Don\'t worry if you cannot complete all the questions — your worker will go over everything with you, and if you prefer not to complete it at all, that\'s OK too."</p>')+
+  _afSec('1 · About you',
+    '<div class="grid-2">'+_afT('s_family','Family name')+_afT('s_given','Given name(s)')+'</div>'+
+    _afR('s_gender','Gender',['Male','Female','Other'])+
+    '<div class="grid-2">'+_afD('s_dob','Date of birth')+_afT('s_addr','Address')+_afT('s_phone','Daytime telephone')+_afT('s_mobile','Mobile')+'</div>'+
+    _afYN('s_aboriginal','Do you identify as being Aboriginal?')+_afYN('s_tsi','Do you identify as being Torres Strait Islander?')+
+    '<div class="grid-2">'+_afT('s_cob','Country of birth')+_afT('s_cultural','Cultural background')+_afT('s_lang','Preferred language')+'</div>'+
+    _afYN('s_interpreter','Interpreter required?')+_afYN('s_allergies','Do you have any allergies?')+_afT('s_allergytype','If yes, what type?'))+
+  _afSec('2 · Who can we contact in an emergency? (e.g. family member, partner, friend, another worker)',
+    '<div class="grid-2">'+_afT('s_ecname','Name')+_afT('s_ecrel','Relationship to you')+_afT('s_ecaddr','Address')+_afT('s_ecphone','Telephone / Mobile')+'</div>')+
+  _afSec('3 · Your doctor\'s details',
+    _afYN('s_hasgp','Do you have a GP?')+'<div class="grid-2">'+_afT('s_gpname','GP name')+_afT('s_gpaddr','GP address')+_afT('s_gpphone','GP phone')+'</div>'+
+    _afYN('s_othersvc','Do you use any other services?')+_afA('s_othersvcdetails','If yes, details',2))+
+  _afSec('4 · About your use of alcohol and drug services',
+    _afYN('s_prevaod','Have you used alcohol and drug services previously?')+
+    _afA('s_prevprograms','If yes, which program/s? (e.g. counselling incl. court-ordered, withdrawal incl. residential, pharmacotherapy)',2)+
+    _afA('s_reason','What is your reason for coming here today?',2)+
+    _afR('s_referredby','Who referred you to treatment today?',['Self','Family','Health Service','Other'])+
+    '<div class="grid-2">'+_afT('s_refname','Referrer name (e.g. GP, case manager, lawyer)')+_afT('s_refrel','Relationship to you')+_afT('s_refphone','Referrer phone')+_afT('s_refagency','Agency / Service')+'</div>')+
+  _afSec('5 · Some more information about you',
+    _afYN('s_employed','Are you employed?')+
+    '<div class="grid-2">'+_afN('s_paidwork','Days of paid work in past 4 weeks',200)+_afT('s_benefit','If not employed, type of benefit received')+_afN('s_edudays','Days of school / tertiary education / vocational training in past 4 weeks',260)+'</div>'+
+    _afR('s_gambleconcern','If you gamble, are you concerned about your gambling?',['Yes','No','I don\'t gamble at all'])+
+    _afYN('s_gamblesupport','Currently receiving support for any gambling issues?')+
+    _afYN('s_arrested','Been arrested in the past 4 weeks?')+_afYN('s_legal','Any current / pending legal issues?')+_afYN('s_legalsupport','Currently receiving support for any legal issues?')+
+    _afR('s_accom','What type of accommodation do you live in?',['Private rental','Public rental','Boarding house','Own home','Homeless','Couch surfing'])+
+    _afYN('s_homeless','Been homeless in the past 4 weeks?')+_afYN('s_eviction','At risk of eviction in the past 4 weeks?')+
+    _afYN('s_safe','Do you live in a place where you feel safe?')+_afA('s_safedetails','If no, please briefly explain',2)+
+    _afYN('s_housingsupport','Currently receiving support for housing issues?')+_afYN('s_pregnant','Are you pregnant?')+
+    _afR('s_livewith','Who do you currently live with?',['Family','Friends','Alone','Out of Home care','Other'])+
+    _afYN('s_caregiver','In the past 4 weeks, been a primary caregiver for / living with any child/children?')+
+    _afT('s_childages','Ages of the children you care for (youngest first, separated by commas)')+
+    _afScale('s_psych','Psychological health in the past 4 weeks (anxiety, depression, problem emotions)')+
+    _afScale('s_physical','Physical health in the past 4 weeks (physical symptoms, bothered by illness)')+
+    _afScale('s_qol','Overall quality of life in the past 4 weeks (able to enjoy life, satisfied with living conditions)'))+
+  _afSec('6 · Alcohol and other drug use (ASSIST) — In the past month, how often have you used the following substances?',
+    _afGrid(assist,freq)+_afT('as_otherspec','j) Other — please specify')+
+    _afT('as_greatest','Which substance (including alcohol) is causing you the greatest concern?')+
+    _afA('as_others','Which other substances (including alcohol) are causing you concern? (list as many as relevant)',2))+
+  _afSec('7 · Alcohol use (AUDIT) — <span id="aodscore-audit" style="color:#dc2626">—</span>',
+    _afYN('audit_lastyear','Have you drunk any alcohol in the last year? (if No, skip this section)')+
+    _afGridRows([
+      ['audit_q1','1. How often do you have a drink containing alcohol?',['Never','Monthly or less','2–4 times a month','2–3 times a week','4+ times a week']],
+      ['audit_q2','2. How many drinks containing alcohol do you have on a typical day when you are drinking?',['1 or 2','3 or 4','5 or 6','7 to 9','10 or more']],
+      ['audit_q3','3. How often do you have six or more drinks on one occasion?',lm],
+      ['audit_q4','4. How often during the last year have you found you were not able to stop drinking once you had started?',lm],
+      ['audit_q5','5. How often during the last year have you failed to do what was expected of you because of drinking?',lm],
+      ['audit_q6','6. How often during the last year have you needed a first drink in the morning to get yourself going after a heavy drinking session?',lm],
+      ['audit_q7','7. How often during the last year have you had a feeling of guilt or remorse after drinking?',lm],
+      ['audit_q8','8. How often during the last year have you been unable to remember what happened the night before because of your drinking?',lm],
+      ['audit_q9','9. Have you or someone else been injured because of your drinking?',yn3,[0,2,4]],
+      ['audit_q10','10. Has a relative, friend, doctor or other health care worker been concerned about your drinking or suggested you cut down?',yn3,[0,2,4]],
+    ])+'<p style="font-size:11.5px;color:var(--muted)">Scoring: 0–7 low risk · 8–15 moderate risk · 16–19 high risk · 20+ dependence likely</p>')+
+  _afSec('8 · Use of drugs other than alcohol (DUDIT) — <span id="aodscore-dudit" style="color:#dc2626">—</span>',
+    _afYN('dudit_lastyear','Have you used drugs other than alcohol in the last year? (if No, skip this section)')+
+    _afGridRows([
+      ['dudit_q1','1. How often do you use drugs other than alcohol?',['Never','Monthly or less','2–4 times a month','2–3 times a week','4+ times a week']],
+      ['dudit_q2','2. How often do you use more than one drug on the same occasion?',['Never','Monthly or less','2–4 times a month','2–3 times a week','4+ times a week']],
+      ['dudit_q3','3. How many times do you take drugs on a typical day when you use drugs?',['0','1 or 2','3 or 4','5 or 6','7 or more']],
+      ['dudit_q4','4. How often are you influenced heavily by drugs?',lm],
+      ['dudit_q5','5. Over the past year, have you felt your longing for drugs was so strong you could not resist it?',lm],
+      ['dudit_q6','6. Over the past year, has it happened that you have not been able to stop taking drugs once you started?',lm],
+      ['dudit_q7','7. How often over the past year have you taken drugs and then neglected to do something you should have done?',lm],
+      ['dudit_q8','8. How often over the past year have you needed to take a drug the morning after heavy drug use the day before?',lm],
+      ['dudit_q9','9. How often over the past year have you had guilt feelings or a bad conscience because you used drugs?',lm],
+      ['dudit_q10','10. Have you or anyone else been hurt (mentally or physically) because you used drugs?',yn3,[0,2,4]],
+      ['dudit_q11','11. Has a relative or friend, doctor or nurse, or anyone else been worried about your drug use or said you should stop?',yn3,[0,2,4]],
+    ])+_afYN('dudit_injected','Have you injected drugs in the past four weeks?')+
+    '<p style="font-size:11.5px;color:var(--muted)">Scoring: 0–24 dependence unlikely · 25+ dependence likely</p>')+
+  _afSec('9 · How have you been feeling during the past 30 days? (K10) — <span id="aodscore-k10" style="color:#dc2626">—</span>',
+    _afGrid([['k10_q1','1. …tired for no good reason?'],['k10_q2','2. …nervous?'],['k10_q3','3. …so nervous that nothing could calm you down?'],['k10_q4','4. …hopeless?'],['k10_q5','5. …restless or fidgety?'],['k10_q6','6. …so restless you could not sit still?'],['k10_q7','7. …depressed?'],['k10_q8','8. …so depressed that nothing could cheer you up?'],['k10_q9','9. …that everything was an effort?'],['k10_q10','10. …worthless?']],
+      ['None of the time (1)','A little of the time (2)','Some of the time (3)','Most of the time (4)','All of the time (5)'],[1,2,3,4,5])+
+    '<p style="font-size:11.5px;color:var(--muted)">Scoring: 10–19 low · 20–24 mild · 25–29 moderate · 30–50 high psychological distress</p>')+
+  _afStaffBlock('s_staff');
+}
+
+// ── FORM 2: Victorian AOD Intake Tool ────────────────────────────────────────
+function _aodHTML_intake(){
+  return _afStaffBlock('i_staff')+
+  _afSec('Demographic information',
+    '<div class="grid-2">'+_afT('i_family','Family name')+_afT('i_given','Name / preferred name(s)')+_afD('i_dob','Date of birth')+_afT('i_pronoun','Preferred pronoun (she/he/they)')+'</div>'+
+    _afR('i_gender','Gender identification',['Male','Female','Other'])+_afT('i_genderother','Other (please specify)')+
+    _afR('i_lgbtiqa','Identification as LGBTIQA+',['No','Yes','Prefer not to say','Other'])+
+    _afYN('i_privhealth','Private health insurance?')+_afT('i_privdetails','Insurance details')+
+    _afYN('i_disability','Person with a disability?')+_afT('i_disdetails','Disability details')+
+    _afR('i_reasoncall','Reason for call / visit today',['Self','Other'])+_afA('i_reasondetails','Details',2)+
+    '<div class="grid-2">'+_afT('i_addr','Address')+_afT('i_postcode','Postcode',140)+'</div>'+
+    _afYN('i_mailsafe','Is it safe to send mail to this address?')+_afT('i_contactpref','Preferred contact method')+
+    '<div class="grid-2">'+_afT('i_mobile','Mobile number')+_afT('i_otherphone','Other contact number')+'</div>'+
+    _afYN('i_vmsafe','Safe to leave voicemail / text on this phone?')+_afT('i_phoneaccess','Does anyone else have access to this phone?')+
+    '<div class="grid-2">'+_afT('i_email','Email address')+_afT('i_ecname','Emergency contact name')+_afT('i_ecrel','Relationship to client')+_afT('i_ecphone','Emergency contact number')+_afT('i_cob','Country of birth')+_afT('i_cultural','Cultural background')+'</div>'+
+    _afR('i_atsi','Identifies as',['Aboriginal','Torres Strait Islander','Both','Neither'])+
+    _afR('i_refugee','Refugee status',['Refugee','Asylum seeker','Neither'])+_afT('i_visa','Visa status details')+
+    '<div class="grid-2">'+_afT('i_lang','Preferred language / dialect')+_afT('i_employment','Employment status')+'</div>'+
+    _afYN('i_interpreter','Interpreter required?')+
+    _afR('i_livingwith','Living with',['Family','Friends','Alone','Care home','Other'])+
+    _afYN('i_faminvolved','Family members to be involved in assessment / treatment?')+_afA('i_famdetails','Details',2)+
+    _afYN('i_caregiver','Primary caregiver / living with child(ren) or other dependents aged 16 or under?')+
+    _afYN('i_childrennotincare','Has children not in their care?')+
+    _afT('i_parentingchanges','Changes to parenting arrangements / orders (details)')+
+    _afT('i_childages','Age(s) of children or dependents')+
+    _afYN('i_reunification','Family Reunification Order?')+_afYN('i_reunifaod','If yes — is AOD treatment a condition?')+
+    '<div class="grid-2">'+_afT('i_gpname','GP name')+_afT('i_gpemail','GP email')+_afT('i_gpfax','GP fax')+_afT('i_gpphone','GP phone')+_afT('i_medicare','Medicare number + expiry')+_afT('i_hcc','Health Care Card number + expiry')+'</div>'+
+    '<div class="form-group"><label>Engaged with other services (tick all that apply)</label>'+
+      _afC('i_svc_cp','Child protection')+_afC('i_svc_ndis','NDIS')+_afC('i_svc_housing','Housing')+_afC('i_svc_mh','Mental health')+_afC('i_svc_legal','Legal')+_afC('i_svc_financial','Financial')+_afC('i_svc_fv','Family Violence Service')+_afC('i_svc_mbcp','Men\'s Behaviour Change Program')+_afT('i_svc_other','Other (please specify)')+'</div>')+
+  _afSec('Section 1 · Alcohol and other drug use',
+    _afYN('i_q1','1. Alcohol or drug use in the past year')+_afYN('i_q2','2. At risk of lapse / relapse')+_afA('i_q2details','Details',2)+
+    '<p style="font-size:12px;color:var(--muted)">If No to Q1 and Q2, go to Section 2.</p>'+
+    '<div class="grid-2">'+_afT('i_q3','3. Primary drug of concern')+_afN('i_q4','4. Days of use in past month',180)+_afT('i_q5','5. Amount per day (amount + units)')+_afD('i_q6','6. Last use of primary drug')+'</div>'+
+    _afR('i_q7','7. Usual route of administration',['Ingests (swallows)','Smokes','Injects','Sniffs (powder)','Inhales (vapour)','Other','Multiple','Not stated'])+
+    _afT('i_q8','8. Other drugs of concern')+
+    _afYN('i_q9','9. Any recent (past 3 months) injecting drug use?')+_afN('i_q9days','Days of injecting use in past month',180)+
+    _afYN('i_q10','10. History of drug overdose')+
+    _afYN('i_q11','11. Other risky drug practices past 3 months (DUI, unsafe injecting, injected by another, using alone, unsafe sex etc.)')+_afA('i_q11details','Details',2)+
+    _afYN('i_q12','12. Evidence of harm from substance use (interpersonal, financial, legal, mental health, physical)')+_afA('i_q12details','Details',2)+
+    _afYN('i_q13','13. Evidence of substance dependence (tolerance, withdrawal, previous quit attempts, preoccupation, craving etc.)')+
+    _afYN('i_q14','14. On pharmacotherapy program? (e.g. methadone / buprenorphine)')+_afA('i_q14details','Details (including prescriber and buprenorphine formulation)',2)+
+    _afYN('i_q15','15. Previous use of AOD services')+_afA('i_q16','16. If yes, which program/s (counselling incl. court ordered, withdrawal, pharmacotherapy)',2)+
+    _afA('i_s1comments','Further comments',3))+
+  _afSec('Section 2 · Risk and complexity',
+    '<div class="form-group"><label>17. Current physical health / medical issues (tick all that apply)</label>'+
+      _afC('i_med_seizures','History of seizures')+_afT('i_med_lastseizure','Date of last seizure')+_afC('i_med_pain','Chronic pain')+_afC('i_med_pregnancy','Pregnancy')+_afC('i_med_diabetes','Diabetes')+_afC('i_med_chronic','Chronic physical illness (cardio, respiratory)')+_afC('i_med_liver','Liver disease')+_afC('i_med_abi','Acquired Brain Injury')+_afT('i_med_other','Other (please specify)')+'</div>'+
+    _afYN('i_q18','18. Any current mental health issue (e.g. major depression)')+_afA('i_q18details','Details (diagnosis, most recent hospitalisation)',2)+
+    _afYN('i_q19','19. Currently taking any medications for mental / physical health issues?')+_afA('i_q19details','Please specify',2)+
+    _afYN('i_q20','20. Recent / current self-harm')+_afA('i_q20details','Details',2)+
+    _afYN('i_q21','21. Recent / current suicidal ideation / attempts')+_afA('i_q21details','If yes, details of safety plan',2)+
+    _afYN('i_q22','22. Homeless / risk of homelessness')+_afA('i_q22details','Details',2)+
+    _afYN('i_q23','23. Unemployed / risk of unemployment')+_afA('i_q23details','Details',2)+
+    _afYN('i_q24','24. Concerned about gambling')+_afA('i_q24details','Details',2)+
+    _afYN('i_q25','25. History / risk of aggression to / from others')+_afA('i_q25details','Details',2)+
+    _afYN('i_q26','26. Any significant court / legal issues (involvement with justice)')+_afYN('i_q26pending','Pending court date?')+_afA('i_q26details','Details',2)+
+    _afYN('i_q27','27. Current family violence intervention order (FVIO)')+
+    _afYN('i_q27afm','As Affected Family Member')+_afYN('i_q27resp','As Respondent')+_afYN('i_q27children','Children on FVIO')+_afA('i_q27details','Details on order',2)+
+    _afYN('i_q28','28. Family violence')+_afA('i_q28details','Details (perpetrator actions, controlling behaviours, physical assaults, threats, existing safety plan)',3)+
+    _afYN('i_q28safety','Do you have immediate concerns about your safety?')+_afA('i_q28safetydetails','Details (imminence, risk management etc.)',2)+
+    '<p style="font-size:12px;color:#991b1b">If you are concerned about the immediate safety of your client — escalate to your supervisor, call Safe Steps on 1800 015 188, or police if necessary.</p>')+
+  _afSec('Summary of identified needs, including need for AOD and other services', _afA('i_summary','Summary',4))+
+  _afSec('Outcome of intake',
+    _afR('i_refer','Refer for further assessment?',['No (go to Next Steps)','Yes (dependent, harm or high-risk substance use)'])+
+    _afT('i_noreason','If No — reason assessment not needed')+
+    '<div class="form-group"><label>Requires assessment for</label>'+_afC('i_asmt_counselling','Counselling')+_afC('i_asmt_nonres','Non-residential withdrawal')+_afC('i_asmt_res','Residential withdrawal')+_afC('i_asmt_carc','Care and recovery co-ordination')+'</div>'+
+    _afR('i_priority','Prioritisation',['Low','Medium','High'])+
+    _afA('i_priorityjust','Justification for prioritisation (AOD problem severity, client risks, family violence, complexity, protective factors)',2)+
+    _afYN('i_canattend','Able to attend assessment / treatment appointment (e.g. transport needs)')+_afA('i_attenddetails','Details',2)+
+    _afT('i_modules','Recommended optional modules')+_afT('i_maram','Recommend MARAM risk assessment(s)')+
+    _afA('i_nextsteps','Next steps (bridging support, psycho-education, brief intervention, harm reduction info, referral to non-AOD service, FV service, neuropsych assessment, housing etc.)',3)+
+    _afA('i_preferences','Client preferences (service type, gender of clinician, time of day, location, services for specific populations — Indigenous, LGBTIQA+, disability, youth etc.)',2)+
+    _afYN('i_sig_other','Information requested for affected significant other (e.g. family member)?')+
+    '<div class="grid-2">'+_afT('i_referredby','Referred to intake by')+_afT('i_refphone','Phone number')+_afD('i_refdate','Date')+'</div>'+
+    _afYN('i_consent','Has the agency "consent to share information" form been completed?')+
+    _afYN('i_refsent','Referral sent?')+_afD('i_refsentdate','Sent date')+_afYN('i_refaccepted','Referral accepted?'))
+}
+
+// ── FORM 3: Victorian AOD Comprehensive Assessment ───────────────────────────
+function _aodHTML_comprehensive(){
+  var subCols=[['first','Age at first use',70],['regular','Age of regular use',70],['route','Route of use',90],['avg','Average daily use (qty / cost / binge)',120],['dweek','Days used past week',70],['d4wk','Days used past 4 wks',70],['inj4wk','Days injected past 4 wks',70],['lastuse','Date of last use',90],['help','Seeking help? (Y/N)',70]];
+  var subs=[['ca_tobacco','Tobacco products'],['ca_alcohol','Alcoholic beverages'],['ca_cannabis','Cannabis (marijuana, hash, synthetic etc.)'],['ca_cocaine','Cocaine'],['ca_meth','Methamphetamine (ice, speed, base)'],['ca_ats','Other amphetamine type stimulants (MDMA, diet pills etc.)'],['ca_inhalants','Inhalants (nitrous, glue, petrol, amyl etc.)'],['ca_sednon','Non-prescribed sedatives / sleeping pills (benzos etc.)'],['ca_sedrx','Prescribed sedatives / sleeping pills'],['ca_hallucinogens','Hallucinogens (LSD, mushrooms, ketamine etc.)'],['ca_opinon','Non-prescribed opioids (heroin, codeine, oxycodone etc.)'],['ca_ghb','GHB'],['ca_opirx','Prescribed opioids'],['ca_other','Other (steroids, caffeine, new & emerging etc.)']];
+  var cpn=['Current (within last 4 weeks)','Past','Never'];
+  var hist=[['ch_abstinence','Periods of abstinence'],['ch_treatment','Treatment / interventions'],['ch_hosp','Hospitalisations / ED presentations related to AOD use'],['ch_overdose','Drug overdose'],['ch_withdrawal','Withdrawal and related complications (seizures, delirium, hallucinations etc.)'],['ch_riskyinject','Risky injecting practices (shares equipment, injected by another etc.)'],['ch_usesalone','Uses alone'],['ch_drives','Drives while intoxicated / under the influence']];
+  function medRow(id,label){ return _afC(id,label)+_afT(id+'_notes','Notes — history, admissions, investigations, treatments'); }
+  function mhGroup(title,items){ return '<div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px"><div style="font-weight:600;font-size:13px;margin-bottom:6px">'+title+'</div>'+items.map(function(x){return _afC(x[0],x[1]);}).join('')+'</div>'; }
+  return _afStaffBlock('c_staff')+
+  _afSec('ℹ️ Purpose','<p style="font-size:13px;color:var(--muted)">To ensure the client\'s comprehensive treatment needs are adequately assessed so they can access the services most suitable to their needs. Use the Intake Tool as a starting point — refer back instead of repeating questions the client has already answered.</p>')+
+  _afSec('1A · Current levels of AOD use <span style="font-weight:400;font-size:12px;color:var(--muted)">(if client was in hospital/prison/rehab last month, record use in the 4 weeks before that)</span>',
+    _afTable(subs,subCols)+_afYN('ca_smokingsupport','Tobacco — smoking cessation support desired? (Quitline 13 7848)')+_afA('ca_othernotes','Other substances — details',2))+
+  _afSec('1B · Current drug use state', _afA('cb_state','Signs of intoxication, withdrawal, BAC',2))+
+  _afSec('1C · AOD use history and behaviours',
+    _afGrid(hist,cpn,cpn)+_afYN('ch_naloxone','Aware of naloxone?')+_afA('ch_notes','Notes / actions / patterns of use',3))+
+  _afSec('2 · Psychosocial — resources and supports',
+    _afA('cp_informal','Informal supports',2)+_afA('cp_formal','Formal supports',2)+_afA('cp_services','Other services involved',2)+_afA('cp_genogram','Genogram / ecomap / sociogram notes',3))+
+  _afSec('2C · Family, children, dependants and social relationships',
+    _afYN('cf_childsafe','Are children / dependants safe?')+_afA('cf_childsafedetails','Details (responsibilities, impact of substance use, vulnerability, risk of harm to others, pets)',2)+
+    _afYN('cf_cp','DHHS / Child Protection involvement?')+_afA('cf_cpdetails','If yes — current Child Protection worker name and contact details',2)+
+    _afA('cf_childnames','Children\'s names & DOBs',2))+
+  _afSec('2D · Housing',
+    _afYN('cd_supported','Are you supported around housing?')+_afA('cd_details','Details',2)+
+    _afYN('cd_forcedout','Ever been forced out of housing by a partner / family member? (victim survivors only)')+
+    _afYN('cd_emergency','Ever needed to stay in emergency housing or refuge?')+_afA('cd_emergdetails','Details',2))+
+  _afSec('2E · Finances, employment and training',
+    _afA('ce_notes','Main income source (benefits/employment), unpaid fines/bills, need for financial counselling',2)+
+    _afYN('ce_bankaccess','Does anyone have access to your bank account or control your finances?')+_afA('ce_bankdetails','Details',2))+
+  _afSec('2F · Current legal status',
+    _afYN('cl_charged','Recently been charged with a crime?')+_afA('cl_chargeddetails','Details',2)+
+    '<div class="form-group"><label>Currently (tick all that apply)</label>'+
+      _afC('cl_awaitingcharges','Awaiting charges (pending)')+_afC('cl_awaitingtrial','Awaiting trial / court')+_afT('cl_courtdate','Court date')+_afC('cl_bail','On bail')+_afC('cl_parole','On parole')+_afC('cl_postsentence','On a post-sentence supervision order')+_afC('cl_dto','On a drug treatment order')+_afC('cl_cco','On a community corrections order (CCO)')+_afC('cl_diversion','On drug diversion (courts, police etc.)')+_afC('cl_youth','Involved with youth justice')+_afC('cl_corrections','Corrections officer / CISP manager')+'</div>'+
+    _afA('cl_details','Details (CCO name, phone, justice office location, parole officer contact etc.)',2)+_afT('cl_other','Other (please specify)')+
+    _afYN('cl_fvio','Current Family Violence Intervention Order (FVIO)?')+
+    _afYN('cl_fvio_afm','As AFM')+_afYN('cl_fvio_resp','As Respondent')+_afYN('cl_fvio_children','Children included on FVIO?')+_afYN('cl_fvio_breaches','Any breaches of FVIO (current or historical)?')+_afA('cl_fviodetails','Details of order',2))+
+  _afSec('2G · Family violence (victim survivors only)',
+    _afYN('cg_maram','MARAM assessment undertaken at intake?')+
+    '<p style="font-size:12px;color:var(--muted)">Before asking the following, check the client feels safe to answer questions about family violence.</p>'+
+    _afYN('cg_unsafe','a) Is there a partner or family member who does things that make you or your children feel unsafe? (controls day-to-day activities, physically hurts, makes threats)')+
+    _afYN('cg_immediate','b) Do you have concerns about your immediate safety?')+
+    _afYN('cg_safetoday','c) Do you and your children feel safe when you leave here today?')+
+    _afA('cg_details','Details',2)+
+    '<p style="font-size:12px;color:#991b1b">If concerned about immediate safety — escalate to your supervisor, call Safe Steps 1800 015 188, or police. If FV is disclosed, use the MARAM Intermediate Risk Assessment Tool.</p>')+
+  _afSec('3 · Medical history — conditions (tick as relevant, with notes)',
+    medRow('cm_allergies','Allergies')+medRow('cm_diet','Dietary requirements')+medRow('cm_cardiac','Cardiac or respiratory problems (asthma, emphysema, high BP, heart attack/angina)')+medRow('cm_gastro','Gastrointestinal / hepatic problems (liver disease, pancreatitis, ulcer, reflux)')+medRow('cm_injuries','Physical injuries or problems (back injury, fractures)')+medRow('cm_endocrine','Endocrine problems (e.g. diabetes)')+medRow('cm_neuro','Neurological problems (fits, seizures, epilepsy, migraines)')+medRow('cm_abi','Head injuries or Acquired Brain Injury (ABI)')+medRow('cm_dental','Dental problems')+medRow('cm_pain','Chronic pain condition')+medRow('cm_pregnancy','Pregnancy')+medRow('cm_skin','Skin conditions')+medRow('cm_sti','STIs (chlamydia, gonorrhoea, herpes etc.)')+
+    _afYN('cm_stitest','STIs — would the client like to be tested?')+
+    _afYN('cm_bbvtested','Blood borne viruses — has the client been tested?')+_afYN('cm_bbvtest','Would the client like to be tested for BBVs?')+_afYN('cm_bbvinfo','Would the client like info about current treatments (e.g. PrEP, Hep C)?')+
+    medRow('cm_other','Other'))+
+  _afSec('4A · Mental health — current diagnosed conditions',
+    mhGroup('Mood [affective] disorders',[['cmh_dep','Depressive disorder'],['cmh_bipolar','Bipolar affective disorder'],['cmh_mood','Mood disorder (unspecified)'],['cmh_moodother','Other']])+
+    mhGroup('Anxiety disorders',[['cmh_gad','Generalised Anxiety Disorder'],['cmh_ptsd','Post-Traumatic Stress Disorder'],['cmh_social','Social phobia'],['cmh_panic','Panic disorder'],['cmh_phobia','Specific phobias'],['cmh_ocd','OCD'],['cmh_anxother','Other']])+
+    mhGroup('Psychotic disorders',[['cmh_schiz','Schizophrenia / schizoaffective disorder'],['cmh_psychosis','Psychosis'],['cmh_drugpsychosis','Drug-induced psychosis'],['cmh_psyother','Other']])+
+    mhGroup('Personality disorders',[['cmh_bpd','Borderline Personality Disorder'],['cmh_aspd','Anti-social Personality Disorder'],['cmh_pdother','Personality disorder (other)']])+
+    mhGroup('Behavioural addictions',[['cmh_gambling','Pathological gambling'],['cmh_behother','Other (e.g. sex addiction)']])+
+    mhGroup('Eating disorders',[['cmh_bulimia','Bulimia nervosa'],['cmh_anorexia','Anorexia nervosa'],['cmh_eatother','Other']])+
+    mhGroup('Other disorders',[['cmh_id','Intellectual disability'],['cmh_dementia','Dementia'],['cmh_adhd','ADHD'],['cmh_autism','Autism'],['cmh_otherother','Other']])+
+    _afA('cmh_history','History of conditions — who diagnosed, when, investigations, treatments',3)+
+    _afYN('cmh_casemgr','Client has a mental health case manager or other MH worker?')+_afA('cmh_casemgrdetails','If yes — worker name and contact details',2)+
+    _afYN('cmh_careplan','Client has a MH care plan from GP?')+_afA('cmh_careplandetails','If yes — details',2)+
+    _afYN('cmh_undiagnosed','Current undiagnosed mental health concerns?')+_afA('cmh_undiagdetails','If yes — details',2))+
+  _afSec('4B · Mental state',
+    _afA('cms_appearance','Appearance / behaviour — grooming, hygiene, eye contact, motor activity, abnormal movements',2)+
+    _afA('cms_speech','Speech — rate, volume, quantity, fluency',2)+
+    _afA('cms_mood','Mood / affect — client self-rated mood 1–10; staff-observed affect (anxious, elevated, blunted, labile, incongruent)',2)+
+    _afA('cms_thoughtform','Thoughts: form — amount and speed, poverty of ideas, flight of ideas, loosening of associations',2)+
+    _afA('cms_thoughtcontent','Thoughts: content — delusions, suicidal thought, obsessions, phobias',2)+
+    _afA('cms_perceptions','Perceptions — hallucinations, depersonalisation, derealisation, illusions',2)+
+    _afA('cms_cognition','Cognition — consciousness & alertness, memory, orientation, concentration',2)+
+    _afA('cms_insight','Insight / judgement — knowledge of problem and need for treatment',2))+
+  _afSec('5 · Current prescribed medications <span style="font-weight:400;font-size:12px;color:var(--muted)">(incl. methadone, psychotropics, OTC and complementary medicines)</span>',
+    _afTable([['cmed_1','1'],['cmed_2','2'],['cmed_3','3'],['cmed_4','4'],['cmed_5','5']],
+      [['name','Medication',120],['dose','Prescribed dose & duration',110],['reason','Reason for prescription / use',110],['taken','Taken as prescribed? If no, reason',110],['prescriber','Prescriber / pharmacy & pick-up arrangements',130]])+
+    _afA('cmed_notes','Notes and actions',2))+
+  _afSec('6 · Suicide & self-harm risk (SAFE-T guide — complete your agency\'s risk assessment form)',
+    '<div class="form-group"><label>Risk factors</label>'+_afC('cs_hopeless','Sense of hopelessness / worthlessness')+_afC('cs_psych','Current / past psychiatric diagnoses')+_afC('cs_medical','Ongoing medical illness')+_afC('cs_trauma','History of abuse / neglect / trauma')+_afC('cs_intox','Intoxication')+_afC('cs_stress','Stressful or triggering events')+_afC('cs_previous','Previous attempts of suicide or self-harm')+'</div>'+_afA('cs_riskcomments','Comments',2)+
+    '<div class="form-group"><label>Suicidal inquiry</label>'+_afC('cs_ideation','Ideation (do you ever think about killing/harming yourself)')+_afC('cs_intent','Intent (do you want to kill/harm yourself)')+_afC('cs_plan','Plan (how would you do it)')+_afC('cs_lethality','Lethality (is the method likely to be lethal)')+_afC('cs_access','Accessibility to means')+_afC('cs_family','Suicide/attempted suicide of significant other or family member')+'</div>'+_afA('cs_inquirycomments','Comments',2)+
+    '<div class="form-group"><label>Protective factors</label>'+_afC('cs_internal','Internal (coping ability, resilience, spirituality, work)')+_afC('cs_external','External (responsibility to children or pets, social support, therapeutic relationships, meaningful activities)')+'</div>'+_afA('cs_protcomments','Comments',2)+
+    _afYN('cs_highrisk','High risk?')+_afA('cs_highriskaction','If YES — action taken (referral etc.) and reasons',2)+
+    '<div style="background:var(--bg);border-radius:8px;padding:12px;margin-top:8px"><div style="font-weight:600;font-size:13px;margin-bottom:6px">Safety plan</div>'+
+    _afA('cs_when','When do you need to call someone? What happens before you reach this point — how to recognise it',2)+
+    _afA('cs_people','People you can call + phone numbers',2)+
+    _afA('cs_actions','Actions for you',2)+_afT('cs_copy','Who has a copy of the plan?')+
+    '<p style="font-size:11.5px;color:var(--muted)">Lifeline 13 11 14 · SuicideLine Victoria 1300 651 251 · DirectLine (AOD) 1800 888 236 · Emergency 000. Provide a copy of this plan to the client.</p></div>')+
+  _afSec('7 · Family violence — basic MARAM-aligned safety plan (victim survivors; led by the victim survivor)',
+    _afA('cfv_protective','Protective factors — what is currently working to keep you / you and your children safe?',2)+
+    _afA('cfv_resources','What resources do you currently have? (cash, phone with safe SIM, car, Myki, documents hidden in safe place)',2)+
+    _afA('cfv_people','Who are the safe people in your life who could support you? Who else needs to be on the plan (children, pets)?',2)+
+    _afA('cfv_escape','How would you get to safety if you needed to leave quickly? Where could you go? When would be a good time?',2)+
+    _afYN('cfv_tech','Is tech safety required? (turn off Find My Phone, change social media settings, new SIM, safe internet)')+
+    '<div class="form-group"><label>Referral needs</label>'+_afC('cfv_ref_sfvs','Specialist Family Violence Service in your area')+_afC('cfv_ref_1800','1800RESPECT (1800 737 732) 24/7 counselling & referrals')+_afC('cfv_ref_orange','The Orange Door')+_afC('cfv_ref_cultural','Culturally-specific services (Aboriginal, LGBTIQA+, disability)')+_afC('cfv_ref_mrs','Male victims: Men\'s Referral Service 1300 766 491')+_afT('cfv_ref_other','Other')+'</div>'+
+    _afA('cfv_followup','Any clinician follow-up actions to be completed',2)+
+    '<div class="grid-2">'+_afD('cfv_reviewdate','Agreed date to review this safety plan')+_afT('cfv_permission','Permission to share information')+_afT('cfv_supports','Existing supports')+'</div>'+
+    _afYN('cfv_consent','Consent to contact?')+
+    '<p style="font-size:11.5px;color:#991b1b">Crisis options: Safe Steps (24/7) 1800 015 188 · Sexual Assault Crisis Line (24/7) 1800 806 292 · 000. It may not be safe for the client to take a copy of this plan — record details for handover and monitoring.</p>')+
+  _afSec('8 · Final case summary sheet',
+    '<div class="grid-2">'+_afT('cf8_sub1','Main substance of concern 1')+_afT('cf8_sub2','Substance of concern 2')+_afT('cf8_sub3','Substance of concern 3')+_afT('cf8_allergies','Allergies')+
+    _afN('cf8_audit','AUDIT score',140)+_afN('cf8_dudit','DUDIT score',140)+_afN('cf8_k10','K10 score',140)+'</div>'+
+    '<p style="font-size:11px;color:var(--muted)">AUDIT: 0–7 low · 8–15 moderate · 16–19 high · 20+ dependence likely. DUDIT: 0–24 dependence unlikely · 25+ likely. K10: 10–19 low · 20–24 mild · 25–29 moderate · 30–50 high distress. (Scores auto-calculate on the Step 1 Screen if completed.)</p>'+
+    _afR('cf8_tier','Tier (1–5)',['1 — Not dependent, no complexity factors','2 — Not dependent, complexity factors','3 — Dependent, 0–1 complexity factors','4 — Dependent, 2–3 complexity factors','5 — Dependent, 4+ complexity factors'],[1,2,3,4,5])+
+    '<div style="font-weight:600;font-size:13px;margin:10px 0 4px">Risk — suicide, self-harm, harm to others</div>'+
+    _afYN('cf8_riskdone','Risk assessment completed?')+_afYN('cf8_safetydone','Safety plan completed?')+_afYN('cf8_harmothers','Risk of harm to others?')+_afA('cf8_riskdetails','Details',2)+
+    '<div style="font-weight:600;font-size:13px;margin:10px 0 4px">Family violence</div>'+
+    _afYN('cf8_maramdone','MARAM victim risk assessment completed?')+_afYN('cf8_fvsafety','FV safety plan completed?')+_afYN('cf8_fviss','FVISS / CISS utilised?')+
+    _afYN('cf8_perp','Person identified as using / perpetrating family violence? (disclosed, referred or court-mandated, respondent on FVIO, identified through information sharing)')+_afA('cf8_perpdetails','Details',2)+
+    _afR('cf8_risklevel','Risk level',['Requires immediate protection','Serious risk','Elevated risk','At risk'])+
+    _afA('cf8_safetyactions','Safety plan actions with handover notes to treating clinician if required',2)+
+    _afA('cf8_goals','Goals and reasons for presentation (including client demographics — gender, age, presenting issues)',3)+
+    _afA('cf8_submh','Substance use and mental health summary',3)+
+    _afA('cf8_otherissues','Other key issues (medical, psychosocial etc.)',2)+
+    '<div style="font-weight:600;font-size:13px;margin:10px 0 4px">Brief case formulation</div>'+
+    _afA('cf8_predisposing','Predisposing',2)+_afA('cf8_precipitating','Precipitating',2)+_afA('cf8_perpetuating','Perpetuating',2)+_afA('cf8_protective','Protective',2))+
+  _afSec('Treatment type/s required & agreed actions',
+    '<div class="form-group"><label>Treatment type/s required (tick all that apply)</label>'+
+    _afC('ct_brief','Brief intervention')+_afC('ct_bridging','Bridging support')+_afC('ct_counselling','Standard counselling')+_afC('ct_complex','Complex counselling')+_afC('ct_reswithdrawal','Residential withdrawal (incl. general hospital)')+_afC('ct_nonreswithdrawal','Non-residential withdrawal')+_afC('ct_resrehab','Residential rehabilitation')+_afC('ct_dayrehab','Therapeutic day rehabilitation')+_afC('ct_carc','Care and recovery coordination')+_afC('ct_pharmaco','Pharmacotherapy')+_afC('ct_family','Family support')+_afC('ct_youth','Youth outreach')+_afT('ct_other','Other (please specify)')+'</div>'+
+    _afD('ct_refdate','Date referral made')+
+    _afA('ct_actions','Agreed actions (referrals — agency name, contact worker, reason, appointment time & date, referral letter sent etc.)',3)+
+    '<div class="grid-2">'+_afD('ct_completed','Date assessment completed')+_afN('ct_sessions','Number of sessions to complete assessment',220)+_afN('ct_dna','Number of assessment sessions client did not attend',220)+'</div>'+
+    _afR('ct_setting','Setting where assessment was completed',['Residential','Non-residential','Home','Off-site','Phone','Other'])+
+    _afYN('ct_consent','Has the agency "consent to share information" form been completed?'))
+}
+
 // ===== VOICE TO TEXT =====
 const _voiceSupported = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
 let _voiceActive = null;
@@ -10536,6 +11087,7 @@ function _observeVoice() {
 function initApp() {
   // Reveal the app chrome (sidebar, topbar, mobile nav) now that the user is authenticated.
   document.body.classList.add('app-authed');
+  applyNavRestrictions();
   const sidebar = document.getElementById('sidebar');
   const main = document.getElementById('main');
 
