@@ -913,7 +913,7 @@ function showPage(page) {
   setMobTab(page);
   document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
   const items = document.querySelectorAll('.nav-item');
-  const titles = { dashboard:'Dashboard', referrals:'Referral Holding Bay', clients:'Clients', sessions:'Session Log', walkins:'Walk-in Register', sewb:'SEWB Program', aod:'AOD Program', justice:'Justice Program', cultural:'Cultural Strengthening', disability:'Disability Program', reports:'Reports', calendar:'Calendar', auditlog:'Audit Log', settings:'Settings' };
+  const titles = { dashboard:'Dashboard', referrals:'Referral Holding Bay', clients:'Clients', sessions:'Session Log', notes:'All Case Notes', walkins:'Walk-in Register', sewb:'SEWB Program', aod:'AOD Program', justice:'Justice Program', cultural:'Cultural Strengthening', disability:'Disability Program', reports:'Reports', calendar:'Calendar', auditlog:'Audit Log', settings:'Settings' };
   document.getElementById('page-title').textContent = titles[page] || page;
   items.forEach(el => { if(el.getAttribute('onclick')?.includes(`'${page}'`)) el.classList.add('active'); });
   if (page !== 'auditlog' && page !== currentPage) audit('Page view', titles[page] || page);
@@ -950,7 +950,7 @@ function showPage(page) {
     btn.onclick = openNewClientModal;
   }
 
-  const pages = { dashboard: renderDashboard, referrals: renderReferrals, clients: renderClients, closedclients: renderClosedClients, sessions: renderSessions, walkins: renderWalkins, sewb: renderSEWB, aod: renderAOD, justice: renderJustice, cultural: renderCultural, disability: renderDisability, workfoundations: renderWorkFoundations, homeownership: renderHomeOwnership, reports: renderReportsPage, calendar: renderCalendarPage, resources: renderResourcesPage, auditlog: renderAuditLog, settings: renderSettings, chat: renderChatPage };
+  const pages = { dashboard: renderDashboard, referrals: renderReferrals, clients: renderClients, closedclients: renderClosedClients, sessions: renderSessions, notes: renderAllNotes, walkins: renderWalkins, sewb: renderSEWB, aod: renderAOD, justice: renderJustice, cultural: renderCultural, disability: renderDisability, workfoundations: renderWorkFoundations, homeownership: renderHomeOwnership, reports: renderReportsPage, calendar: renderCalendarPage, resources: renderResourcesPage, auditlog: renderAuditLog, settings: renderSettings, chat: renderChatPage };
   const fn = pages[page];
   document.getElementById('content').innerHTML = fn ? fn() : '<div class="empty-state"><p>This page could not be opened. Please refresh, or contact your system manager if it keeps happening.</p></div>';
   attachPageEvents(page);
@@ -1186,23 +1186,23 @@ function openClientProfile(id) {
   </div>
 
   <div class="tabs" id="profile-tabs">
-    <div class="tab active" onclick="switchProfileTab('overview','${id}')">Overview</div>
-    <div class="tab" id="ptab-notes" onclick="switchProfileTab('notes','${id}')">📝 Notes &amp; Files (${clientNotes.length})</div>
-    <div class="tab" onclick="switchProfileTab('summary','${id}')">📄 Summary</div>
-    <div class="tab" onclick="switchProfileTab('intake','${id}')">📋 Intake Form</div>
-    <div class="tab" onclick="switchProfileTab('keyworkers','${id}')">👷 Key Workers</div>
-    <div class="tab" onclick="switchProfileTab('demographics','${id}')">Demographics</div>
-    <div class="tab" onclick="switchProfileTab('sewb','${id}')">SEWB</div>
-    <div class="tab" onclick="switchProfileTab('aod','${id}')">AOD</div>
-    <div class="tab" onclick="switchProfileTab('justice','${id}')">Justice</div>
-    <div class="tab" onclick="switchProfileTab('disability','${id}')">♿ Disability</div>
-    <div class="tab" onclick="switchProfileTab('workfoundations','${id}')">💼 Work Foundations</div>
-    <div class="tab" onclick="switchProfileTab('cultural','${id}')">Cultural Strengthening</div>
-    <div class="tab" onclick="switchProfileTab('time','${id}')">Time (${hrs}h ${mins}m)</div>
-    <div class="tab" onclick="switchProfileTab('safety','${id}')">Safety Plan</div>
-    <div class="tab" onclick="switchProfileTab('goals','${id}')">🎯 Goals (${(c.goalPlan||[]).length})</div>
-    <div class="tab" id="ptab-files" onclick="switchProfileTab('files','${id}')">📎 Files (${(c.attachments||[]).length})</div>
-    <div class="tab" onclick="switchProfileTab('feedback','${id}')">⭐ Feedback</div>
+    <div class="tab active" onclick="switchProfileTab('overview','${id}',this)">Overview</div>
+    <div class="tab" id="ptab-notes" onclick="switchProfileTab('notes','${id}',this)">📝 Notes &amp; Files (${clientNotes.length})</div>
+    <div class="tab" onclick="switchProfileTab('summary','${id}',this)">📄 Summary</div>
+    <div class="tab" onclick="switchProfileTab('intake','${id}',this)">📋 Intake Form</div>
+    <div class="tab" onclick="switchProfileTab('keyworkers','${id}',this)">👷 Key Workers</div>
+    <div class="tab" onclick="switchProfileTab('demographics','${id}',this)">Demographics</div>
+    <div class="tab" onclick="switchProfileTab('sewb','${id}',this)">SEWB</div>
+    <div class="tab" onclick="switchProfileTab('aod','${id}',this)">AOD</div>
+    <div class="tab" onclick="switchProfileTab('justice','${id}',this)">Justice</div>
+    <div class="tab" onclick="switchProfileTab('disability','${id}',this)">♿ Disability</div>
+    <div class="tab" onclick="switchProfileTab('workfoundations','${id}',this)">💼 Work Foundations</div>
+    <div class="tab" onclick="switchProfileTab('cultural','${id}',this)">Cultural Strengthening</div>
+    <div class="tab" onclick="switchProfileTab('time','${id}',this)">Time (${hrs}h ${mins}m)</div>
+    <div class="tab" onclick="switchProfileTab('safety','${id}',this)">Safety Plan</div>
+    <div class="tab" onclick="switchProfileTab('goals','${id}',this)">🎯 Goals (${(c.goalPlan||[]).length})</div>
+    <div class="tab" id="ptab-files" onclick="switchProfileTab('files','${id}',this)">📎 Files (${(c.attachments||[]).length})</div>
+    <div class="tab" onclick="switchProfileTab('feedback','${id}',this)">⭐ Feedback</div>
   </div>
   <div id="profile-tab-content">${renderProfileTab('overview', c, clientNotes, clientTime)}</div>
   `;
@@ -1210,13 +1210,14 @@ function openClientProfile(id) {
   showModal('👤 Client Profile', html, null, '900px', true);
 }
 
-function switchProfileTab(tab, id) {
+function switchProfileTab(tab, id, el) {
   const c = clients.find(cl=>cl.id===id);
   if(!c) return;
   const clientNotes = notes.filter(n=>n.clientId===id).sort((a,b)=>b.created?.localeCompare(a.created));
   const clientTime = timeLogs.filter(t=>t.clientId===id);
   document.querySelectorAll('#profile-tabs .tab').forEach(t=>t.classList.remove('active'));
-  event.target.classList.add('active');
+  const _tabEl = el || (typeof event!=='undefined' && event && event.target);
+  if(_tabEl && _tabEl.classList) _tabEl.classList.add('active');
   document.getElementById('profile-tab-content').innerHTML = renderProfileTab(tab, c, clientNotes, clientTime);
   if(tab === 'intake') {
     startIntakeAutoSave(id);
@@ -9738,13 +9739,55 @@ function chatCol(name) {
 }
 
 // ---- render chat page ----
+// ===== ALL CASE NOTES (dashboard "View all") =====
+let _notesTypeFilter = 'all';
+function _allNotesList() {
+  const q = (document.getElementById('notes-search')?.value || '').toLowerCase();
+  const all = notes.slice().sort((a,b)=>(b.created||'').localeCompare(a.created||''));
+  const filtered = all.filter(n=>{
+    if(_notesTypeFilter!=='all' && (n.type||'general')!==_notesTypeFilter) return false;
+    if(!q) return true;
+    const c = clients.find(cl=>cl.id===n.clientId);
+    return (n.text||'').toLowerCase().includes(q) || (c?.fullName||'').toLowerCase().includes(q) || (n.worker||n.author||'').toLowerCase().includes(q);
+  });
+  const count = document.getElementById('notes-count');
+  if(count) count.textContent = `${filtered.length} of ${all.length}`;
+  return filtered.length===0 ? '<div class="empty-state"><div class="icon">📝</div><p>No notes match your search</p></div>' :
+    filtered.map(n=>{
+      const c = clients.find(cl=>cl.id===n.clientId);
+      return `<div class="note-entry ${n.type||'general'}" style="margin-bottom:10px;cursor:pointer" onclick="openClientProfile('${n.clientId}')">
+        <div class="note-meta"><span class="section-badge badge-${n.type||'general'}">${n.type||'general'}</span><span style="font-weight:600">${sanitize(c?.fullName||'Unknown client')}</span><span>${sanitize(n.worker||n.author||'Staff')}</span><span>${fmtdt(n.created)}</span></div>
+        <div class="note-text">${sanitize(n.text||'')}</div>
+      </div>`;
+    }).join('');
+}
+function _filterAllNotes() { const el = document.getElementById('notes-results'); if(el) el.innerHTML = _allNotesList(); }
+function _setNotesType(t) { _notesTypeFilter = t; document.querySelectorAll('.notes-type-chip').forEach(b=>{ b.className='notes-type-chip btn btn-sm '+(b.dataset.t===t?'btn-primary':'btn-outline'); }); _filterAllNotes(); }
+function renderAllNotes() {
+  const types = ['all','general','sewb','aod','justice','cultural','disability'];
+  const chip = t => `<button class="notes-type-chip btn btn-sm ${_notesTypeFilter===t?'btn-primary':'btn-outline'}" data-t="${t}" onclick="_setNotesType('${t}')" style="text-transform:capitalize">${t==='all'?'All types':t}</button>`;
+  return `
+  <div class="card" style="margin-bottom:16px">
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <input id="notes-search" oninput="_filterAllNotes()" placeholder="🔍 Search notes, client or worker…" style="flex:1;min-width:220px;padding:9px 12px;border:1px solid var(--border);border-radius:8px;font-size:13px">
+      <span id="notes-count" style="font-size:12px;color:var(--muted)"></span>
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">${types.map(chip).join('')}</div>
+  </div>
+  <div class="card"><div id="notes-results">${_allNotesList()}</div></div>`;
+}
+
 function renderChatPage() {
   document.getElementById('page-title').textContent = 'Messages';
   document.getElementById('top-action-btn').textContent = '✏️ New Message';
   document.getElementById('top-action-btn').onclick = openNewConvModal;
 
   const syncReady = FSYNC.isReady();
-  document.getElementById('content').innerHTML = `
+  // Kick off the live listeners after this HTML is placed into the DOM by
+  // showPage() (renderChatPage returns the markup rather than writing it
+  // itself, so the return value isn't clobbered).
+  if(syncReady) setTimeout(()=>{ if(currentPage==='chat'){ _chatUnsubAll(); _chatListenConvs(); } }, 0);
+  return `
   <div id="chat-wrap" style="display:flex;gap:0;height:calc(100vh - 110px);background:var(--card);border-radius:12px;overflow:hidden;border:1px solid var(--border)">
     <!-- Sidebar list -->
     <div id="chat-list-pane" style="width:280px;min-width:220px;border-right:1px solid var(--border);display:flex;flex-direction:column;background:var(--bg)">
@@ -9769,11 +9812,6 @@ function renderChatPage() {
       </div>
     </div>
   </div>`;
-
-  if(syncReady) {
-    _chatUnsubAll();
-    _chatListenConvs();
-  }
 }
 
 function _chatUnsubAll() {
@@ -11444,6 +11482,15 @@ function sanitize(str) {
   const _origSaveCU = saveCurrentUser;
   window.saveCurrentUser = function(u) { _origSaveCU(u); if(u) resetIdle(); else clearTimeout(_idleTimer); };
 })();
+
+// Press Escape to close whatever modal is open — matches what users expect and
+// gives a keyboard way out of large forms.
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    const mc = document.getElementById('modal-container');
+    if (mc && mc.innerHTML.trim()) { closeModal(); }
+  }
+});
 
 // ===== INIT =====
 // Clear any old Firebase config saved in localStorage so the hardcoded config always wins
