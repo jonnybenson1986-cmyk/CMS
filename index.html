@@ -596,6 +596,7 @@ const FSYNC = (() => {
       col('clients').get(), col('notes').get(), col('timelogs').get(),
       col('referrals').get(), col('workersList').get(), col('workflowTasks').get(),
     ]);
+    try { const ps = await col('policies').doc('list').get(); const pl = ps.exists ? ps.data().list : null; if(pl){ policies = pl; DB.save('policies', policies); } } catch(e){}
     if (!cs.empty) { clients = cs.docs.map(d=>d.data()); DB.save('clients',clients); }
     if (!ns.empty) { notes   = ns.docs.map(d=>d.data()); DB.save('notes',notes); }
     if (!ts.empty) { timeLogs= ts.docs.map(d=>d.data()); DB.save('timelogs',timeLogs); }
@@ -614,6 +615,7 @@ const FSYNC = (() => {
     _listeners.push(col('notes').onSnapshot(snap=>{ if(snap.metadata.hasPendingWrites)return; notes=snap.docs.map(d=>d.data());DB.save('notes',notes); }));
     _listeners.push(col('timelogs').onSnapshot(snap=>{ if(snap.metadata.hasPendingWrites)return; timeLogs=snap.docs.map(d=>d.data());DB.save('timelogs',timeLogs); }));
     _listeners.push(col('referrals').onSnapshot(snap=>{ if(snap.metadata.hasPendingWrites)return; referrals=snap.docs.map(d=>d.data());DB.save('referrals',referrals); if(currentPage==='referrals')setTimeout(()=>showPage('referrals'),50); }));
+    _listeners.push(col('policies').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; const pl=doc.exists?doc.data().list:null; if(pl){ policies=pl; DB.save('policies',policies); if(currentPage==='policies')setTimeout(()=>showPage('policies'),50); } }));
   }
 
   async function _batch(colName, items, idFn) {
@@ -636,6 +638,7 @@ const FSYNC = (() => {
   async function pushReferrals(){ await _batch('referrals',referrals,r=>r.id||uid()); }
   async function pushWorkers()  { if(db) col('workersList').doc('list').set({list:workersList}).catch(()=>{}); }
   async function pushTasks()    { if(db) col('workflowTasks').doc('list').set({list:workflowTasks}).catch(()=>{}); }
+  async function pushPolicies() { if(db) col('policies').doc('list').set({list:policies.map(p=>{ const {data,...rest}=p; return rest; })}).catch(e=>console.warn('Policy sync:',e.message)); }
   async function pushAudit()    { await _batch('auditlog',auditLog,a=>a.id); }
   async function deleteDoc(colName,id) { if(db&&id) col(colName).doc(id).delete().catch(()=>{}); }
 
@@ -773,7 +776,7 @@ const FSYNC = (() => {
   }
 
   return { init, isReady, pushAll, pushClients, pushNotes, pushReferrals, pushWorkers, pushTasks, pushAudit, pushBrokerage, deleteDoc, getCfg, saveCfg, showSetupModal, clearConfig,
-    storageReady, uploadFile, deleteStorageFile, getStorageURL, wipeCollections, wipeStorageFolder };
+    storageReady, uploadFile, deleteStorageFile, getStorageURL, wipeCollections, wipeStorageFolder, pushPolicies };
 })();
 
 let clients = DB.load('clients', []);
@@ -9264,12 +9267,15 @@ function renderPoliciesPage() {
   <div class="card">
     <div class="card-header">
       <div class="card-title">📖 Policies &amp; Procedures</div>
-      ${mgr?`<label class="btn btn-primary" style="cursor:pointer;margin:0">
-        ➕ Upload Document
-        <input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.png,.jpg,.jpeg" multiple style="display:none" onchange="uploadPolicies(this)">
-      </label>`:''}
+      ${mgr?`<div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-primary" style="margin:0" onclick="openPolicyEditor()">✍️ Write Policy / Procedure</button>
+        <label class="btn btn-outline" style="cursor:pointer;margin:0">
+          ⬆️ Upload Document
+          <input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.png,.jpg,.jpeg" multiple style="display:none" onchange="uploadPolicies(this)">
+        </label>
+      </div>`:''}
     </div>
-    <p style="font-size:13px;color:var(--muted);margin-bottom:14px">The organisation's policies, procedures, forms and guidelines — one place for the whole team. ${mgr?'Choose a category, then upload or drag files in.':'Contact a manager to add or update documents.'}</p>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:14px">The organisation's policies, procedures, forms and guidelines — one place for the whole team. ${mgr?'Write a document on screen, or upload a file.':'Contact a manager to add or update documents.'}</p>
     ${mgr?`
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
       <label style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Upload as</label>
@@ -9301,33 +9307,106 @@ function renderPoliciesList() {
   const q = (document.getElementById('policy-search')?.value||'').toLowerCase();
   const list = policies
     .filter(p=>_polCatFilter==='all' || (p.category||'Other')===_polCatFilter)
-    .filter(p=>!q || p.name.toLowerCase().includes(q))
+    .filter(p=>!q || p.name.toLowerCase().includes(q) || (p.written && (p.body||'').toLowerCase().includes(q)))
     .sort((a,b)=>(a.category||'').localeCompare(b.category||'') || a.name.localeCompare(b.name));
   const count = document.getElementById('policy-count');
   if(count) count.textContent = `${list.length} of ${policies.length}`;
-  if(!policies.length) return `<div class="empty-state" style="padding:24px"><div class="icon">📖</div><p>No policies or procedures uploaded yet${_polIsMgr()?' — upload the first document above':''}</p></div>`;
+  if(!policies.length) return `<div class="empty-state" style="padding:24px"><div class="icon">📖</div><p>No policies or procedures yet${_polIsMgr()?' — use “Write Policy / Procedure” or upload a file above':''}</p></div>`;
   if(!list.length) return `<div class="empty-state" style="padding:20px"><p>No documents match your search</p></div>`;
   const icons = { pdf:'📄', doc:'📝', docx:'📝', xls:'📊', xlsx:'📊', ppt:'📋', pptx:'📋', txt:'📃', png:'🖼️', jpg:'🖼️', jpeg:'🖼️' };
   const catColours = { Policy:'#ede9fe;color:#6b21a8', Procedure:'#dbeafe;color:#1e40af', Form:'#d1fae5;color:#065f46', Guideline:'#fef3c7;color:#92400e', Other:'#f3f4f6;color:#6b7280' };
   const mgr = _polIsMgr();
   return `<div style="display:grid;gap:8px">
     ${list.map(p=>{
-      const ext = p.name.split('.').pop().toLowerCase();
-      const size = p.size<1024*1024 ? (p.size/1024).toFixed(1)+' KB' : (p.size/1024/1024).toFixed(1)+' MB';
+      const written = !!p.written;
+      const ext = written ? '' : p.name.split('.').pop().toLowerCase();
+      const icon = written ? '✍️' : (icons[ext]||'📎');
+      const meta = written
+        ? `Written document &bull; ${p.updatedAt?'Updated '+fmt(p.updatedAt):'Added '+(p.uploaded||'')}${p.uploadedBy?' by '+sanitize(p.uploadedBy):''}`
+        : `${p.size<1024*1024 ? (p.size/1024).toFixed(1)+' KB' : (p.size/1024/1024).toFixed(1)+' MB'} &bull; Uploaded ${p.uploaded||''}${p.uploadedBy?' by '+sanitize(p.uploadedBy):''}`;
       return `<div style="display:flex;align-items:center;gap:12px;padding:10px 14px;background:var(--bg);border-radius:8px;border:1px solid var(--border)">
-        <span style="font-size:24px">${icons[ext]||'📎'}</span>
-        <div style="flex:1;min-width:0">
+        <span style="font-size:24px">${icon}</span>
+        <div style="flex:1;min-width:0;cursor:${written?'pointer':'default'}" ${written?`onclick="viewPolicy('${p.id}')"`:''}>
           <div style="font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${sanitize(p.name)}</div>
-          <div style="font-size:11px;color:var(--muted)">${size} &bull; Uploaded ${p.uploaded||''}${p.uploadedBy?' by '+sanitize(p.uploadedBy):''}</div>
+          <div style="font-size:11px;color:var(--muted)">${meta}</div>
         </div>
         <span style="font-size:10px;font-weight:700;padding:2px 10px;border-radius:12px;background:${catColours[p.category]||catColours.Other}">${sanitize(p.category||'Other')}</span>
         <div style="display:flex;gap:6px;flex-shrink:0">
-          <button class="btn btn-sm btn-outline" onclick="downloadPolicy('${p.id}')">⬇️ Download</button>
+          ${written
+            ? `<button class="btn btn-sm btn-outline" onclick="viewPolicy('${p.id}')">👁️ View</button>${mgr?`<button class="btn btn-sm btn-outline" onclick="openPolicyEditor('${p.id}')">✏️ Edit</button>`:''}`
+            : `<button class="btn btn-sm btn-outline" onclick="downloadPolicy('${p.id}')">⬇️ Download</button>`}
           ${mgr?`<button class="btn btn-sm btn-danger" onclick="deletePolicy('${p.id}')">✕</button>`:''}
         </div>
       </div>`;
     }).join('')}
   </div>`;
+}
+
+// Write or edit a policy/procedure directly in the app (no file needed).
+function openPolicyEditor(id) {
+  if(!_polIsMgr()){ showToast('Only managers can write or edit policy documents'); return; }
+  const existing = id ? policies.find(p=>p.id===id) : null;
+  const html = `
+    <div class="grid-2">
+      <div class="form-group"><label>Title</label><input id="pol-title" value="${existing?sanitize(existing.name):''}" placeholder="e.g. Client Confidentiality Policy"></div>
+      <div class="form-group"><label>Category</label>
+        <select id="pol-cat">${POLICY_CATS.map(c=>`<option ${existing&&existing.category===c?'selected':''}>${c}</option>`).join('')}</select></div>
+    </div>
+    <div class="form-group"><label>Document text</label>
+      <textarea id="pol-body" rows="16" placeholder="Type or paste the full policy / procedure here. Use blank lines between sections — headings and spacing are preserved." style="font-family:inherit;line-height:1.6">${existing?sanitize(existing.body||''):''}</textarea>
+    </div>
+    <p style="font-size:12px;color:var(--muted)">Saved into the shared library and viewable on screen by all staff. You can edit it here any time.</p>`;
+  showModal(existing?'✏️ Edit Policy / Procedure':'✍️ Write Policy / Procedure', html, ()=>savePolicyDoc(id), '760px');
+}
+
+function savePolicyDoc(id) {
+  const title = document.getElementById('pol-title')?.value?.trim();
+  const body  = document.getElementById('pol-body')?.value ?? '';
+  const category = document.getElementById('pol-cat')?.value || 'Policy';
+  if(!title){ showToast('Please give the document a title'); return false; }
+  if(!body.trim()){ showToast('Please enter the document text'); return false; }
+  const existing = id ? policies.find(p=>p.id===id) : null;
+  if(existing){
+    existing.name=title; existing.category=category; existing.body=body;
+    existing.updatedAt=now(); existing.updatedBy=currentUser?.name||'';
+    audit('Policy document edited', title+' ('+category+')');
+  } else {
+    policies.push({ id:uid(), written:true, name:title, category, body, uploaded:today(), uploadedBy:currentUser?.name||'' });
+    audit('Policy document written', title+' ('+category+')');
+  }
+  savePolicies();
+  if(FSYNC.isReady()) FSYNC.pushPolicies?.();
+  _filterPolicies();
+  showToast(`"${sanitize(title)}" saved`);
+  return true;
+}
+
+// Read a written policy on screen.
+function viewPolicy(id) {
+  const p = policies.find(x=>x.id===id);
+  if(!p || !p.written) return;
+  const catColours = { Policy:'#ede9fe;color:#6b21a8', Procedure:'#dbeafe;color:#1e40af', Form:'#d1fae5;color:#065f46', Guideline:'#fef3c7;color:#92400e', Other:'#f3f4f6;color:#6b7280' };
+  const meta = p.updatedAt ? 'Last updated '+fmtdt(p.updatedAt)+(p.updatedBy?' by '+sanitize(p.updatedBy):'') : 'Added '+(p.uploaded||'')+(p.uploadedBy?' by '+sanitize(p.uploadedBy):'');
+  const html = `
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
+      <span style="font-size:11px;font-weight:700;padding:3px 12px;border-radius:12px;background:${catColours[p.category]||catColours.Other}">${sanitize(p.category||'Other')}</span>
+      <span style="font-size:12px;color:var(--muted)">${meta}</span>
+      <div style="margin-left:auto;display:flex;gap:8px">
+        <button class="btn btn-sm btn-outline" onclick="printPolicy('${p.id}')">🖨️ Print</button>
+        ${_polIsMgr()?`<button class="btn btn-sm btn-primary" onclick="closeModal();openPolicyEditor('${p.id}')">✏️ Edit</button>`:''}
+      </div>
+    </div>
+    <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:20px 22px;max-height:60vh;overflow-y:auto;white-space:pre-wrap;font-size:14px;line-height:1.7">${sanitize(p.body||'')}</div>`;
+  showModal('📖 '+sanitize(p.name), html, null, '820px', true);
+}
+
+function printPolicy(id) {
+  const p = policies.find(x=>x.id===id);
+  if(!p) return;
+  audit('Policy document printed', p.name);
+  const body = sanitize(p.body||'').replace(/\n/g,'<br>');
+  openReport(reportHeader(p.name, (p.category||'Policy')+' — Worn Gundidj', '') +
+    `<div style="white-space:normal;font-size:12px;line-height:1.7;margin-top:8px">${body}</div>`);
 }
 function _filterPolicies(){ const el=document.getElementById('policies-list'); if(el) el.innerHTML=renderPoliciesList(); }
 function _setPolicyCat(c){ _polCatFilter=c; document.querySelectorAll('.policy-cat-chip').forEach(b=>{ b.className='policy-cat-chip btn btn-sm '+(b.dataset.c===c?'btn-primary':'btn-outline'); }); _filterPolicies(); }
@@ -9348,7 +9427,7 @@ async function uploadPolicies(input) {
     catch(e){ console.warn('Upload failed:', e); showToast("Upload failed — the file wasn't saved. Please check your connection and try again."); }
   }
   if(ok){
-    savePolicies(); _filterPolicies();
+    savePolicies(); if(FSYNC.isReady()) FSYNC.pushPolicies?.(); _filterPolicies();
     showToast(`${ok} document${ok!==1?'s':''} added to ${category==='Other'?'the library':category+'s'} ✓`);
     audit('Policy document uploaded', files.map(f=>f.name).join(', ')+' ('+category+')');
   }
@@ -9368,7 +9447,7 @@ function deletePolicy(id) {
   if(!p || !confirm(`Delete "${sanitize(p.name)}" from the policy library?`)) return;
   if(p.storagePath) FSYNC.deleteStorageFile(p.storagePath);
   policies = policies.filter(x=>x.id!==id);
-  savePolicies(); _filterPolicies();
+  savePolicies(); if(FSYNC.isReady()) FSYNC.pushPolicies?.(); _filterPolicies();
   audit('Policy document deleted', p.name);
   showToast(`"${sanitize(p.name)}" deleted`);
 }
