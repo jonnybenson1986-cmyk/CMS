@@ -383,8 +383,8 @@
   </div>
   <div class="nav-section">
     <div class="nav-section-label">Admin</div>
-    <div class="nav-item" onclick="showPage('chat')" id="nav-chat">
-      <span class="icon">💬</span><span>Messages</span><span id="chat-unread-badge" style="display:none;background:#dc2626;color:#fff;font-size:10px;font-weight:700;border-radius:10px;padding:1px 6px;margin-left:auto"></span>
+    <div class="nav-item" onclick="showPage('policies')">
+      <span class="icon">📖</span><span>Policies &amp; Procedures</span>
     </div>
     <div class="nav-item" onclick="showPage('calendar')">
       <span class="icon">📅</span><span>Calendar</span>
@@ -801,6 +801,7 @@ let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
 let fphoClients = DB.load('fphoClients', []); // separate client roster for the FPHO program
 let resources = DB.load('resources', []);
+let policies = DB.load('policies', []); // organisation policies & procedures library
 function saveFPHO() { DB.save('fphoApplications', fphoApplications); }
 function saveFPHOClients() { DB.save('fphoClients', fphoClients); }
 
@@ -913,7 +914,7 @@ function showPage(page) {
   setMobTab(page);
   document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
   const items = document.querySelectorAll('.nav-item');
-  const titles = { dashboard:'Dashboard', referrals:'Referral Holding Bay', clients:'Clients', sessions:'Session Log', walkins:'Walk-in Register', sewb:'SEWB Program', aod:'AOD Program', justice:'Justice Program', cultural:'Cultural Strengthening', disability:'Disability Program', reports:'Reports', calendar:'Calendar', auditlog:'Audit Log', settings:'Settings' };
+  const titles = { dashboard:'Dashboard', referrals:'Referral Holding Bay', clients:'Clients', sessions:'Session Log', notes:'All Case Notes', policies:'Policies & Procedures', walkins:'Walk-in Register', sewb:'SEWB Program', aod:'AOD Program', justice:'Justice Program', cultural:'Cultural Strengthening', disability:'Disability Program', reports:'Reports', calendar:'Calendar', auditlog:'Audit Log', settings:'Settings' };
   document.getElementById('page-title').textContent = titles[page] || page;
   items.forEach(el => { if(el.getAttribute('onclick')?.includes(`'${page}'`)) el.classList.add('active'); });
   if (page !== 'auditlog' && page !== currentPage) audit('Page view', titles[page] || page);
@@ -950,7 +951,7 @@ function showPage(page) {
     btn.onclick = openNewClientModal;
   }
 
-  const pages = { dashboard: renderDashboard, referrals: renderReferrals, clients: renderClients, closedclients: renderClosedClients, sessions: renderSessions, walkins: renderWalkins, sewb: renderSEWB, aod: renderAOD, justice: renderJustice, cultural: renderCultural, disability: renderDisability, workfoundations: renderWorkFoundations, homeownership: renderHomeOwnership, reports: renderReportsPage, calendar: renderCalendarPage, resources: renderResourcesPage, auditlog: renderAuditLog, settings: renderSettings, chat: renderChatPage };
+  const pages = { dashboard: renderDashboard, referrals: renderReferrals, clients: renderClients, closedclients: renderClosedClients, sessions: renderSessions, notes: renderAllNotes, walkins: renderWalkins, sewb: renderSEWB, aod: renderAOD, justice: renderJustice, cultural: renderCultural, disability: renderDisability, workfoundations: renderWorkFoundations, homeownership: renderHomeOwnership, reports: renderReportsPage, calendar: renderCalendarPage, resources: renderResourcesPage, policies: renderPoliciesPage, auditlog: renderAuditLog, settings: renderSettings, chat: renderChatPage };
   const fn = pages[page];
   document.getElementById('content').innerHTML = fn ? fn() : '<div class="empty-state"><p>This page could not be opened. Please refresh, or contact your system manager if it keeps happening.</p></div>';
   attachPageEvents(page);
@@ -1186,23 +1187,23 @@ function openClientProfile(id) {
   </div>
 
   <div class="tabs" id="profile-tabs">
-    <div class="tab active" onclick="switchProfileTab('overview','${id}')">Overview</div>
-    <div class="tab" id="ptab-notes" onclick="switchProfileTab('notes','${id}')">📝 Notes &amp; Files (${clientNotes.length})</div>
-    <div class="tab" onclick="switchProfileTab('summary','${id}')">📄 Summary</div>
-    <div class="tab" onclick="switchProfileTab('intake','${id}')">📋 Intake Form</div>
-    <div class="tab" onclick="switchProfileTab('keyworkers','${id}')">👷 Key Workers</div>
-    <div class="tab" onclick="switchProfileTab('demographics','${id}')">Demographics</div>
-    <div class="tab" onclick="switchProfileTab('sewb','${id}')">SEWB</div>
-    <div class="tab" onclick="switchProfileTab('aod','${id}')">AOD</div>
-    <div class="tab" onclick="switchProfileTab('justice','${id}')">Justice</div>
-    <div class="tab" onclick="switchProfileTab('disability','${id}')">♿ Disability</div>
-    <div class="tab" onclick="switchProfileTab('workfoundations','${id}')">💼 Work Foundations</div>
-    <div class="tab" onclick="switchProfileTab('cultural','${id}')">Cultural Strengthening</div>
-    <div class="tab" onclick="switchProfileTab('time','${id}')">Time (${hrs}h ${mins}m)</div>
-    <div class="tab" onclick="switchProfileTab('safety','${id}')">Safety Plan</div>
-    <div class="tab" onclick="switchProfileTab('goals','${id}')">🎯 Goals (${(c.goalPlan||[]).length})</div>
-    <div class="tab" id="ptab-files" onclick="switchProfileTab('files','${id}')">📎 Files (${(c.attachments||[]).length})</div>
-    <div class="tab" onclick="switchProfileTab('feedback','${id}')">⭐ Feedback</div>
+    <div class="tab active" onclick="switchProfileTab('overview','${id}',this)">Overview</div>
+    <div class="tab" id="ptab-notes" onclick="switchProfileTab('notes','${id}',this)">📝 Notes &amp; Files (${clientNotes.length})</div>
+    <div class="tab" onclick="switchProfileTab('summary','${id}',this)">📄 Summary</div>
+    <div class="tab" onclick="switchProfileTab('intake','${id}',this)">📋 Intake Form</div>
+    <div class="tab" onclick="switchProfileTab('keyworkers','${id}',this)">👷 Key Workers</div>
+    <div class="tab" onclick="switchProfileTab('demographics','${id}',this)">Demographics</div>
+    <div class="tab" onclick="switchProfileTab('sewb','${id}',this)">SEWB</div>
+    <div class="tab" onclick="switchProfileTab('aod','${id}',this)">AOD</div>
+    <div class="tab" onclick="switchProfileTab('justice','${id}',this)">Justice</div>
+    <div class="tab" onclick="switchProfileTab('disability','${id}',this)">♿ Disability</div>
+    <div class="tab" onclick="switchProfileTab('workfoundations','${id}',this)">💼 Work Foundations</div>
+    <div class="tab" onclick="switchProfileTab('cultural','${id}',this)">Cultural Strengthening</div>
+    <div class="tab" onclick="switchProfileTab('time','${id}',this)">Time (${hrs}h ${mins}m)</div>
+    <div class="tab" onclick="switchProfileTab('safety','${id}',this)">Safety Plan</div>
+    <div class="tab" onclick="switchProfileTab('goals','${id}',this)">🎯 Goals (${(c.goalPlan||[]).length})</div>
+    <div class="tab" id="ptab-files" onclick="switchProfileTab('files','${id}',this)">📎 Files (${(c.attachments||[]).length})</div>
+    <div class="tab" onclick="switchProfileTab('feedback','${id}',this)">⭐ Feedback</div>
   </div>
   <div id="profile-tab-content">${renderProfileTab('overview', c, clientNotes, clientTime)}</div>
   `;
@@ -1210,13 +1211,14 @@ function openClientProfile(id) {
   showModal('👤 Client Profile', html, null, '900px', true);
 }
 
-function switchProfileTab(tab, id) {
+function switchProfileTab(tab, id, el) {
   const c = clients.find(cl=>cl.id===id);
   if(!c) return;
   const clientNotes = notes.filter(n=>n.clientId===id).sort((a,b)=>b.created?.localeCompare(a.created));
   const clientTime = timeLogs.filter(t=>t.clientId===id);
   document.querySelectorAll('#profile-tabs .tab').forEach(t=>t.classList.remove('active'));
-  event.target.classList.add('active');
+  const _tabEl = el || (typeof event!=='undefined' && event && event.target);
+  if(_tabEl && _tabEl.classList) _tabEl.classList.add('active');
   document.getElementById('profile-tab-content').innerHTML = renderProfileTab(tab, c, clientNotes, clientTime);
   if(tab === 'intake') {
     startIntakeAutoSave(id);
@@ -9246,6 +9248,131 @@ function deleteResource(id) {
   showToast(`"${sanitize(r.name)}" deleted`);
 }
 
+// ===== ORGANISATION POLICIES & PROCEDURES =====
+// Central library for the org's governance documents. Everyone can read and
+// download; only managers (sysmanager/admin/supervisor) can upload or delete.
+// Files use the same storage pipeline as Resources (cloud when connected,
+// local fallback) under the teams/{team}/policies folder.
+let _polCatFilter = 'all';
+const POLICY_CATS = ['Policy','Procedure','Form','Guideline','Other'];
+function savePolicies() { DB.save('policies', policies); }
+function _polIsMgr() { return ['sysmanager','admin','supervisor'].includes(currentUser?.role); }
+
+function renderPoliciesPage() {
+  const mgr = _polIsMgr();
+  return `
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">📖 Policies &amp; Procedures</div>
+      ${mgr?`<label class="btn btn-primary" style="cursor:pointer;margin:0">
+        ➕ Upload Document
+        <input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.png,.jpg,.jpeg" multiple style="display:none" onchange="uploadPolicies(this)">
+      </label>`:''}
+    </div>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:14px">The organisation's policies, procedures, forms and guidelines — one place for the whole team. ${mgr?'Choose a category, then upload or drag files in.':'Contact a manager to add or update documents.'}</p>
+    ${mgr?`
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+      <label style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Upload as</label>
+      <select id="policy-cat" style="padding:8px 12px;border:1px solid var(--border);border-radius:8px;font-size:13px">
+        ${POLICY_CATS.map(c=>`<option>${c}</option>`).join('')}
+      </select>
+    </div>
+    <div style="border:2.5px dashed var(--border);border-radius:12px;padding:28px 20px;text-align:center;cursor:pointer;transition:all .2s;margin-bottom:16px;background:var(--bg)"
+      onclick="this.closest('.card').querySelector('input[type=file]').click()"
+      ondragover="event.preventDefault();this.style.borderColor='var(--primary)';this.style.background='#f0fdf4'"
+      ondragleave="this.style.borderColor='var(--border)';this.style.background='var(--bg)'"
+      ondrop="event.preventDefault();this.style.borderColor='var(--border)';this.style.background='var(--bg)';uploadPolicies({files:event.dataTransfer.files,value:''})">
+      <div style="font-size:36px;margin-bottom:6px">📖</div>
+      <div style="font-size:14px;font-weight:700;color:var(--primary);margin-bottom:3px">Drag &amp; drop documents here</div>
+      <div style="font-size:12px;color:var(--muted)">or click to browse — PDF, Word, Excel and more</div>
+    </div>`:''}
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+      <input id="policy-search" oninput="_filterPolicies()" placeholder="🔍 Search documents…" style="flex:1;min-width:200px;padding:9px 12px;border:1px solid var(--border);border-radius:8px;font-size:13px">
+      <span id="policy-count" style="font-size:12px;color:var(--muted)"></span>
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px">
+      ${['all',...POLICY_CATS].map(c=>{ const lbl={all:'All',Policy:'Policies',Procedure:'Procedures',Form:'Forms',Guideline:'Guidelines',Other:'Other'}[c]||c; return `<button class="policy-cat-chip btn btn-sm ${_polCatFilter===c?'btn-primary':'btn-outline'}" data-c="${c}" onclick="_setPolicyCat('${c}')">${lbl}</button>`; }).join('')}
+    </div>
+    <div id="policies-list">${renderPoliciesList()}</div>
+  </div>`;
+}
+
+function renderPoliciesList() {
+  const q = (document.getElementById('policy-search')?.value||'').toLowerCase();
+  const list = policies
+    .filter(p=>_polCatFilter==='all' || (p.category||'Other')===_polCatFilter)
+    .filter(p=>!q || p.name.toLowerCase().includes(q))
+    .sort((a,b)=>(a.category||'').localeCompare(b.category||'') || a.name.localeCompare(b.name));
+  const count = document.getElementById('policy-count');
+  if(count) count.textContent = `${list.length} of ${policies.length}`;
+  if(!policies.length) return `<div class="empty-state" style="padding:24px"><div class="icon">📖</div><p>No policies or procedures uploaded yet${_polIsMgr()?' — upload the first document above':''}</p></div>`;
+  if(!list.length) return `<div class="empty-state" style="padding:20px"><p>No documents match your search</p></div>`;
+  const icons = { pdf:'📄', doc:'📝', docx:'📝', xls:'📊', xlsx:'📊', ppt:'📋', pptx:'📋', txt:'📃', png:'🖼️', jpg:'🖼️', jpeg:'🖼️' };
+  const catColours = { Policy:'#ede9fe;color:#6b21a8', Procedure:'#dbeafe;color:#1e40af', Form:'#d1fae5;color:#065f46', Guideline:'#fef3c7;color:#92400e', Other:'#f3f4f6;color:#6b7280' };
+  const mgr = _polIsMgr();
+  return `<div style="display:grid;gap:8px">
+    ${list.map(p=>{
+      const ext = p.name.split('.').pop().toLowerCase();
+      const size = p.size<1024*1024 ? (p.size/1024).toFixed(1)+' KB' : (p.size/1024/1024).toFixed(1)+' MB';
+      return `<div style="display:flex;align-items:center;gap:12px;padding:10px 14px;background:var(--bg);border-radius:8px;border:1px solid var(--border)">
+        <span style="font-size:24px">${icons[ext]||'📎'}</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${sanitize(p.name)}</div>
+          <div style="font-size:11px;color:var(--muted)">${size} &bull; Uploaded ${p.uploaded||''}${p.uploadedBy?' by '+sanitize(p.uploadedBy):''}</div>
+        </div>
+        <span style="font-size:10px;font-weight:700;padding:2px 10px;border-radius:12px;background:${catColours[p.category]||catColours.Other}">${sanitize(p.category||'Other')}</span>
+        <div style="display:flex;gap:6px;flex-shrink:0">
+          <button class="btn btn-sm btn-outline" onclick="downloadPolicy('${p.id}')">⬇️ Download</button>
+          ${mgr?`<button class="btn btn-sm btn-danger" onclick="deletePolicy('${p.id}')">✕</button>`:''}
+        </div>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+function _filterPolicies(){ const el=document.getElementById('policies-list'); if(el) el.innerHTML=renderPoliciesList(); }
+function _setPolicyCat(c){ _polCatFilter=c; document.querySelectorAll('.policy-cat-chip').forEach(b=>{ b.className='policy-cat-chip btn btn-sm '+(b.dataset.c===c?'btn-primary':'btn-outline'); }); _filterPolicies(); }
+
+async function uploadPolicies(input) {
+  if(!_polIsMgr()){ showToast('Only managers can upload policy documents'); return; }
+  const files = [...input.files]; if(input.value!==undefined) input.value='';
+  if(!files.length) return;
+  const category = document.getElementById('policy-cat')?.value || 'Other';
+  if(!FSYNC.storageReady()) {
+    const total = policies.reduce((a,p)=>a+(p.size||0),0) + files.reduce((a,f)=>a+f.size,0);
+    if(total>8*1024*1024){ showToast('⚠️ Local file limit reached — connect Cloud Storage for unlimited storage'); return; }
+  }
+  showToast(FSYNC.storageReady()?'☁️ Uploading…':'Uploading…');
+  let ok=0;
+  for(const file of files){
+    try { const m=await cmsUploadAttachment('policies', file); policies.push({ id:m.id, name:m.name, size:m.size, type:m.type, data:m.data, storagePath:m.storagePath, url:m.url, category, uploaded:today(), uploadedBy:currentUser?.name||'' }); ok++; }
+    catch(e){ console.warn('Upload failed:', e); showToast("Upload failed — the file wasn't saved. Please check your connection and try again."); }
+  }
+  if(ok){
+    savePolicies(); _filterPolicies();
+    showToast(`${ok} document${ok!==1?'s':''} added to ${category==='Other'?'the library':category+'s'} ✓`);
+    audit('Policy document uploaded', files.map(f=>f.name).join(', ')+' ('+category+')');
+  }
+}
+
+async function downloadPolicy(id) {
+  const p = policies.find(x=>x.id===id);
+  if(!p) return;
+  audit('Policy document downloaded', p.name);
+  if(p.data){ const a=document.createElement('a'); a.href=p.data; a.download=p.name; a.click(); return; }
+  if(p.url){ try { const resp=await fetch(p.url); const b=await resp.blob(); const u=URL.createObjectURL(b); const a=document.createElement('a'); a.href=u; a.download=p.name; a.click(); setTimeout(()=>URL.revokeObjectURL(u),8000); } catch(e){ const w=window.open(p.url,'_blank'); if(!w) showToast('⚠️ Pop-up blocked — allow pop-ups to open documents'); } }
+}
+
+function deletePolicy(id) {
+  if(!_polIsMgr()){ showToast('Only managers can delete policy documents'); return; }
+  const p = policies.find(x=>x.id===id);
+  if(!p || !confirm(`Delete "${sanitize(p.name)}" from the policy library?`)) return;
+  if(p.storagePath) FSYNC.deleteStorageFile(p.storagePath);
+  policies = policies.filter(x=>x.id!==id);
+  savePolicies(); _filterPolicies();
+  audit('Policy document deleted', p.name);
+  showToast(`"${sanitize(p.name)}" deleted`);
+}
+
 // ===== OUTLOOK / MICROSOFT GRAPH SYNC =====
 let _msalInstance = null;
 
@@ -9738,13 +9865,55 @@ function chatCol(name) {
 }
 
 // ---- render chat page ----
+// ===== ALL CASE NOTES (dashboard "View all") =====
+let _notesTypeFilter = 'all';
+function _allNotesList() {
+  const q = (document.getElementById('notes-search')?.value || '').toLowerCase();
+  const all = notes.slice().sort((a,b)=>(b.created||'').localeCompare(a.created||''));
+  const filtered = all.filter(n=>{
+    if(_notesTypeFilter!=='all' && (n.type||'general')!==_notesTypeFilter) return false;
+    if(!q) return true;
+    const c = clients.find(cl=>cl.id===n.clientId);
+    return (n.text||'').toLowerCase().includes(q) || (c?.fullName||'').toLowerCase().includes(q) || (n.worker||n.author||'').toLowerCase().includes(q);
+  });
+  const count = document.getElementById('notes-count');
+  if(count) count.textContent = `${filtered.length} of ${all.length}`;
+  return filtered.length===0 ? '<div class="empty-state"><div class="icon">📝</div><p>No notes match your search</p></div>' :
+    filtered.map(n=>{
+      const c = clients.find(cl=>cl.id===n.clientId);
+      return `<div class="note-entry ${n.type||'general'}" style="margin-bottom:10px;cursor:pointer" onclick="openClientProfile('${n.clientId}')">
+        <div class="note-meta"><span class="section-badge badge-${n.type||'general'}">${n.type||'general'}</span><span style="font-weight:600">${sanitize(c?.fullName||'Unknown client')}</span><span>${sanitize(n.worker||n.author||'Staff')}</span><span>${fmtdt(n.created)}</span></div>
+        <div class="note-text">${sanitize(n.text||'')}</div>
+      </div>`;
+    }).join('');
+}
+function _filterAllNotes() { const el = document.getElementById('notes-results'); if(el) el.innerHTML = _allNotesList(); }
+function _setNotesType(t) { _notesTypeFilter = t; document.querySelectorAll('.notes-type-chip').forEach(b=>{ b.className='notes-type-chip btn btn-sm '+(b.dataset.t===t?'btn-primary':'btn-outline'); }); _filterAllNotes(); }
+function renderAllNotes() {
+  const types = ['all','general','sewb','aod','justice','cultural','disability'];
+  const chip = t => `<button class="notes-type-chip btn btn-sm ${_notesTypeFilter===t?'btn-primary':'btn-outline'}" data-t="${t}" onclick="_setNotesType('${t}')" style="text-transform:capitalize">${t==='all'?'All types':t}</button>`;
+  return `
+  <div class="card" style="margin-bottom:16px">
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <input id="notes-search" oninput="_filterAllNotes()" placeholder="🔍 Search notes, client or worker…" style="flex:1;min-width:220px;padding:9px 12px;border:1px solid var(--border);border-radius:8px;font-size:13px">
+      <span id="notes-count" style="font-size:12px;color:var(--muted)"></span>
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">${types.map(chip).join('')}</div>
+  </div>
+  <div class="card"><div id="notes-results">${_allNotesList()}</div></div>`;
+}
+
 function renderChatPage() {
   document.getElementById('page-title').textContent = 'Messages';
   document.getElementById('top-action-btn').textContent = '✏️ New Message';
   document.getElementById('top-action-btn').onclick = openNewConvModal;
 
   const syncReady = FSYNC.isReady();
-  document.getElementById('content').innerHTML = `
+  // Kick off the live listeners after this HTML is placed into the DOM by
+  // showPage() (renderChatPage returns the markup rather than writing it
+  // itself, so the return value isn't clobbered).
+  if(syncReady) setTimeout(()=>{ if(currentPage==='chat'){ _chatUnsubAll(); _chatListenConvs(); } }, 0);
+  return `
   <div id="chat-wrap" style="display:flex;gap:0;height:calc(100vh - 110px);background:var(--card);border-radius:12px;overflow:hidden;border:1px solid var(--border)">
     <!-- Sidebar list -->
     <div id="chat-list-pane" style="width:280px;min-width:220px;border-right:1px solid var(--border);display:flex;flex-direction:column;background:var(--bg)">
@@ -9769,11 +9938,6 @@ function renderChatPage() {
       </div>
     </div>
   </div>`;
-
-  if(syncReady) {
-    _chatUnsubAll();
-    _chatListenConvs();
-  }
 }
 
 function _chatUnsubAll() {
@@ -10510,7 +10674,7 @@ const RESTRICTABLE_PAGES = {
   sessions:'Session Log', sewb:'SEWB Program', aod:'AOD Program', justice:'Justice Program',
   cultural:'Cultural Strengthening', disability:'Disability Program',
   workfoundations:'Work Foundations', homeownership:'First Peoples Home Ownership',
-  chat:'Messages', calendar:'Calendar', resources:'Resources', reports:'Reports', auditlog:'Audit Log',
+  policies:'Policies & Procedures', calendar:'Calendar', resources:'Resources', reports:'Reports', auditlog:'Audit Log',
 };
 function _myHiddenPages(){
   if(!currentUser || currentUser.role==='sysmanager') return [];
@@ -11444,6 +11608,15 @@ function sanitize(str) {
   const _origSaveCU = saveCurrentUser;
   window.saveCurrentUser = function(u) { _origSaveCU(u); if(u) resetIdle(); else clearTimeout(_idleTimer); };
 })();
+
+// Press Escape to close whatever modal is open — matches what users expect and
+// gives a keyboard way out of large forms.
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    const mc = document.getElementById('modal-container');
+    if (mc && mc.innerHTML.trim()) { closeModal(); }
+  }
+});
 
 // ===== INIT =====
 // Clear any old Firebase config saved in localStorage so the hardcoded config always wins
