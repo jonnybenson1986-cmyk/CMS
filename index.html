@@ -8945,10 +8945,10 @@ function renderSettings() {
   <div class="card" style="border-left:4px solid var(--primary)">
     <div class="card-header">
       <div class="card-title">👥 Staff Accounts</div>
-      <button class="btn btn-sm btn-primary" onclick="openAddStaffModal()">➕ Add Staff Account</button>
+      ${currentUser?.role==='sysmanager'?`<button class="btn btn-sm btn-primary" onclick="openAddStaffModal()">➕ Add Staff Account</button>`:''}
     </div>
     <p style="font-size:13px;color:var(--muted);margin-bottom:14px">
-      Staff accounts are managed through Firebase Authentication. Add a staff member here to link their Firebase login to their CMS profile and role.
+      Staff accounts are managed through Firebase Authentication. Add a staff member here to link their Firebase login to their CMS profile and role.${currentUser?.role==='sysmanager'?'':' <strong>Only the System Manager can add, edit or remove accounts — you have view-only access.</strong>'}
       ${FSYNC.isReady()?'':'<strong style="color:#d97706"> ⚠️ Cloud Sync must be connected first.</strong>'}
     </p>
     <div style="overflow-x:auto">
@@ -8959,11 +8959,11 @@ function renderSettings() {
           <th style="text-align:left;padding:8px 10px;border-bottom:1px solid var(--border)">Role</th>
           <th style="text-align:left;padding:8px 10px;border-bottom:1px solid var(--border)">Firebase</th>
           <th style="text-align:left;padding:8px 10px;border-bottom:1px solid var(--border)">Last Login</th>
-          <th style="padding:8px 10px;border-bottom:1px solid var(--border)">Actions</th>
+          ${currentUser?.role==='sysmanager'?`<th style="padding:8px 10px;border-bottom:1px solid var(--border)">Actions</th>`:''}
         </tr></thead>
         <tbody>
           ${userProfiles.length===0
-            ? `<tr><td colspan="6" style="padding:14px 10px;color:var(--muted);text-align:center">No staff accounts yet. Click "Add Staff Account" to create the first one.</td></tr>`
+            ? `<tr><td colspan="${currentUser?.role==='sysmanager'?6:5}" style="padding:14px 10px;color:var(--muted);text-align:center">No staff accounts yet.${currentUser?.role==='sysmanager'?' Click "Add Staff Account" to create the first one.':''}</td></tr>`
             : userProfiles.map(u=>`
             <tr style="border-bottom:1px solid var(--border)">
               <td style="padding:8px 10px;font-weight:600">${ROLES[u.role]?.icon||'👤'} ${sanitize(u.name)}</td>
@@ -8975,10 +8975,10 @@ function renderSettings() {
               <td style="padding:8px 10px;font-size:11px;color:var(--muted)">
                 ${u.lastLoginAt ? `<span title="IP: ${sanitize(u.lastLoginIP||'unknown')}">${fmtdt(u.lastLoginAt)}<br><code style="font-size:10px">${sanitize(u.lastLoginIP||'—')}</code></span>` : '—'}
               </td>
-              <td style="padding:8px 10px;white-space:nowrap;text-align:center">
+              ${currentUser?.role==='sysmanager'?`<td style="padding:8px 10px;white-space:nowrap;text-align:center">
                 <button class="btn btn-sm btn-outline" style="margin-right:4px" onclick="openEditStaffModal('${u.id}')">✏️ Edit</button>
                 <button class="btn btn-sm btn-outline" style="color:#dc2626" onclick="removeStaffAccount('${u.id}')">🗑️</button>
-              </td>
+              </td>`:''}
             </tr>`).join('')}
         </tbody>
       </table>
@@ -9574,6 +9574,7 @@ function saveSettings() {
 
 // ── Staff Account Management ─────────────────────────────────
 function openAddStaffModal() {
+  if(currentUser?.role!=='sysmanager'){ showToast('Only the System Manager can manage staff accounts'); return; }
   const html = `
     <p style="font-size:13px;color:var(--muted);margin-bottom:16px">
       This creates a Firebase Authentication account for the staff member. They will receive an email to set their password (if using Firebase Email Link), or you can set a temporary password here.
@@ -9592,6 +9593,7 @@ function openAddStaffModal() {
 }
 
 async function createStaffAccount() {
+  if(currentUser?.role!=='sysmanager'){ showToast('Only the System Manager can manage staff accounts'); return false; }
   const name  = document.getElementById('sa-name')?.value?.trim();
   const email = document.getElementById('sa-email')?.value?.trim();
   const pass  = document.getElementById('sa-pass')?.value;
@@ -9639,6 +9641,7 @@ async function createStaffAccount() {
 }
 
 function openEditStaffModal(userId) {
+  if(currentUser?.role!=='sysmanager'){ showToast('Only the System Manager can manage staff accounts'); return; }
   const u = userProfiles.find(p=>p.id===userId); if(!u) return;
   const html = `
     <div class="grid-2">
@@ -9665,6 +9668,7 @@ function openEditStaffModal(userId) {
 }
 
 async function saveStaffEdit(userId) {
+  if(currentUser?.role!=='sysmanager'){ showToast('Only the System Manager can manage staff accounts'); return false; }
   const u = userProfiles.find(p=>p.id===userId); if(!u) return false;
   const name  = document.getElementById('se-name')?.value?.trim();
   const email = document.getElementById('se-email')?.value?.trim();
@@ -9701,6 +9705,7 @@ async function saveStaffEdit(userId) {
 }
 
 function removeStaffAccount(userId) {
+  if(currentUser?.role!=='sysmanager'){ showToast('Only the System Manager can manage staff accounts'); return; }
   const u = userProfiles.find(p=>p.id===userId); if(!u) return;
   if(!confirm(`Remove ${sanitize(u.name)} from the CMS?\n\nThis removes their profile from this system. Their Firebase Authentication account will remain — delete it from the Firebase Console if needed.`)) return;
   userProfiles = userProfiles.filter(p=>p.id!==userId);

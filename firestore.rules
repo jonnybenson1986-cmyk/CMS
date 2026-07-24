@@ -1,58 +1,64 @@
 rules_version = '2';
 
-// Worn Gundidj CMS — Firestore security rules
+// Worn Gundidj CMS — Firestore security rules (LIVE-HARDENED BASELINE)
 // Deploy: Firebase Console → Firestore Database → Rules → paste → Publish
-// (or `firebase deploy --only firestore:rules` if using the CLI).
 //
-// Baseline posture: only signed-in staff (email/password accounts) can access
-// team data. This matches what is currently live (verified: anonymous = 403).
+// Works with the CURRENT app — no Cloud Functions / custom claims required.
+// Posture: any signed-in staff account can use the CMS, but server-side:
+//   • the audit log is append-only for EVERYONE (tamper-proof record)
+//   • the roles mirror can never be written from a browser
+//   • only the collections the app actually uses exist — anything else is denied
 //
-// NOTE on least-privilege (audit findings #2/#3): true per-worker / per-role
-// restriction and immutable case notes require staff roles to live in Firebase
-// custom claims (set by a trusted Cloud Function), plus server Timestamps on
-// notes. That is a separate hardening project — see the commented block below
-// for the target shape. Do NOT enable it until the app writes custom claims and
-// server timestamps, or staff will be locked out.
+// The app's routine sync re-writes existing docs verbatim (full overwrite via
+// batch.set), so "update allowed only when nothing changed" lets sync work
+// while blocking real edits. Known trade-off: the login entry's IP backfill
+// no longer replicates to the cloud copy (the original entry is preserved).
+//
+// NEXT STEP (findings #2/#3): per-role restriction via custom claims — see
+// firestore.rules.strict and SECURITY-DEPLOY.md. Do NOT publish the strict
+// file until the Cloud Functions are deployed and roles assigned.
 
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    function signedIn() { return request.auth != null; }
+    function signedIn()  { return request.auth != null; }
+    // Byte-identical re-write — what the app's "push everything" sync does.
+    function unchanged() { return request.resource.data == resource.data; }
 
-    // All CMS data lives under teams/{teamId}/**
-    match /teams/{teamId}/{document=**} {
-      allow read, write: if signedIn();
+    // ── Core client data ────────────────────────────────────────────────────
+    match /teams/{teamId}/clients/{id}       { allow read, write: if signedIn(); }
+    match /teams/{teamId}/notes/{id}         { allow read, write: if signedIn(); }
+    match /teams/{teamId}/timelogs/{id}      { allow read, write: if signedIn(); }
+    match /teams/{teamId}/referrals/{id}     { allow read, write: if signedIn(); }
+
+    // ── Team lists & tools ──────────────────────────────────────────────────
+    match /teams/{teamId}/workersList/{id}   { allow read, write: if signedIn(); }
+    match /teams/{teamId}/workflowTasks/{id} { allow read, write: if signedIn(); }
+    match /teams/{teamId}/policies/{id}      { allow read, write: if signedIn(); }
+    match /teams/{teamId}/chatConvs/{id}     { allow read, write: if signedIn(); }
+    match /teams/{teamId}/chatMsgs/{id}      { allow read, write: if signedIn(); }
+
+    // ── Section-access rules (who sees which pages) ─────────────────────────
+    // App-level UI restricts editing to the System Manager; server-side
+    // tightening to sysmanager-only comes with custom claims (strict rules).
+    match /teams/{teamId}/userAccess/{id}    { allow read, write: if signedIn(); }
+
+    // ── Audit log: append-only for EVERYONE, including admins ───────────────
+    // create        → any signed-in staff (the app writes audit entries)
+    // update        → only a byte-identical re-push (sync no-op); real edits denied
+    // delete        → nobody, ever — "Clear audit log" only clears the local view
+    match /teams/{teamId}/auditlog/{id} {
+      allow read, create: if signedIn();
+      allow update: if signedIn() && unchanged();
+      allow delete: if false;
     }
+
+    // ── Roles mirror: written only by trusted server code (Admin SDK) ───────
+    match /teams/{teamId}/roles/{uid} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    // No catch-all: any collection not listed above is denied by default.
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// TARGET (least-privilege) — enable only after custom claims + server timestamps
-// exist in the app. Kept here as the documented next step for findings #2/#3/#7.
-//
-// service cloud.firestore {
-//   match /databases/{database}/documents {
-//     function role()   { return request.auth.token.role; }         // custom claim
-//     function isMgr()  { return role() in ['sysmanager','admin','supervisor']; }
-//     function isSys()  { return role() == 'sysmanager'; }
-//
-//     match /teams/{t}/clients/{id} {
-//       allow read:   if request.auth != null && (isMgr() ||
-//                       request.auth.token.name in resource.data.assignedWorkers);
-//       allow create, update: if request.auth != null;
-//       allow delete: if isSys();                                    // deletes restricted
-//     }
-//     match /teams/{t}/notes/{id} {
-//       allow read:   if request.auth != null;
-//       allow create: if request.auth != null;
-//       // append-only: no edits/deletes after 24h except sysmanager
-//       allow update, delete: if isSys() ||
-//         request.time < resource.data.createdAt + duration.value(24,'h');
-//     }
-//     match /teams/{t}/auditlog/{id} {
-//       allow read:   if isMgr();
-//       allow create: if request.auth != null;                        // immutable
-//       allow update, delete: if false;                               // never
-//     }
-//   }
-// }

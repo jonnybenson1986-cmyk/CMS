@@ -66,6 +66,12 @@ service cloud.firestore {
       allow delete: if isMgr();
     }
 
+    match /teams/{teamId}/policies/{id} {
+      allow read: if signedIn();
+      allow create, update: if isMgr();      // library managed by managers
+      allow delete: if isMgr();
+    }
+
     match /teams/{teamId}/workersList/{id} {
       allow read, create: if signedIn();
       allow update: if signedIn() && (unchanged() || isMgr());
