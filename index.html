@@ -10221,6 +10221,34 @@ let userProfiles = DB.load('userProfiles', []);
 function saveUserProfiles() { DB.save('userProfiles', userProfiles); }
 function saveCurrentUser(u) { currentUser = u; DB.save('currentUser', u); }
 
+// Resolve which local staff profile belongs to a Firebase account.
+// Identity is keyed on the account EMAIL (unique per Firebase user), NOT a
+// fuzzy uid-or-email first match — so signing in always maps to YOUR own
+// profile, never whichever profile happened to be carrying your uid. It also
+// self-heals: any stale uid binding on another profile is cleared, so a wrong
+// binding can't shadow the correct profile on the next login.
+function _resolveUserProfile(firebaseUser, email) {
+  const fbUid = firebaseUser?.uid;
+  const emailLc = (email || firebaseUser?.email || '').trim().toLowerCase();
+  // 1. The profile whose email matches this account (authoritative identity).
+  let u = emailLc ? userProfiles.find(p => (p.email || '').trim().toLowerCase() === emailLc) : null;
+  // 2. Otherwise a profile already bound to this exact uid (legacy / no email).
+  if (!u && fbUid) u = userProfiles.find(p => p.firebaseUid && p.firebaseUid === fbUid);
+  // 3. Otherwise a brand-new profile for this account.
+  if (!u) {
+    u = { id: fbUid || uid(), name: firebaseUser?.displayName || emailLc.split('@')[0] || 'Staff',
+          email: emailLc, role: 'worker', firebaseUid: fbUid };
+    userProfiles.push(u);
+  } else {
+    if (!u.email && emailLc) u.email = emailLc;
+    if (fbUid) u.firebaseUid = fbUid;
+  }
+  // One Firebase account = exactly one profile: strip this uid from any others.
+  if (fbUid) userProfiles.forEach(p => { if (p !== u && p.firebaseUid === fbUid) p.firebaseUid = ''; });
+  saveUserProfiles();
+  return u;
+}
+
 // ===== IP CAPTURE =====
 // Fetches the user's public IP once per session for security audit logging.
 // Uses a privacy-neutral lookup (no tracking, HTTPS only).
@@ -10489,14 +10517,8 @@ async function doLogin() {
       const cfg = FSYNC.getCfg();
       if (!firebase.apps.length) firebase.initializeApp(cfg);
       const cred = await firebase.auth().signInWithEmailAndPassword(email, pass);
-      // Match Firebase user to local profile or create one
-      let u = userProfiles.find(p=>p.email===email||p.firebaseUid===cred.user.uid);
-      if (!u) {
-        u = { id: cred.user.uid, name: cred.user.displayName||email.split('@')[0], email, role:'worker', firebaseUid: cred.user.uid };
-        userProfiles.push(u); saveUserProfiles();
-      } else {
-        u.firebaseUid = cred.user.uid;
-      }
+      // Match Firebase user to local profile (keyed on email; self-healing)
+      let u = _resolveUserProfile(cred.user, email);
       // Server-set role wins: once the role Cloud Function is deployed
       // (SECURITY-DEPLOY.md), the signed token carries {role, name} custom
       // claims that a devtools localStorage edit can't forge. No claims yet
@@ -10582,15 +10604,7 @@ function _auditLogin(u) {
 }
 
 function _finishLogin(firebaseUser, email) {
-  let u = userProfiles.find(p=>p.email===email);
-  if(!u) {
-    const displayName = firebaseUser.displayName || email.split('@')[0];
-    u = { id: firebaseUser.uid, name: displayName, email, role: 'worker', firebaseUid: firebaseUser.uid };
-    userProfiles.push(u); saveUserProfiles();
-  } else {
-    u.firebaseUid = firebaseUser.uid;
-    saveUserProfiles();
-  }
+  const u = _resolveUserProfile(firebaseUser, email);
   saveCurrentUser(u); _auditLogin(u); initApp();
 }
 
