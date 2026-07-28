@@ -947,8 +947,8 @@ function renderDashboard() {
   const alerts = getWorkflowAlerts();
   const pendingTasks = workflowTasks.filter(t=>!t.done);
 
-  const recentNotes = [...notes].sort((a,b)=>b.created?.localeCompare(a.created)).slice(0,5);
-  const recentClients = [...clients].sort((a,b)=>b.created?.localeCompare(a.created)).slice(0,5);
+  const recentNotes = notes.filter(n=>{ const c=clients.find(cl=>cl.id===n.clientId); return !c || canViewClient(c); }).sort((a,b)=>b.created?.localeCompare(a.created)).slice(0,5);
+  const recentClients = visibleClients(clients).slice().sort((a,b)=>b.created?.localeCompare(a.created)).slice(0,5);
 
   const alertHTML = alerts.length===0&&pendingTasks.length===0 ? '' : `
   <div class="card" style="margin-bottom:16px;border-left:4px solid #d97706">
@@ -1010,12 +1010,9 @@ function renderDashboard() {
 // ===== CLIENTS LIST =====
 function renderClients() {
   const search = document.getElementById('global-search')?.value?.toLowerCase()||'';
-  const managerNames = ['Jon Benson','Jade Atkinson'];
-  const isManager = ['sysmanager','admin','supervisor'].includes(currentUser?.role) || managerNames.includes(currentUser?.name);
-  const myName = currentUser?.name||'';
   const filtered = clients
+    .filter(canViewClient)
     .filter(c=>(c.status||'active')!=='closed')
-    .filter(c=> isManager || (c.assignedWorkers||[c.keyWorker]).includes(myName))
     .filter(c=>!search||c.fullName?.toLowerCase().includes(search)||c.clientId?.toLowerCase().includes(search)||c.community?.toLowerCase().includes(search));
   return `
   <div class="card" style="padding:0;overflow:hidden">
@@ -1038,7 +1035,10 @@ function renderClients() {
               <td>${progs.map(p=>`<span class="tag badge-${p.toLowerCase()}" style="margin-right:3px;font-size:10px">${p}</span>`).join('')||'<span style="color:var(--muted);font-size:12px">None</span>'}</td>
               <td><span class="risk-pill risk-${c.riskLevel||'low'}">${(c.riskLevel||'low').toUpperCase()}</span></td>
               <td><span class="tag ${c.status==='active'?'tag-active':'tag-closed'}">${c.status||'active'}</span></td>
-              <td><button class="btn btn-sm btn-outline" onclick="event.stopPropagation();openClientProfile('${c.id}')">View</button></td>
+              <td style="white-space:nowrap">
+                <button class="btn btn-sm btn-outline" onclick="event.stopPropagation();openClientProfile('${c.id}')">View</button>
+                ${currentUser?.role==='sysmanager' ? `<button class="btn btn-sm btn-outline" title="${c.accessRestricted?'Restricted — manage who can see this file':'Restrict who can see this file'}" style="margin-left:4px;${c.accessRestricted?'background:#f5f3ff;color:#5b21b6;border-color:#ddd6fe':''}" onclick="event.stopPropagation();openRestrictAccessModal('${c.id}')">${c.accessRestricted?'🔒':'🔓'}</button>` : ''}
+              </td>
             </tr>`;
           }).join('')
         }
@@ -1051,7 +1051,7 @@ function renderClients() {
 function filterClients() { document.getElementById('content').innerHTML = renderClients(); attachPageEvents('clients'); }
 
 function renderClosedClients() {
-  const closed = clients.filter(c=>c.status==='closed').sort((a,b)=>(b.closedDate||'').localeCompare(a.closedDate||''));
+  const closed = visibleClients(clients).filter(c=>c.status==='closed').sort((a,b)=>(b.closedDate||'').localeCompare(a.closedDate||''));
   return `
   <div class="card">
     <div class="card-header">
@@ -1124,6 +1124,7 @@ function reopenClient(id) {
 function openClientProfile(id) {
   const c = clients.find(cl=>cl.id===id);
   if(!c) return;
+  if(!canViewClient(c)){ showToast('You are not assigned to this client. Ask your System Manager for access.'); return; }
   audit('Viewed client', c.fullName, id);
   currentClientId = id;
   const clientNotes = notes.filter(n=>n.clientId===id).sort((a,b)=>b.created?.localeCompare(a.created));
@@ -1151,7 +1152,9 @@ function openClientProfile(id) {
       <button class="btn btn-outline btn-sm" onclick="openEditClientModal('${id}')">✏️ Edit</button>
       <button class="btn btn-primary btn-sm" onclick="openNoteModal('${id}')">📝 Add Note</button>
       <button class="btn btn-accent btn-sm" onclick="openTimeModal('${id}')">⏱️ Log Time</button>
-      ${['sysmanager','admin'].includes(currentUser?.role) ? `<button class="btn btn-sm" style="background:#f3e8ff;color:#6b21a8;border:1px solid #d8b4fe" onclick="openAssignWorkersModal('${id}')">👥 Assign Workers</button>` : ''}
+      ${['sysmanager','admin','supervisor'].includes(currentUser?.role) ? `<button class="btn btn-sm" style="background:#f3e8ff;color:#6b21a8;border:1px solid #d8b4fe" onclick="openAssignWorkersModal('${id}')">👥 Assign Workers</button>` : ''}
+      ${currentUser?.role==='sysmanager' ? `<button class="btn btn-sm" style="background:${c.accessRestricted?'#ede9fe':'#f8fafc'};color:${c.accessRestricted?'#5b21b6':'#475569'};border:1px solid ${c.accessRestricted?'#c4b5fd':'#e2e8f0'}" onclick="openRestrictAccessModal('${id}')">${c.accessRestricted?'🔒 Access restricted':'🔓 Restrict access'}</button>` : ''}
+      ${c.accessRestricted ? `<span class="tag" style="background:#ede9fe;color:#5b21b6;font-size:11px">🔒 Restricted to ${(c.allowedWorkers||[]).length} worker${(c.allowedWorkers||[]).length!==1?'s':''}</span>` : ''}
       ${(c.status||'active')==='closed'
         ? `<button class="btn btn-sm" style="background:#d1fae5;color:#065f46" onclick="reopenClient('${id}')">🔓 Reopen</button>`
         : `<button class="btn btn-sm" style="background:#fee2e2;color:#991b1b" onclick="closeClient('${id}')">🔒 Close Client</button>`}
@@ -2988,6 +2991,7 @@ function openNewClientModal() {
 }
 
 function openAssignWorkersModal(id) {
+  if(!['sysmanager','admin','supervisor'].includes(currentUser?.role)){ showToast('Only managers can change client assignments'); return; }
   const c = clients.find(cl=>cl.id===id); if(!c) return;
   const assigned = c.assignedWorkers || (c.keyWorker ? [c.keyWorker] : []);
   const html = `
@@ -3006,6 +3010,46 @@ function openAssignWorkersModal(id) {
     saveAll(); FSYNC.pushClients();
     showToast('Workers assigned ✓'); return true;
   }, '500px');
+}
+
+// System Manager: restrict an individual client file to selected staff.
+// Default is open to all workers; managers/supervisors keep access for oversight.
+function openRestrictAccessModal(id) {
+  if(currentUser?.role!=='sysmanager'){ showToast('Only the System Manager can restrict client access'); return; }
+  const c = clients.find(cl=>cl.id===id); if(!c) return;
+  const allowed = c.allowedWorkers || [];
+  const staff = (userProfiles.length ? userProfiles.map(u=>({name:u.name,role:u.role})) : (workersList||[]).map(w=>({name:w,role:'worker'})))
+    .filter(u=>u.name);
+  const html = `
+    <p style="font-size:13px;color:var(--muted);margin-bottom:14px">By default every worker can open <strong>${sanitize(c.fullName)}</strong>'s file. Turn on restriction to limit it to the staff you tick below. System Managers, Admins and Supervisors always keep access for oversight.</p>
+    <label style="display:flex;align-items:center;gap:10px;padding:12px;border:1px solid #ddd6fe;background:#f5f3ff;border-radius:8px;cursor:pointer;font-weight:700;font-size:13.5px;color:#5b21b6;margin:0">
+      <input type="checkbox" id="ra-on" ${c.accessRestricted?'checked':''} onchange="document.getElementById('ra-list').style.display=this.checked?'block':'none'" style="width:18px;height:18px;accent-color:#7c3aed">
+      🔒 Restrict this client file to selected staff
+    </label>
+    <div id="ra-list" style="display:${c.accessRestricted?'block':'none'};margin-top:12px">
+      <div style="font-size:12px;color:var(--muted);margin-bottom:8px">Staff who can access this file:</div>
+      <div style="display:flex;flex-direction:column;gap:8px;max-height:320px;overflow-y:auto">
+        ${staff.map(u=>{
+          const mgr=['sysmanager','admin','supervisor'].includes(u.role);
+          return `<label style="display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid var(--border);border-radius:8px;font-size:13px;${mgr?'opacity:.6':''}">
+            <input type="checkbox" class="ra-worker" value="${sanitize(u.name)}" ${(allowed.includes(u.name)||mgr)?'checked':''} ${mgr?'disabled':''}>
+            <span>👤 ${sanitize(u.name)} <span style="font-size:11px;color:var(--muted)">${sanitize(ROLES[u.role]?.label||u.role||'')}</span></span>
+            ${mgr?'<span style="margin-left:auto;font-size:10px;color:#6b7280">always has access</span>':''}
+          </label>`;
+        }).join('') || '<p style="font-size:12px;color:var(--muted)">No staff accounts found — add staff in Settings first.</p>'}
+      </div>
+    </div>`;
+  showModal('🔐 Client File Access — '+sanitize(c.fullName), html, ()=>{
+    const on = document.getElementById('ra-on')?.checked;
+    c.accessRestricted = !!on;
+    c.allowedWorkers = on ? [...document.querySelectorAll('.ra-worker:checked')].filter(el=>!el.disabled).map(el=>el.value) : [];
+    saveAll(); if(FSYNC.isReady()) FSYNC.pushClients();
+    audit(on?'Restricted client access':'Removed client access restriction',
+      c.fullName + (on ? ` — allowed: ${c.allowedWorkers.join(', ')||'(managers only)'}` : ''), c.id);
+    showToast(on ? `🔒 Access restricted — ${c.allowedWorkers.length} worker${c.allowedWorkers.length!==1?'s':''} + managers` : '🔓 File is open to all workers again');
+    if(currentPage) showPage(currentPage);
+    return true;
+  }, '560px');
 }
 
 function openEditClientModal(id) {
@@ -3368,7 +3412,7 @@ function renderTime() {
 }
 
 function renderSEWB() {
-  const sewbClients = clients.filter(c=>c.sewb);
+  const sewbClients = visibleClients(clients).filter(c=>c.sewb);
   return `
   <div class="alert alert-info">💚 The SEWB framework recognises eight domains of life that affect wellbeing for Aboriginal and Torres Strait Islander peoples — connection to body, mind and emotions, family and kinship, community, culture, Country, spirit, and sovereignty. Care is holistic and self-determined.</div>
   <div class="grid-4" style="margin-bottom:20px">
@@ -3400,7 +3444,7 @@ function renderSEWB() {
 }
 
 function renderAOD() {
-  const aodClients = clients.filter(c=>c.aod);
+  const aodClients = visibleClients(clients).filter(c=>c.aod);
   return `
   <div class="grid-4" style="margin-bottom:20px">
     <div class="stat-card"><div class="label">AOD Clients</div><div class="value" style="color:#dc2626">${aodClients.length}</div></div>
@@ -3429,7 +3473,7 @@ function renderAOD() {
 }
 
 function renderJustice() {
-  const jClients = clients.filter(c=>c.justice);
+  const jClients = visibleClients(clients).filter(c=>c.justice);
   return `
   <div class="grid-4" style="margin-bottom:20px">
     <div class="stat-card"><div class="label">Justice Clients</div><div class="value" style="color:#1d4ed8">${jClients.length}</div></div>
@@ -3457,7 +3501,7 @@ function renderJustice() {
 }
 
 function renderCultural() {
-  const cClients = clients.filter(c=>c.cultural);
+  const cClients = visibleClients(clients).filter(c=>c.cultural);
   return `
   <div class="alert alert-info">🌀 Cultural strengthening is a core protective factor. This program supports reconnection to Country, culture, language, ceremony, Elders, and community identity as pathways to healing and wellbeing.</div>
   <div class="grid-4" style="margin-bottom:20px">
@@ -5065,7 +5109,7 @@ function buildFundingReport(program) {
 }
 
 function buildDisabilityProgramReport(from, to) {
-  const dc = clients.filter(c=>c.disability);
+  const dc = visibleClients(clients).filter(c=>c.disability);
   const rptNotes = notes.filter(n=>n.type==='disability'&&n.created>=from&&n.created<=to+'T23:59:59');
   const ndisCount = dc.filter(c=>c.dis?.ndisNum||c.ndis).length;
   const dspCount  = dc.filter(c=>c.dis?.dsp==='Yes').length;
@@ -5089,7 +5133,7 @@ function buildDisabilityProgramReport(from, to) {
 }
 
 function buildWorkFoundationsProgramReport(from, to) {
-  const wc = clients.filter(c=>c.workFoundations);
+  const wc = visibleClients(clients).filter(c=>c.workFoundations);
   const rptNotes = notes.filter(n=>n.type==='workfoundations'&&n.created>=from&&n.created<=to+'T23:59:59');
   const employed = wc.filter(c=>c.wf?.status==='Placed'||c.wf?.empStatus?.startsWith('Employed'));
   const byStatus = {}; wc.forEach(c=>{ const k=c.wf?.status||'Unknown'; byStatus[k]=(byStatus[k]||0)+1; });
@@ -6989,7 +7033,7 @@ function deleteWalkin(id) {
 // DISABILITY PROGRAM
 // ============================================================
 function renderDisability() {
-  const dc = clients.filter(c=>c.disability);
+  const dc = visibleClients(clients).filter(c=>c.disability);
   const fundTotals = dc.reduce((a,c)=>{ const f=ndisClientFunding(c); a.total+=f.total; a.spent+=f.spent; return a; }, {total:0,spent:0});
   return `
   <div class="alert alert-info" style="margin-bottom:16px">♿ The Disability Program supports clients with disability-related needs — including NDIS navigation, support coordination, advocacy, and connecting to appropriate services.</div>
@@ -7539,7 +7583,7 @@ function saveDisability(id) {
 // WORK FOUNDATIONS PROGRAM
 // ============================================================
 function renderWorkFoundations() {
-  const wc = clients.filter(c=>c.workFoundations);
+  const wc = visibleClients(clients).filter(c=>c.workFoundations);
   return `
   <div class="card">
     <div class="card-header">
@@ -9881,7 +9925,9 @@ function chatCol(name) {
 let _notesTypeFilter = 'all';
 function _allNotesList() {
   const q = (document.getElementById('notes-search')?.value || '').toLowerCase();
-  const all = notes.slice().sort((a,b)=>(b.created||'').localeCompare(a.created||''));
+  const all = notes.slice()
+    .filter(n=>{ const c=clients.find(cl=>cl.id===n.clientId); return !c || canViewClient(c); })
+    .sort((a,b)=>(b.created||'').localeCompare(a.created||''));
   const filtered = all.filter(n=>{
     if(_notesTypeFilter!=='all' && (n.type||'general')!==_notesTypeFilter) return false;
     if(!q) return true;
@@ -10708,6 +10754,23 @@ function _myHiddenPages(){
   return (prof?.hiddenPages) || currentUser.hiddenPages || [];
 }
 function pageAllowed(page){ return !_myHiddenPages().includes(page); }
+
+// ===== PER-CLIENT ACCESS RESTRICTION =====
+// General rule: every worker can open every client file. A System Manager can
+// lock down an INDIVIDUAL client (from the client's Actions) so that only the
+// workers they name — plus managers/supervisors for oversight — can see it.
+// The restriction lives on the client record (accessRestricted +
+// allowedWorkers), so it syncs with the client like any other field.
+function _clientOversightRole(){ return ['sysmanager','admin','supervisor'].includes(currentUser?.role); }
+function canViewClient(c){
+  if(!c || !currentUser) return false;
+  if(_clientOversightRole()) return true;          // managers/supervisors always see (oversight)
+  if(!c.accessRestricted) return true;             // default: open to all workers
+  const me = (currentUser.name||'').trim();
+  return (c.allowedWorkers||[]).map(w=>(w||'').trim()).includes(me);
+}
+// Filter a client array down to what the current user may see.
+function visibleClients(list){ return (list||clients).filter(canViewClient); }
 // Hide restricted sections from the sidebar and the mobile tab bar.
 function applyNavRestrictions(){
   const hidden = _myHiddenPages();
@@ -11452,18 +11515,18 @@ function getWorkflowAlerts() {
     if(age>=1) alerts.push({type:'referral',level:age>=3?'high':'medium',msg:`Referral for ${sanitize(r.name)} unactioned (${age} day${age>1?'s':''})`,link:'referrals',id:r.id});
   });
   // Safety plan reviews overdue
-  clients.filter(c=>c.status==='active'&&c.sfNext&&c.sfNext<todayStr).forEach(c=>{
+  visibleClients(clients).filter(c=>c.status==='active'&&c.sfNext&&c.sfNext<todayStr).forEach(c=>{
     alerts.push({type:'safety',level:'high',msg:`Safety plan overdue for ${sanitize(c.fullName)}`,link:'clients',id:c.id});
   });
   // High-risk clients with no recent notes (7+ days)
-  clients.filter(c=>c.status==='active'&&c.riskLevel==='high').forEach(c=>{
+  visibleClients(clients).filter(c=>c.status==='active'&&c.riskLevel==='high').forEach(c=>{
     const lastNote=notes.filter(n=>n.clientId===c.id).sort((a,b)=>b.created.localeCompare(a.created))[0];
     if(!lastNote||lastNote.created.split('T')[0]<addDaysStr(todayStr,-7)){
       alerts.push({type:'contact',level:'high',msg:`No contact logged for ${sanitize(c.fullName)} (high risk) in 7+ days`,link:'clients',id:c.id});
     }
   });
   // Upcoming court dates (next 7 days)
-  clients.filter(c=>c.status==='active'&&c.jusCourts).forEach(c=>{
+  visibleClients(clients).filter(c=>c.status==='active'&&c.jusCourts).forEach(c=>{
     const lines=c.jusCourts.split(/\n|,|;/).map(l=>l.trim()).filter(Boolean);
     lines.forEach(line=>{
       const m=line.match(/(\d{1,2}[\s\/\-]\w+[\s\/\-]\d{2,4}|\d{4}-\d{2}-\d{2})/i);
@@ -11574,7 +11637,7 @@ function globalSearch(query) {
   if(!query||query.length<2) return [];
   const q=query.toLowerCase();
   const results=[];
-  clients.forEach(c=>{
+  visibleClients(clients).forEach(c=>{
     if((c.fullName||'').toLowerCase().includes(q)||(c.mob||'').toLowerCase().includes(q)||(c.community||'').toLowerCase().includes(q)||(c.phone||'').includes(q)||(c.clientId||'').toLowerCase().includes(q)){
       results.push({type:'client',icon:'👤',label:sanitize(c.fullName),sub:`${sanitize(c.mob||'')} ${sanitize(c.community||'')}`,action:`openClientProfile('${c.id}')`});
     }
@@ -11582,6 +11645,7 @@ function globalSearch(query) {
   notes.forEach(n=>{
     if((n.text||'').toLowerCase().includes(q)){
       const c=clients.find(cl=>cl.id===n.clientId);
+      if(c && !canViewClient(c)) return;   // don't leak notes of restricted clients
       results.push({type:'note',icon:'📝',label:`Note: ${sanitize((n.text||'').slice(0,60))}…`,sub:`${sanitize(c?.fullName||'Unknown')} — ${fmtdt(n.created)}`,action:`openClientProfile('${n.clientId}')`});
     }
   });
