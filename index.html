@@ -878,6 +878,10 @@ function initials(name) { return name.split(' ').filter(Boolean).map(w=>w[0]).sl
 let currentPage = 'dashboard';
 
 function showPage(page) {
+  // Settings is System-Manager only.
+  if(page === 'settings' && currentUser?.role !== 'sysmanager') {
+    showToast('Settings is available to the System Manager only.'); page = 'dashboard';
+  }
   if(!pageAllowed(page)) { showToast("You don't have access to that section — ask your System Manager."); page = 'dashboard'; }
   currentPage = page;
   // Background refreshes (e.g. sync snapshots) can fire while the login screen
@@ -10774,9 +10778,13 @@ function visibleClients(list){ return (list||clients).filter(canViewClient); }
 // Hide restricted sections from the sidebar and the mobile tab bar.
 function applyNavRestrictions(){
   const hidden = _myHiddenPages();
+  const isSys = currentUser?.role === 'sysmanager';
   document.querySelectorAll('.nav-item, .mob-tab').forEach(el=>{
     const m = (el.getAttribute('onclick')||'').match(/showPage\('([^']+)'\)/);
-    el.style.display = (m && hidden.includes(m[1])) ? 'none' : '';
+    const page = m && m[1];
+    // Settings is System-Manager only; everything else respects hiddenPages.
+    const blocked = page && ((page==='settings' && !isSys) || hidden.includes(page));
+    el.style.display = blocked ? 'none' : '';
   });
 }
 // Synced storage for access rules (doc per email) so restrictions set by the
