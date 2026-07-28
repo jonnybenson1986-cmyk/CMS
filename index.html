@@ -6672,7 +6672,10 @@ function openSessionModal(clientId, defaultType) {
       <input type="number" id="sm-duration" min="0" placeholder="e.g. 60" value="60">
     </div>
     <div class="form-group"><label>Worker</label>
-      ${workerSelectHTML('sm-worker','sm-worker-new', DB.load('workerName',''))}
+      ${currentUser?.role==='sysmanager'
+        ? workerSelectHTML('sm-worker','sm-worker-new', currentUser?.name || DB.load('workerName',''))
+        : `<input id="sm-worker" value="${sanitize(currentUser?.name||'')}" readonly title="Sessions are recorded under the worker who is signed in" style="background:var(--bg);color:var(--muted);cursor:not-allowed">
+           <div style="font-size:11px;color:var(--muted);margin-top:4px">Recorded under your name. Only a System Manager can log a session for another worker.</div>`}
     </div>
   </div>
 
@@ -6744,7 +6747,10 @@ function openSessionModal(clientId, defaultType) {
     const mins = parseInt(document.getElementById('sm-duration')?.value||'0');
     const noteDate = sessionDate ? new Date(sessionDate).toISOString() : now();
     const noteDateStr = noteDate.split('T')[0];
-    const worker = getWorkerValue('sm-worker','sm-worker-new');
+    // Non-managers can only log under their own name; a System Manager may pick any worker.
+    const worker = currentUser?.role==='sysmanager'
+      ? getWorkerValue('sm-worker','sm-worker-new')
+      : (currentUser?.name || '');
     const clientId = document.getElementById('sm-client')?.value;
     const type = document.getElementById('sm-type')?.value||'general';
     const contact = document.getElementById('sm-contact')?.value;
