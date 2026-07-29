@@ -10542,6 +10542,175 @@ function showLoginScreen() {
   setTimeout(()=>(document.getElementById('login-email')||document.getElementById('login-user'))?.focus(),100);
 }
 
+// ===== MULTI-FACTOR AUTHENTICATION (SMS) =====
+// Optional second factor: after a correct password, Firebase requires a code
+// texted to the enrolled mobile before finishing sign-in. Nothing is enforced
+// centrally — a staff member enrols voluntarily from the sidebar. Once
+// enrolled, THAT account is required to complete the challenge every login;
+// unenrolled accounts sign in as before.
+//   • Enrolment lives in openMfaModal() → 3 steps: verify current password,
+//     verify SMS code, done.
+//   • Sign-in challenge is handled inside doLogin's catch block when Firebase
+//     throws 'auth/multi-factor-auth-required'.
+//   • Uses invisible reCAPTCHA, required by Firebase phone auth.
+
+let _mfaRecaptcha = null;
+function _mfaMountRecaptcha(containerId){
+  try {
+    if(_mfaRecaptcha){ _mfaRecaptcha.clear(); _mfaRecaptcha=null; }
+    _mfaRecaptcha = new firebase.auth.RecaptchaVerifier(containerId, { size:'invisible' });
+    return _mfaRecaptcha;
+  } catch(e){ console.warn('reCAPTCHA mount failed:', e); return null; }
+}
+function _mfaFriendlyError(e){
+  const m = {
+    'auth/invalid-verification-code': 'That code was not correct — check your phone and try again.',
+    'auth/code-expired':              'That code has expired — request a new one.',
+    'auth/too-many-requests':         'Too many attempts — please wait a few minutes.',
+    'auth/requires-recent-login':     'Please sign out and back in, then try again.',
+    'auth/invalid-phone-number':      'That phone number doesn\'t look right. Use international format, e.g. +61412345678.',
+    'auth/second-factor-already-in-use': 'That phone is already enrolled as a second factor on this account.',
+  };
+  return m[e.code] || (e.message || 'Something went wrong. Please try again.');
+}
+
+async function openMfaModal(){
+  if(!window.firebase || !firebase.auth) { showToast('Still connecting — try again in a moment.'); return; }
+  const u = firebase.auth().currentUser;
+  if(!u){ showToast('Please sign in first.'); return; }
+  const enrolled = u.multiFactor?.enrolledFactors || [];
+  const html = `
+    <p style="font-size:13px;color:var(--muted);margin-bottom:14px">
+      Two-step sign-in asks for a code texted to your mobile whenever you sign in — so a stolen password alone can't get into the CMS.
+      Enrolment is optional, but strongly recommended for anyone with access to client data.
+    </p>
+    ${enrolled.length ? `
+      <div style="background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;padding:12px 14px;margin-bottom:12px">
+        <div style="font-weight:700;color:#065f46;font-size:13px;margin-bottom:6px">✅ Two-step sign-in is ON for your account</div>
+        ${enrolled.map(f=>`<div style="font-size:12.5px;color:#065f46">📱 ${sanitize(f.displayName||'Mobile')} · ${sanitize(f.phoneNumber||'')}</div>`).join('')}
+        <button class="btn btn-sm btn-outline" style="margin-top:10px" onclick="removeMfa('${enrolled[0].uid}')">Remove this factor</button>
+      </div>
+    ` : `
+      <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px">
+        <div style="font-weight:700;font-size:13.5px;margin-bottom:10px">Add your mobile number</div>
+        <div class="form-group"><label>Password (to confirm it's you)</label>
+          <input type="password" id="mfa-pass" placeholder="Your current password" autocomplete="current-password"></div>
+        <div class="form-group"><label>Mobile number (international format)</label>
+          <input type="tel" id="mfa-phone" placeholder="+61 412 345 678"></div>
+        <div class="form-group"><label>Label (optional)</label>
+          <input id="mfa-label" placeholder="e.g. Work mobile"></div>
+        <button class="btn btn-primary" id="mfa-send-btn" onclick="mfaSendEnrolCode()">Send verification code</button>
+        <p id="mfa-status" style="font-size:12px;color:var(--muted);margin-top:8px;min-height:16px"></p>
+      </div>
+      <div id="mfa-verify-block" style="display:none;margin-top:12px;background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:14px">
+        <div style="font-weight:700;font-size:13.5px;margin-bottom:10px">Enter the 6-digit code we texted</div>
+        <div class="form-group"><input id="mfa-code" placeholder="123456" inputmode="numeric" maxlength="6" autocomplete="one-time-code" style="font-size:16px;letter-spacing:4px;text-align:center"></div>
+        <button class="btn btn-primary" onclick="mfaCompleteEnrol()">Turn on two-step sign-in</button>
+      </div>
+    `}
+    <div id="mfa-recaptcha" style="margin-top:8px"></div>
+    <p style="font-size:11px;color:var(--muted);margin-top:12px">If you lose access to your phone, contact the System Manager — they can reset your second factor from the Firebase console.</p>`;
+  showModal('🔐 Two-step sign-in', html, null, '520px', true);
+  setTimeout(()=>_mfaMountRecaptcha('mfa-recaptcha'), 50);
+}
+
+let _mfaSession = null;   // holds { session, verificationId } during enrolment
+async function mfaSendEnrolCode(){
+  const pass  = document.getElementById('mfa-pass')?.value;
+  const phone = document.getElementById('mfa-phone')?.value?.trim();
+  const st    = document.getElementById('mfa-status');
+  if(!pass){ st.textContent='Please enter your password.'; return; }
+  if(!phone || !/^\+\d{7,}$/.test(phone.replace(/\s/g,''))){ st.textContent='Enter your mobile in international format, e.g. +61412345678.'; return; }
+  st.textContent='Sending code…';
+  try {
+    const u = firebase.auth().currentUser;
+    // Re-authenticate — Firebase requires a recent login before adding a factor.
+    const cred = firebase.auth.EmailAuthProvider.credential(u.email, pass);
+    await u.reauthenticateWithCredential(cred);
+    const session = await u.multiFactor.getSession();
+    const provider = new firebase.auth.PhoneAuthProvider();
+    const verificationId = await provider.verifyPhoneNumber({ phoneNumber: phone.replace(/\s/g,''), session }, _mfaRecaptcha);
+    _mfaSession = { verificationId, phone };
+    document.getElementById('mfa-verify-block').style.display='block';
+    st.textContent='Code sent — check your phone.';
+  } catch(e){
+    console.warn('MFA enrol send failed:', e);
+    st.textContent = _mfaFriendlyError(e);
+    // reCAPTCHA is single-use; remount for a retry
+    setTimeout(()=>_mfaMountRecaptcha('mfa-recaptcha'), 50);
+  }
+}
+
+async function mfaCompleteEnrol(){
+  const code = document.getElementById('mfa-code')?.value?.trim();
+  const st = document.getElementById('mfa-status');
+  if(!code || !_mfaSession){ st.textContent='Enter the 6-digit code first.'; return; }
+  try {
+    const cred = firebase.auth.PhoneAuthProvider.credential(_mfaSession.verificationId, code);
+    const assertion = firebase.auth.PhoneMultiFactorGenerator.assertion(cred);
+    const label = document.getElementById('mfa-label')?.value?.trim() || 'Mobile';
+    await firebase.auth().currentUser.multiFactor.enroll(assertion, label);
+    audit('Two-step sign-in enabled', currentUser?.name + ' enrolled ' + _mfaSession.phone.replace(/\d(?=\d{4})/g,'•'));
+    _mfaSession = null;
+    closeModal();
+    alert('✅ Two-step sign-in is now on.\n\nFrom next sign-in you will be asked for a code texted to your mobile. Keep this device safe — if you lose it, contact your System Manager to reset it.');
+  } catch(e){
+    console.warn('MFA enrol complete failed:', e);
+    st.textContent = _mfaFriendlyError(e);
+  }
+}
+
+async function removeMfa(factorUid){
+  if(!confirm('Turn OFF two-step sign-in for your account?\n\nYou will no longer be asked for a code at sign-in.')) return;
+  try {
+    await firebase.auth().currentUser.multiFactor.unenroll({ uid: factorUid });
+    audit('Two-step sign-in removed', currentUser?.name+' removed a factor');
+    closeModal();
+    showToast('Two-step sign-in turned off');
+  } catch(e){
+    alert('Could not remove: ' + _mfaFriendlyError(e));
+  }
+}
+
+// Sign-in challenge when the account has MFA enrolled.
+async function _mfaChallengeFlow(resolver, email){
+  const hint = resolver.hints[0]; // one factor supported today (SMS)
+  return new Promise((resolve, reject) => {
+    const html = `
+      <p style="font-size:13px;color:var(--muted);margin-bottom:14px">This account has two-step sign-in on. We're texting a 6-digit code to <strong>${sanitize(hint.phoneNumber||'your mobile')}</strong>.</p>
+      <div class="form-group"><label>6-digit code</label>
+        <input id="mfa-in-code" inputmode="numeric" maxlength="6" autocomplete="one-time-code" style="font-size:16px;letter-spacing:4px;text-align:center" placeholder="123456"></div>
+      <p id="mfa-in-status" style="font-size:12px;color:var(--muted);min-height:16px"></p>
+      <div id="mfa-in-recaptcha"></div>`;
+    showModal('🔐 Enter your sign-in code', html, async ()=>{
+      const st = document.getElementById('mfa-in-status');
+      const code = document.getElementById('mfa-in-code')?.value?.trim();
+      if(!code){ st.textContent='Enter the 6-digit code.'; return false; }
+      try {
+        const cred = firebase.auth.PhoneAuthProvider.credential(window._mfaInVerificationId, code);
+        const assertion = firebase.auth.PhoneMultiFactorGenerator.assertion(cred);
+        const userCred = await resolver.resolveSignIn(assertion);
+        resolve(userCred);
+        return true;
+      } catch(e){
+        st.textContent = _mfaFriendlyError(e);
+        return false;
+      }
+    }, '460px');
+    // Kick off the SMS send after the modal is in the DOM
+    setTimeout(async ()=>{
+      try {
+        _mfaMountRecaptcha('mfa-in-recaptcha');
+        const provider = new firebase.auth.PhoneAuthProvider();
+        window._mfaInVerificationId = await provider.verifyPhoneNumber({ multiFactorHint: hint, session: resolver.session }, _mfaRecaptcha);
+      } catch(e){
+        document.getElementById('mfa-in-status').textContent = 'Could not send code: ' + _mfaFriendlyError(e);
+        reject(e);
+      }
+    }, 60);
+  });
+}
+
 async function doLogin() {
   const errEl = document.getElementById('login-error');
 
@@ -10573,7 +10742,17 @@ async function doLogin() {
       }
       const cfg = FSYNC.getCfg();
       if (!firebase.apps.length) firebase.initializeApp(cfg);
-      const cred = await firebase.auth().signInWithEmailAndPassword(email, pass);
+      let cred;
+      try {
+        cred = await firebase.auth().signInWithEmailAndPassword(email, pass);
+      } catch(e){
+        // If the account has two-step sign-in, complete the SMS challenge
+        // before finishing sign-in. Any other error rethrows to the outer catch.
+        if (e.code === 'auth/multi-factor-auth-required') {
+          btn.textContent='Awaiting code…';
+          cred = await _mfaChallengeFlow(e.resolver, email);
+        } else { throw e; }
+      }
       // Match Firebase user to local profile (keyed on email; self-healing)
       let u = _resolveUserProfile(cred.user, email);
       // Server-set role wins: once the role Cloud Function is deployed
@@ -11401,6 +11580,9 @@ function initApp() {
         <div style="font-size:10px;opacity:0.6">${ROLES[currentUser?.role]?.label||''}</div>
       </div>
     </div>
+    <button onclick="openMfaModal()" title="Turn on two-step sign-in for stronger security" style="width:100%;padding:8px;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.25);border-radius:7px;color:#fff;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;transition:background 0.15s" onmouseover="this.style.background='rgba(255,255,255,0.2)'" onmouseout="this.style.background='rgba(255,255,255,0.1)'">
+      <span style="font-size:14px">🔐</span> Two-step sign-in${(()=>{ try{ return firebase.auth().currentUser?.multiFactor?.enrolledFactors?.length ? ' ✓' : ''; }catch(_){ return ''; } })()}
+    </button>
     <button onclick="logout()" style="width:100%;padding:8px;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.25);border-radius:7px;color:#fff;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;transition:background 0.15s" onmouseover="this.style.background='rgba(255,255,255,0.2)'" onmouseout="this.style.background='rgba(255,255,255,0.1)'">
       <span style="font-size:14px">⏻</span> Sign Out
     </button>`;
