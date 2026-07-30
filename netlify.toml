@@ -15,8 +15,10 @@
     Permissions-Policy = "camera=(), microphone=(self), geolocation=()"
     # Content Security Policy
     # - default: self only
-    # - scripts: self + Firebase + MSAL CDN
-    # - connect: Firebase Firestore/Auth APIs + Microsoft login
+    # - scripts: self + Firebase + MSAL CDN + reCAPTCHA (needed for SMS MFA)
+    # - connect: Firebase Firestore/Auth APIs + Microsoft login + reCAPTCHA
+    # - frame:   reCAPTCHA challenge iframe (mandatory for phone MFA)
+    # - manifest: allow the embedded data: PWA manifest
     # - style: self + inline (required by the single-file app)
     # - img: self + data URIs (avatars, logos)
     # - frame-ancestors: none (no embedding)
@@ -25,6 +27,8 @@
       script-src 'self' 'unsafe-inline'
         https://www.gstatic.com
         https://www.googleapis.com
+        https://www.google.com
+        https://www.recaptcha.net
         https://cdn.jsdelivr.net
         https://alcdn.msauth.net;
       style-src 'self' 'unsafe-inline';
@@ -39,6 +43,8 @@
         https://graph.microsoft.com
         https://api.ipify.org
         https://*.firebasestorage.googleapis.com
+        https://www.google.com
+        https://www.recaptcha.net
         https://www.google-analytics.com
         https://analytics.google.com
         https://region1.google-analytics.com;
@@ -46,7 +52,8 @@
       font-src 'self' data:;
       media-src 'self';
       worker-src 'self';
-      frame-src 'none';
+      manifest-src 'self' data:;
+      frame-src https://www.google.com https://www.recaptcha.net;
       frame-ancestors 'none';
       form-action 'self';
       base-uri 'self';
