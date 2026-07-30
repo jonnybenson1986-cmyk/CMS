@@ -10571,6 +10571,7 @@ function _mfaFriendlyError(e){
     'auth/invalid-phone-number':      'That phone number doesn\'t look right. Use international format, e.g. +61412345678.',
     'auth/second-factor-already-in-use': 'That phone is already enrolled as a second factor on this account.',
     'auth/unverified-email':          'Please verify your email address first — reopen Two-step sign-in and use the "Send verification email" button.',
+    'auth/operation-not-allowed':     'SMS is not yet enabled for your region. The System Manager needs to allow Australia (+61) in Firebase Console → Authentication → Settings → SMS region policy.',
   };
   return m[e.code] || (e.message || 'Something went wrong. Please try again.');
 }
