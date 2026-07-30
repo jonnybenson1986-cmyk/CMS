@@ -10570,6 +10570,7 @@ function _mfaFriendlyError(e){
     'auth/requires-recent-login':     'Please sign out and back in, then try again.',
     'auth/invalid-phone-number':      'That phone number doesn\'t look right. Use international format, e.g. +61412345678.',
     'auth/second-factor-already-in-use': 'That phone is already enrolled as a second factor on this account.',
+    'auth/unverified-email':          'Please verify your email address first — reopen Two-step sign-in and use the "Send verification email" button.',
   };
   return m[e.code] || (e.message || 'Something went wrong. Please try again.');
 }
@@ -10578,7 +10579,13 @@ async function openMfaModal(){
   if(!window.firebase || !firebase.auth) { showToast('Still connecting — try again in a moment.'); return; }
   const u = firebase.auth().currentUser;
   if(!u){ showToast('Please sign in first.'); return; }
-  const enrolled = u.multiFactor?.enrolledFactors || [];
+  // Refresh token/profile so a just-verified email shows up straight away.
+  try { await u.reload(); } catch(_){}
+  const fresh = firebase.auth().currentUser;
+  const enrolled = fresh.multiFactor?.enrolledFactors || [];
+  // Firebase blocks enrolment until the email address is verified. If it isn't,
+  // don't show the mobile form at all — walk the user through verification.
+  const needsVerify = !enrolled.length && !fresh.emailVerified;
   const html = `
     <p style="font-size:13px;color:var(--muted);margin-bottom:14px">
       Two-step sign-in asks for a code texted to your mobile whenever you sign in — so a stolen password alone can't get into the CMS.
@@ -10589,6 +10596,19 @@ async function openMfaModal(){
         <div style="font-weight:700;color:#065f46;font-size:13px;margin-bottom:6px">✅ Two-step sign-in is ON for your account</div>
         ${enrolled.map(f=>`<div style="font-size:12.5px;color:#065f46">📱 ${sanitize(f.displayName||'Mobile')} · ${sanitize(f.phoneNumber||'')}</div>`).join('')}
         <button class="btn btn-sm btn-outline" style="margin-top:10px" onclick="removeMfa('${enrolled[0].uid}')">Remove this factor</button>
+      </div>
+    ` : needsVerify ? `
+      <div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:14px">
+        <div style="font-weight:700;font-size:13.5px;margin-bottom:6px;color:#92400e">📧 Verify your email first</div>
+        <p style="font-size:12.5px;color:#78350f;margin-bottom:12px;line-height:1.5">
+          Before you can add two-step sign-in, we need to confirm you own <strong>${sanitize(fresh.email||'your email')}</strong>.
+          Click the button, open the email we send you, and click the link inside — then come back here and click <em>I've verified — check again</em>.
+        </p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-primary" id="mfa-send-verify" onclick="mfaSendVerifyEmail()">📧 Send verification email</button>
+          <button class="btn btn-outline" onclick="openMfaModal()">🔄 I've verified — check again</button>
+        </div>
+        <p id="mfa-verify-status" style="font-size:12px;color:#78350f;margin-top:10px;min-height:16px"></p>
       </div>
     ` : `
       <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px">
@@ -10611,7 +10631,30 @@ async function openMfaModal(){
     <div id="mfa-recaptcha" style="margin-top:8px"></div>
     <p style="font-size:11px;color:var(--muted);margin-top:12px">If you lose access to your phone, contact the System Manager — they can reset your second factor from the Firebase console.</p>`;
   showModal('🔐 Two-step sign-in', html, null, '520px', true);
-  setTimeout(()=>_mfaMountRecaptcha('mfa-recaptcha'), 50);
+  if(!needsVerify && !enrolled.length) setTimeout(()=>_mfaMountRecaptcha('mfa-recaptcha'), 50);
+}
+
+// Send Firebase's email-verification link to the signed-in user's address,
+// then explain what to do next. The user clicks the link in their inbox and
+// then hits "check again" in the modal to refresh their status.
+async function mfaSendVerifyEmail(){
+  const st = document.getElementById('mfa-verify-status');
+  const btn = document.getElementById('mfa-send-verify');
+  const u = firebase.auth().currentUser;
+  if(!u){ if(st) st.textContent = 'Please sign in first.'; return; }
+  if(btn){ btn.disabled = true; btn.textContent = 'Sending…'; }
+  try {
+    await u.sendEmailVerification();
+    if(st) st.innerHTML = `✅ Sent to <strong>${sanitize(u.email||'your email')}</strong>. Open it, click the link, then come back and press <em>I've verified — check again</em>. (Check junk/spam if you don't see it in a minute.)`;
+    if(btn) btn.textContent = '📧 Resend verification email';
+  } catch(e){
+    console.warn('sendEmailVerification failed:', e);
+    if(st) st.textContent = e.code==='auth/too-many-requests'
+      ? 'Too many requests — please wait a few minutes and try again.'
+      : ('Could not send: ' + (e.message||e.code||'unknown error'));
+  } finally {
+    if(btn) btn.disabled = false;
+  }
 }
 
 let _mfaSession = null;   // holds { session, verificationId } during enrolment
