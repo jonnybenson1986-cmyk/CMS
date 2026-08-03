@@ -453,6 +453,7 @@
 <script src="vendor/firebase/firebase-firestore-compat.js"></script>
 <script src="vendor/firebase/firebase-auth-compat.js"></script>
 <script src="vendor/firebase/firebase-storage-compat.js"></script>
+<script src="vendor/firebase/firebase-app-check-compat.js"></script>
 <script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
 <script>
 // ===== DATA LAYER =====
@@ -488,6 +489,29 @@ const FSYNC = (() => {
   function isReady()  { return !!db; }
   function col(name)  { return db.collection('teams').doc(teamId).collection(name); }
 
+  // ── APP CHECK ─────────────────────────────────────────────────────────────
+  // Attaches an anti-abuse token (via reCAPTCHA Enterprise) to every request
+  // this app makes to Firebase, so the backend can distinguish OUR site from
+  // scripts / bots holding the same public config. Reads the site key from
+  // localStorage 'appCheckSiteKey' — a value the System Manager pastes into
+  // Settings → Cloud Sync → App Check after registering the site in Firebase
+  // Console → App Check. If no key is set the activation is skipped safely
+  // and the app runs exactly as it did before (App Check must be left in
+  // Monitoring mode in that case — see IT hardening notes).
+  function _activateAppCheck(_log){
+    try {
+      if (!firebase.appCheck) { _log && _log.push('AppCheck SDK missing'); return; }
+      const key = (window.DB && DB.load('appCheckSiteKey','')) || '';
+      if (!key) { _log && _log.push('AppCheck not configured (no site key) — leave Enforcement OFF'); return; }
+      // Idempotent — activating twice throws; guard.
+      if (firebase.app()._appCheckActivated) return;
+      const provider = new firebase.appCheck.ReCaptchaEnterpriseProvider(key);
+      firebase.appCheck().activate(provider, /* isTokenAutoRefreshEnabled */ true);
+      firebase.app()._appCheckActivated = true;
+      _log && _log.push('App Check ✓');
+    } catch(e){ console.warn('App Check activation failed:', e); _log && _log.push('AppCheck: '+(e.code||e.message||'error')); }
+  }
+
   function _loadScript(src) {
     return new Promise((resolve, reject) => {
       const s = document.createElement('script');
@@ -510,7 +534,7 @@ const FSYNC = (() => {
       `https://www.gstatic.com/firebasejs/${ver}/`,             // CSP-allowed CDN fallback
       `https://cdn.jsdelivr.net/npm/firebase@${ver}/`,          // CSP-allowed CDN fallback
     ];
-    const files = ['firebase-app-compat.js', 'firebase-firestore-compat.js', 'firebase-auth-compat.js', 'firebase-storage-compat.js'];
+    const files = ['firebase-app-compat.js', 'firebase-firestore-compat.js', 'firebase-auth-compat.js', 'firebase-storage-compat.js', 'firebase-app-check-compat.js'];
     for (const base of bases) {
       try {
         for (const f of files) await _loadScript(base + f);
@@ -540,6 +564,7 @@ const FSYNC = (() => {
       if (firebase.apps.length) { try { await firebase.app().delete(); } catch(e){} }
       firebase.initializeApp(cfg);
       _log.push('App initialised ✓');
+      _activateAppCheck(_log);
       db = firebase.firestore();
       teamId = cfg.teamId || 'worngundidj';
       _log.push('Firestore ✓');
@@ -9090,6 +9115,26 @@ function renderSettings() {
         <strong>Team ID:</strong> <code style="background:#e0f0e8;padding:2px 8px;border-radius:4px">${FSYNC.getCfg()?.teamId||'worngundidj'}</code>
       </div>
       <button class="btn btn-sm btn-danger" onclick="FSYNC.clearConfig()">🗑️ Disconnect Firebase</button>
+
+      <!-- App Check site key (System Manager only) -->
+      ${currentUser?.role==='sysmanager' ? `
+      <div style="margin-top:16px;padding:14px;border:1px solid ${DB.load('appCheckSiteKey','')?'#a7f3d0':'#fcd34d'};background:${DB.load('appCheckSiteKey','')?'#ecfdf5':'#fffbeb'};border-radius:10px">
+        <div style="font-weight:700;font-size:13.5px;margin-bottom:4px;color:${DB.load('appCheckSiteKey','')?'#065f46':'#92400e'}">
+          🛡️ App Check — anti-abuse token ${DB.load('appCheckSiteKey','')?'<span style="font-weight:600;font-size:11px">· Active</span>':'<span style="font-weight:600;font-size:11px">· Not set</span>'}
+        </div>
+        <p style="font-size:12.5px;color:${DB.load('appCheckSiteKey','')?'#065f46':'#78350f'};line-height:1.5;margin-bottom:10px">
+          Proves each request to Firebase came from this app, not a script or bot. Register a reCAPTCHA Enterprise site key in
+          <strong>Firebase Console → App Check → Apps → your web app → Register</strong>, then paste the <strong>site key</strong> (public value) below and click Save. Sign out and back in for it to take effect.
+        </p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <input id="appcheck-site-key" placeholder="6L… (reCAPTCHA Enterprise site key)" value="${sanitize(DB.load('appCheckSiteKey',''))}" style="flex:1;min-width:260px;padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:12.5px;font-family:monospace">
+          <button class="btn btn-sm btn-primary" onclick="saveAppCheckKey()">💾 Save site key</button>
+          ${DB.load('appCheckSiteKey','') ? `<button class="btn btn-sm btn-outline" onclick="clearAppCheckKey()">Remove</button>` : ''}
+        </div>
+        <p style="font-size:11.5px;color:${DB.load('appCheckSiteKey','')?'#065f46':'#78350f'};margin-top:8px;line-height:1.4">
+          ⚠️ Leave App Check <strong>Enforcement OFF</strong> in Firebase Console until this shows Active AND the Monitoring page shows healthy “verified” requests for at least a day — enforcing too early will lock all staff out.
+        </p>
+      </div>` : ''}
     `:`
       <p style="font-size:13px;color:var(--muted);margin-bottom:12px">Connect once to securely share the same client records across all staff devices, in real time. Data is stored on Australian servers (Sydney). Paste your Firebase config below to connect.</p>
       <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px">
@@ -9617,6 +9662,31 @@ function clearSidebarBg() {
   DB.save('sidebarBg', '');
   applySidebarBg();
   showToast('Sidebar background cleared');
+}
+
+// System Manager only — saves the reCAPTCHA Enterprise site key that App Check
+// uses to mint the anti-abuse token. Key is a PUBLIC value (like the Firebase
+// API key), safe to store in localStorage; the paired secret stays in Google
+// Cloud. Takes effect on the next Cloud Sync init (sign out / sign in).
+function saveAppCheckKey(){
+  if(currentUser?.role!=='sysmanager'){ showToast('Only the System Manager can change App Check'); return; }
+  const key = (document.getElementById('appcheck-site-key')?.value||'').trim();
+  if(!key){ showToast('Paste the site key first'); return; }
+  if(!/^[A-Za-z0-9_\-]{30,80}$/.test(key)){
+    if(!confirm("That doesn't look like a typical reCAPTCHA Enterprise site key. Save it anyway?")) return;
+  }
+  DB.save('appCheckSiteKey', key);
+  audit('App Check site key saved', 'App Check activated for this site');
+  alert('✅ App Check site key saved.\n\nNext step: sign out and sign back in so the token is minted, then check Firebase Console → App Check that "Verified requests" starts climbing.\n\n⚠️ DO NOT click "Enforce" until Verified is at 100% for at least a day, or staff will be locked out.');
+  showPage('settings');
+}
+function clearAppCheckKey(){
+  if(currentUser?.role!=='sysmanager'){ showToast('Only the System Manager can change App Check'); return; }
+  if(!confirm('Remove the App Check site key? The app will stop attaching anti-abuse tokens — leave App Check enforcement OFF in Firebase or all requests will be rejected.')) return;
+  DB.save('appCheckSiteKey', '');
+  audit('App Check site key removed', 'App Check deactivated for this site');
+  showToast('App Check site key removed — sign out and back in to fully deactivate');
+  showPage('settings');
 }
 
 function saveSettings() {
