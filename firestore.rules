@@ -43,6 +43,12 @@ service cloud.firestore {
     // tightening to sysmanager-only comes with custom claims (strict rules).
     match /teams/{teamId}/userAccess/{id}    { allow read, write: if signedIn(); }
 
+    // ── Newly-synced operational stores (QA C4/H5) ─────────────────────────
+    match /teams/{teamId}/fpho/{id}         { allow read, write: if signedIn(); }
+    match /teams/{teamId}/walkins/{id}      { allow read, write: if signedIn(); }
+    match /teams/{teamId}/calevents/{id}    { allow read, write: if signedIn(); }
+    match /teams/{teamId}/resources/{id}    { allow read, write: if signedIn(); }
+
     // ── Audit log: append-only for EVERYONE, including admins ───────────────
     // create        → any signed-in staff (the app writes audit entries)
     // update        → only a byte-identical re-push (sync no-op); real edits denied

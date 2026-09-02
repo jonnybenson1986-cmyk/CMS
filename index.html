@@ -453,12 +453,34 @@
 <script src="vendor/firebase/firebase-firestore-compat.js"></script>
 <script src="vendor/firebase/firebase-auth-compat.js"></script>
 <script src="vendor/firebase/firebase-storage-compat.js"></script>
+<script src="vendor/firebase/firebase-app-check-compat.js"></script>
 <script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
 <script>
 // ===== DATA LAYER =====
 const DB = {
   load(k, def) { try { return JSON.parse(localStorage.getItem('sewb_cms_'+k)) ?? def; } catch { return def; } },
-  save(k, v) { localStorage.setItem('sewb_cms_'+k, JSON.stringify(v)); }
+  // A failed write used to throw silently and the data was simply lost (QA M2).
+  // Browser storage is finite (~5MB), so this DOES happen with large datasets or
+  // base64 file fallbacks. Now the failure is caught and the worker is warned so
+  // they can act (export a backup / connect Cloud Sync) instead of losing work.
+  save(k, v) {
+    try { localStorage.setItem('sewb_cms_'+k, JSON.stringify(v)); return true; }
+    catch (e) {
+      console.error('Local save failed for "'+k+'":', e && e.name, e && e.message);
+      try {
+        if (!DB._warned) {
+          DB._warned = true;
+          const quota = e && (e.name==='QuotaExceededError' || e.code===22 || e.code===1014);
+          const msg = quota
+            ? '⚠️ This device has run out of storage space. Recent changes may NOT be saved locally. Connect Cloud Sync or export a backup now, then contact your System Manager.'
+            : '⚠️ Could not save to this device. Please export a backup and contact your System Manager.';
+          if (typeof showToast === 'function') showToast(msg); else alert(msg);
+          setTimeout(()=>{ DB._warned = false; }, 30000); // allow re-warning later
+        }
+      } catch (_) {}
+      return false;
+    }
+  }
 };
 
 // ===== NDIS PRICE CATALOGUE (2025-26 Pricing Arrangements and Price Limits) =====
@@ -488,6 +510,29 @@ const FSYNC = (() => {
   function isReady()  { return !!db; }
   function col(name)  { return db.collection('teams').doc(teamId).collection(name); }
 
+  // ── APP CHECK ─────────────────────────────────────────────────────────────
+  // Attaches an anti-abuse token (via reCAPTCHA Enterprise) to every request
+  // this app makes to Firebase, so the backend can distinguish OUR site from
+  // scripts / bots holding the same public config. Reads the site key from
+  // localStorage 'appCheckSiteKey' — a value the System Manager pastes into
+  // Settings → Cloud Sync → App Check after registering the site in Firebase
+  // Console → App Check. If no key is set the activation is skipped safely
+  // and the app runs exactly as it did before (App Check must be left in
+  // Monitoring mode in that case — see IT hardening notes).
+  function _activateAppCheck(_log){
+    try {
+      if (!firebase.appCheck) { _log && _log.push('AppCheck SDK missing'); return; }
+      const key = (window.DB && DB.load('appCheckSiteKey','')) || '';
+      if (!key) { _log && _log.push('AppCheck not configured (no site key) — leave Enforcement OFF'); return; }
+      // Idempotent — activating twice throws; guard.
+      if (firebase.app()._appCheckActivated) return;
+      const provider = new firebase.appCheck.ReCaptchaEnterpriseProvider(key);
+      firebase.appCheck().activate(provider, /* isTokenAutoRefreshEnabled */ true);
+      firebase.app()._appCheckActivated = true;
+      _log && _log.push('App Check ✓');
+    } catch(e){ console.warn('App Check activation failed:', e); _log && _log.push('AppCheck: '+(e.code||e.message||'error')); }
+  }
+
   function _loadScript(src) {
     return new Promise((resolve, reject) => {
       const s = document.createElement('script');
@@ -510,7 +555,7 @@ const FSYNC = (() => {
       `https://www.gstatic.com/firebasejs/${ver}/`,             // CSP-allowed CDN fallback
       `https://cdn.jsdelivr.net/npm/firebase@${ver}/`,          // CSP-allowed CDN fallback
     ];
-    const files = ['firebase-app-compat.js', 'firebase-firestore-compat.js', 'firebase-auth-compat.js', 'firebase-storage-compat.js'];
+    const files = ['firebase-app-compat.js', 'firebase-firestore-compat.js', 'firebase-auth-compat.js', 'firebase-storage-compat.js', 'firebase-app-check-compat.js'];
     for (const base of bases) {
       try {
         for (const f of files) await _loadScript(base + f);
@@ -540,6 +585,7 @@ const FSYNC = (() => {
       if (firebase.apps.length) { try { await firebase.app().delete(); } catch(e){} }
       firebase.initializeApp(cfg);
       _log.push('App initialised ✓');
+      _activateAppCheck(_log);
       db = firebase.firestore();
       teamId = cfg.teamId || 'worngundidj';
       _log.push('Firestore ✓');
@@ -597,6 +643,21 @@ const FSYNC = (() => {
       col('referrals').get(), col('workersList').get(), col('workflowTasks').get(),
     ]);
     try { const ps = await col('policies').doc('list').get(); const pl = ps.exists ? ps.data().list : null; if(pl){ policies = pl; DB.save('policies', policies); } } catch(e){}
+    // QA C4/H5 — pull the stores that used to be device-local only.
+    try { const f = await col('fpho').doc('list').get(); if(f.exists){ const d=f.data();
+      if(Array.isArray(d.clients)){ fphoClients=d.clients; DB.save('fphoClients',fphoClients); }
+      if(Array.isArray(d.applications)){ fphoApplications=d.applications; DB.save('fphoApplications',fphoApplications); } } } catch(e){}
+    try { const w2 = await col('walkins').doc('list').get(); const l=w2.exists?w2.data().list:null; if(Array.isArray(l)){ walkins=l; DB.save('walkins',walkins); } } catch(e){}
+    try { const ce = await col('calevents').doc('list').get(); const l=ce.exists?ce.data().list:null; if(Array.isArray(l)){ calEvents=l; DB.save('calevents',calEvents); } } catch(e){}
+    try { const rs2 = await col('resources').doc('list').get(); const l=rs2.exists?rs2.data().list:null; if(Array.isArray(l)){ resources=l; DB.save('resources',resources); } } catch(e){}
+    // QA H4 — the audit log was write-only: pushed but never pulled, so each
+    // device only ever showed its own entries. Merge in the most recent 2000.
+    try { const al = await col('auditlog').orderBy('ts','desc').limit(2000).get();
+      if(!al.empty){ const rows=al.docs.map(d=>d.data()).reverse();
+        const seen=new Set(auditLog.map(a=>a.id));
+        rows.forEach(r=>{ if(r && r.id && !seen.has(r.id)){ auditLog.push(r); seen.add(r.id); } });
+        auditLog.sort((a,b)=>String(a.ts||'').localeCompare(String(b.ts||'')));
+        DB.save('auditlog', auditLog); } } catch(e){ console.warn('Audit pull:', e.message); }
     if (!cs.empty) { clients = cs.docs.map(d=>d.data()); DB.save('clients',clients); }
     if (!ns.empty) { notes   = ns.docs.map(d=>d.data()); DB.save('notes',notes); }
     if (!ts.empty) { timeLogs= ts.docs.map(d=>d.data()); DB.save('timelogs',timeLogs); }
@@ -611,20 +672,53 @@ const FSYNC = (() => {
       if (['clients','dashboard','sewb','aod','justice','cultural','disability','reports','sessions'].includes(currentPage))
         setTimeout(()=>showPage(currentPage),50);
     };
-    _listeners.push(col('clients').onSnapshot(snap=>{ if(snap.metadata.hasPendingWrites)return; clients=snap.docs.map(d=>d.data());DB.save('clients',clients);refresh(); }));
-    _listeners.push(col('notes').onSnapshot(snap=>{ if(snap.metadata.hasPendingWrites)return; notes=snap.docs.map(d=>d.data());DB.save('notes',notes); }));
-    _listeners.push(col('timelogs').onSnapshot(snap=>{ if(snap.metadata.hasPendingWrites)return; timeLogs=snap.docs.map(d=>d.data());DB.save('timelogs',timeLogs); }));
-    _listeners.push(col('referrals').onSnapshot(snap=>{ if(snap.metadata.hasPendingWrites)return; referrals=snap.docs.map(d=>d.data());DB.save('referrals',referrals); if(currentPage==='referrals')setTimeout(()=>showPage('referrals'),50); }));
-    _listeners.push(col('policies').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; const pl=doc.exists?doc.data().list:null; if(pl){ policies=pl; DB.save('policies',policies); if(currentPage==='policies')setTimeout(()=>showPage('policies'),50); } }));
+    // GUARD (QA C1): never let an EMPTY snapshot overwrite good local data.
+    // Firestore emits an empty snapshot from a cold/offline cache (fromCache),
+    // and on a permissions error — accepting it would erase records a worker
+    // entered offline. hasPendingWrites does NOT cover this. Only trust an
+    // empty result when it is a confirmed server read.
+    const trust = snap => {
+      if (snap.metadata.hasPendingWrites) return false;      // our own un-acked write
+      if (snap.empty && snap.metadata.fromCache) return false; // cold/offline cache — not truth
+      return true;
+    };
+    _listeners.push(col('clients').onSnapshot(snap=>{ if(!trust(snap))return; clients=snap.docs.map(d=>d.data());DB.save('clients',clients);refresh(); }, e=>console.warn('clients listener:',e.message)));
+    _listeners.push(col('notes').onSnapshot(snap=>{ if(!trust(snap))return; notes=snap.docs.map(d=>d.data());DB.save('notes',notes); }, e=>console.warn('notes listener:',e.message)));
+    _listeners.push(col('timelogs').onSnapshot(snap=>{ if(!trust(snap))return; timeLogs=snap.docs.map(d=>d.data());DB.save('timelogs',timeLogs); }, e=>console.warn('timelogs listener:',e.message)));
+    _listeners.push(col('referrals').onSnapshot(snap=>{ if(!trust(snap))return; referrals=snap.docs.map(d=>d.data());DB.save('referrals',referrals); if(currentPage==='referrals')setTimeout(()=>showPage('referrals'),50); }, e=>console.warn('referrals listener:',e.message)));
+    _listeners.push(col('policies').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; const pl=doc.exists?doc.data().list:null; if(pl){ policies=pl; DB.save('policies',policies); if(currentPage==='policies')setTimeout(()=>showPage('policies'),50); } }, e=>console.warn('policies listener:',e.message)));
+    _listeners.push(col('walkins').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; const l=doc.exists?doc.data().list:null; if(l){ walkins=l; DB.save('walkins',walkins); if(currentPage==='walkins')setTimeout(()=>showPage('walkins'),50); } }, e=>console.warn('walkins listener:',e.message)));
+    _listeners.push(col('calevents').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; const l=doc.exists?doc.data().list:null; if(l){ calEvents=l; DB.save('calevents',calEvents); if(currentPage==='calendar')setTimeout(()=>showPage('calendar'),50); } }, e=>console.warn('calevents listener:',e.message)));
+    _listeners.push(col('fpho').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; if(!doc.exists)return; const d=doc.data();
+      if(Array.isArray(d.clients)){ fphoClients=d.clients; DB.save('fphoClients',fphoClients); }
+      if(Array.isArray(d.applications)){ fphoApplications=d.applications; DB.save('fphoApplications',fphoApplications); }
+      if(currentPage==='homeownership')setTimeout(()=>showPage('homeownership'),50); }, e=>console.warn('fpho listener:',e.message)));
+    _listeners.push(col('resources').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; const l=doc.exists?doc.data().list:null; if(l){ resources=l; DB.save('resources',resources); if(currentPage==='resources')setTimeout(()=>showPage('resources'),50); } }, e=>console.warn('resources listener:',e.message)));
   }
+
+  // Firestore rejects `undefined` anywhere in a document and fails the WHOLE
+  // batch — one bad field silently loses up to 400 records (QA H2). Round-trip
+  // through JSON to drop undefined values before writing.
+  function _clean(o){ try { return JSON.parse(JSON.stringify(o===undefined?null:o)); } catch(e){ return o; } }
 
   async function _batch(colName, items, idFn) {
     if (!db||!items.length) return;
     for (let i=0;i<items.length;i+=400) {
       const batch=db.batch();
-      items.slice(i,i+400).forEach(item=>batch.set(col(colName).doc(idFn(item)),item));
-      await batch.commit().catch(e=>console.warn('Sync write:',e.message));
+      // merge:true — a concurrent edit by another worker must not blow away
+      // fields this device didn't touch (QA C3: silent last-write-wins loss).
+      items.slice(i,i+400).forEach(item=>batch.set(col(colName).doc(idFn(item)), _clean(item), {merge:true}));
+      await batch.commit().catch(e=>{ console.warn('Sync write:',e.message); _syncFailed(colName, e); });
     }
+  }
+  // Surface sync failures instead of swallowing them (QA H3).
+  let _syncErrCount = 0;
+  function _syncFailed(colName, e){
+    _syncErrCount++;
+    try {
+      if (typeof showToast === 'function' && _syncErrCount <= 3)
+        showToast('⚠️ Could not save ' + colName + ' to the cloud — your work is saved on this device. Check your connection.');
+    } catch(_){}
   }
   function _sanitiseClient(c) {
     if (!c.wf?.brokReceipt) return c;
@@ -640,6 +734,15 @@ const FSYNC = (() => {
   async function pushTasks()    { if(db) col('workflowTasks').doc('list').set({list:workflowTasks}).catch(()=>{}); }
   async function pushPolicies() { if(db) col('policies').doc('list').set({list:policies.map(p=>{ const {data,...rest}=p; return rest; })}).catch(e=>console.warn('Policy sync:',e.message)); }
   async function pushAudit()    { await _batch('auditlog',auditLog,a=>a.id); }
+  // QA C4/H5 — these were device-local only. FPHO holds real client records, so
+  // losing the device (or signing out, which purges local data) destroyed them
+  // permanently and no other worker could see them. Now synced like everything
+  // else. Base64 `data` is stripped from resources so the doc stays small —
+  // cloud-stored files carry a storagePath/url instead.
+  async function pushFpho()     { if(db) col('fpho').doc('list').set({ clients:_clean(fphoClients)||[], applications:_clean(fphoApplications)||[] }).catch(e=>{console.warn('FPHO sync:',e.message);_syncFailed('FPHO records',e);}); }
+  async function pushWalkins()  { if(db) col('walkins').doc('list').set({list:_clean(walkins)||[]}).catch(e=>{console.warn('Walk-in sync:',e.message);_syncFailed('walk-ins',e);}); }
+  async function pushCalEvents(){ if(db) col('calevents').doc('list').set({list:_clean(calEvents)||[]}).catch(e=>{console.warn('Calendar sync:',e.message);_syncFailed('calendar',e);}); }
+  async function pushResources(){ if(db) col('resources').doc('list').set({list:(resources||[]).map(r=>{ const {data,...rest}=r; return _clean(rest); })}).catch(e=>{console.warn('Resource sync:',e.message);_syncFailed('resources',e);}); }
   async function deleteDoc(colName,id) { if(db&&id) col(colName).doc(id).delete().catch(()=>{}); }
 
   // ===== FIREBASE STORAGE (large files: client attachments, resources) =====
@@ -745,7 +848,8 @@ const FSYNC = (() => {
   }
 
   return { init, isReady, pushAll, pushClients, pushNotes, pushReferrals, pushWorkers, pushTasks, pushAudit, pushBrokerage, deleteDoc, getCfg, saveCfg, showSetupModal, clearConfig,
-    storageReady, uploadFile, deleteStorageFile, getStorageURL, pushPolicies };
+    storageReady, uploadFile, deleteStorageFile, getStorageURL, pushPolicies,
+    pushFpho, pushWalkins, pushCalEvents, pushResources };
 })();
 
 let clients = DB.load('clients', []);
@@ -775,8 +879,8 @@ let fphoApplications = DB.load('fphoApplications', []);
 let fphoClients = DB.load('fphoClients', []); // separate client roster for the FPHO program
 let resources = DB.load('resources', []);
 let policies = DB.load('policies', []); // organisation policies & procedures library
-function saveFPHO() { DB.save('fphoApplications', fphoApplications); }
-function saveFPHOClients() { DB.save('fphoClients', fphoClients); }
+function saveFPHO() { DB.save('fphoApplications', fphoApplications); if(FSYNC.isReady()) FSYNC.pushFpho?.(); }
+function saveFPHOClients() { DB.save('fphoClients', fphoClients); if(FSYNC.isReady()) FSYNC.pushFpho?.(); }
 
 // ===== AUDIT LOG =====
 let auditLog = DB.load('auditlog', []);
@@ -5514,7 +5618,7 @@ function buildRiskRegister() {
 let calEvents = DB.load('calevents', []);
 let calWeekOffset = 0; // weeks from current week
 
-function saveCalEvents() { DB.save('calevents', calEvents); }
+function saveCalEvents() { DB.save('calevents', calEvents); if(FSYNC.isReady()) FSYNC.pushCalEvents?.(); }
 
 // Event types config
 const EVT_TYPES = {
@@ -6548,7 +6652,7 @@ function deleteReferral(id) {
 // UNIFIED SESSION LOG (Case Notes + Time merged)
 // ============================================================
 let walkins = DB.load('walkins', []);
-function saveWalkins() { DB.save('walkins', walkins); }
+function saveWalkins() { DB.save('walkins', walkins); if(FSYNC.isReady()) FSYNC.pushWalkins?.(); }
 
 function renderSessions() {
   const from = today().slice(0,7); // this month default
@@ -9090,6 +9194,26 @@ function renderSettings() {
         <strong>Team ID:</strong> <code style="background:#e0f0e8;padding:2px 8px;border-radius:4px">${FSYNC.getCfg()?.teamId||'worngundidj'}</code>
       </div>
       <button class="btn btn-sm btn-danger" onclick="FSYNC.clearConfig()">🗑️ Disconnect Firebase</button>
+
+      <!-- App Check site key (System Manager only) -->
+      ${currentUser?.role==='sysmanager' ? `
+      <div style="margin-top:16px;padding:14px;border:1px solid ${DB.load('appCheckSiteKey','')?'#a7f3d0':'#fcd34d'};background:${DB.load('appCheckSiteKey','')?'#ecfdf5':'#fffbeb'};border-radius:10px">
+        <div style="font-weight:700;font-size:13.5px;margin-bottom:4px;color:${DB.load('appCheckSiteKey','')?'#065f46':'#92400e'}">
+          🛡️ App Check — anti-abuse token ${DB.load('appCheckSiteKey','')?'<span style="font-weight:600;font-size:11px">· Active</span>':'<span style="font-weight:600;font-size:11px">· Not set</span>'}
+        </div>
+        <p style="font-size:12.5px;color:${DB.load('appCheckSiteKey','')?'#065f46':'#78350f'};line-height:1.5;margin-bottom:10px">
+          Proves each request to Firebase came from this app, not a script or bot. Register a reCAPTCHA Enterprise site key in
+          <strong>Firebase Console → App Check → Apps → your web app → Register</strong>, then paste the <strong>site key</strong> (public value) below and click Save. Sign out and back in for it to take effect.
+        </p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <input id="appcheck-site-key" placeholder="6L… (reCAPTCHA Enterprise site key)" value="${sanitize(DB.load('appCheckSiteKey',''))}" style="flex:1;min-width:260px;padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:12.5px;font-family:monospace">
+          <button class="btn btn-sm btn-primary" onclick="saveAppCheckKey()">💾 Save site key</button>
+          ${DB.load('appCheckSiteKey','') ? `<button class="btn btn-sm btn-outline" onclick="clearAppCheckKey()">Remove</button>` : ''}
+        </div>
+        <p style="font-size:11.5px;color:${DB.load('appCheckSiteKey','')?'#065f46':'#78350f'};margin-top:8px;line-height:1.4">
+          ⚠️ Leave App Check <strong>Enforcement OFF</strong> in Firebase Console until this shows Active AND the Monitoring page shows healthy “verified” requests for at least a day — enforcing too early will lock all staff out.
+        </p>
+      </div>` : ''}
     `:`
       <p style="font-size:13px;color:var(--muted);margin-bottom:12px">Connect once to securely share the same client records across all staff devices, in real time. Data is stored on Australian servers (Sydney). Paste your Firebase config below to connect.</p>
       <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px">
@@ -9178,7 +9302,7 @@ function renderSettings() {
 }
 
 // ===== RESOURCES =====
-function saveResources() { DB.save('resources', resources); }
+function saveResources() { DB.save('resources', resources); if(FSYNC.isReady()) FSYNC.pushResources?.(); }
 
 function renderResourcesPage() {
   return `
@@ -9617,6 +9741,31 @@ function clearSidebarBg() {
   DB.save('sidebarBg', '');
   applySidebarBg();
   showToast('Sidebar background cleared');
+}
+
+// System Manager only — saves the reCAPTCHA Enterprise site key that App Check
+// uses to mint the anti-abuse token. Key is a PUBLIC value (like the Firebase
+// API key), safe to store in localStorage; the paired secret stays in Google
+// Cloud. Takes effect on the next Cloud Sync init (sign out / sign in).
+function saveAppCheckKey(){
+  if(currentUser?.role!=='sysmanager'){ showToast('Only the System Manager can change App Check'); return; }
+  const key = (document.getElementById('appcheck-site-key')?.value||'').trim();
+  if(!key){ showToast('Paste the site key first'); return; }
+  if(!/^[A-Za-z0-9_\-]{30,80}$/.test(key)){
+    if(!confirm("That doesn't look like a typical reCAPTCHA Enterprise site key. Save it anyway?")) return;
+  }
+  DB.save('appCheckSiteKey', key);
+  audit('App Check site key saved', 'App Check activated for this site');
+  alert('✅ App Check site key saved.\n\nNext step: sign out and sign back in so the token is minted, then check Firebase Console → App Check that "Verified requests" starts climbing.\n\n⚠️ DO NOT click "Enforce" until Verified is at 100% for at least a day, or staff will be locked out.');
+  showPage('settings');
+}
+function clearAppCheckKey(){
+  if(currentUser?.role!=='sysmanager'){ showToast('Only the System Manager can change App Check'); return; }
+  if(!confirm('Remove the App Check site key? The app will stop attaching anti-abuse tokens — leave App Check enforcement OFF in Firebase or all requests will be rejected.')) return;
+  DB.save('appCheckSiteKey', '');
+  audit('App Check site key removed', 'App Check deactivated for this site');
+  showToast('App Check site key removed — sign out and back in to fully deactivate');
+  showPage('settings');
 }
 
 function saveSettings() {
@@ -10571,6 +10720,7 @@ function _mfaFriendlyError(e){
     'auth/invalid-phone-number':      'That phone number doesn\'t look right. Use international format, e.g. +61412345678.',
     'auth/second-factor-already-in-use': 'That phone is already enrolled as a second factor on this account.',
     'auth/unverified-email':          'Please verify your email address first — reopen Two-step sign-in and use the "Send verification email" button.',
+    'auth/operation-not-allowed':     'SMS is not yet enabled for your region. The System Manager needs to allow Australia (+61) in Firebase Console → Authentication → Settings → SMS region policy.',
   };
   return m[e.code] || (e.message || 'Something went wrong. Please try again.');
 }
@@ -10947,9 +11097,17 @@ async function logout() {
   } catch(e) { /* ignore */ }
   // Clear cached client PHI from this device on logout (shared-device safety).
   // Data re-syncs from the cloud on next sign-in.
+  // GUARD (QA C4): only purge when Cloud Sync is actually connected — otherwise
+  // this destroys the ONLY copy of anything entered offline. If we can't
+  // confirm a cloud copy exists, keep the local data and say so.
   try {
-    clients=[]; notes=[]; timeLogs=[]; referrals=[];
-    ['clients','notes','timelogs','referrals','fphoApplications','fphoClients','resources'].forEach(k=>DB.save(k,[]));
+    if (FSYNC.isReady()) {
+      clients=[]; notes=[]; timeLogs=[]; referrals=[];
+      ['clients','notes','timelogs','referrals','fphoApplications','fphoClients','resources'].forEach(k=>DB.save(k,[]));
+    } else {
+      console.warn('Logout: Cloud Sync not connected — local data kept to avoid destroying unsynced work.');
+      alert('Note: you are not connected to Cloud Sync, so your data has been kept on this device rather than cleared (clearing it would lose anything not yet uploaded).\n\nReconnect and sign out again on a shared device.');
+    }
   } catch(e) { /* ignore */ }
   showLoginScreen();
 }
