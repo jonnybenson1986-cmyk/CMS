@@ -653,15 +653,17 @@ const FSYNC = (() => {
     // QA H4 — the audit log was write-only: pushed but never pulled, so each
     // device only ever showed its own entries. Merge in the most recent 2000.
     try { const al = await col('auditlog').orderBy('ts','desc').limit(2000).get();
-      if(!al.empty){ const rows=al.docs.map(d=>d.data()).reverse();
+      if(!al.empty){ const rows=_live(al.docs.map(d=>d.data())).reverse();
         const seen=new Set(auditLog.map(a=>a.id));
         rows.forEach(r=>{ if(r && r.id && !seen.has(r.id)){ auditLog.push(r); seen.add(r.id); } });
         auditLog.sort((a,b)=>String(a.ts||'').localeCompare(String(b.ts||'')));
         DB.save('auditlog', auditLog); } } catch(e){ console.warn('Audit pull:', e.message); }
-    if (!cs.empty) { clients = cs.docs.map(d=>d.data()); DB.save('clients',clients); }
-    if (!ns.empty) { notes   = ns.docs.map(d=>d.data()); DB.save('notes',notes); }
-    if (!ts.empty) { timeLogs= ts.docs.map(d=>d.data()); DB.save('timelogs',timeLogs); }
-    if (!rs.empty) { referrals=rs.docs.map(d=>d.data()); DB.save('referrals',referrals); }
+    // _live() drops tombstoned records (QA C2); _seedHashes records what the
+    // cloud already holds so the next save doesn't re-upload everything (QA H1).
+    if (!cs.empty) { clients = _live(cs.docs.map(d=>d.data())); DB.save('clients',clients); _seedHashes('clients', cs.docs); }
+    if (!ns.empty) { notes   = _live(ns.docs.map(d=>d.data())); DB.save('notes',notes); _seedHashes('notes', ns.docs); }
+    if (!ts.empty) { timeLogs= _live(ts.docs.map(d=>d.data())); DB.save('timelogs',timeLogs); _seedHashes('timelogs', ts.docs); }
+    if (!rs.empty) { referrals=_live(rs.docs.map(d=>d.data())); DB.save('referrals',referrals); _seedHashes('referrals', rs.docs); }
     if (!ws.empty) { const w=ws.docs[0]?.data()?.list; if(w){workersList=w;DB.save('workersList',workersList);} }
     if (!wks.empty){ const t=wks.docs[0]?.data()?.list; if(t){workflowTasks=t;DB.save('workflowTasks',workflowTasks);} }
   }
@@ -682,10 +684,10 @@ const FSYNC = (() => {
       if (snap.empty && snap.metadata.fromCache) return false; // cold/offline cache — not truth
       return true;
     };
-    _listeners.push(col('clients').onSnapshot(snap=>{ if(!trust(snap))return; clients=snap.docs.map(d=>d.data());DB.save('clients',clients);refresh(); }, e=>console.warn('clients listener:',e.message)));
-    _listeners.push(col('notes').onSnapshot(snap=>{ if(!trust(snap))return; notes=snap.docs.map(d=>d.data());DB.save('notes',notes); }, e=>console.warn('notes listener:',e.message)));
-    _listeners.push(col('timelogs').onSnapshot(snap=>{ if(!trust(snap))return; timeLogs=snap.docs.map(d=>d.data());DB.save('timelogs',timeLogs); }, e=>console.warn('timelogs listener:',e.message)));
-    _listeners.push(col('referrals').onSnapshot(snap=>{ if(!trust(snap))return; referrals=snap.docs.map(d=>d.data());DB.save('referrals',referrals); if(currentPage==='referrals')setTimeout(()=>showPage('referrals'),50); }, e=>console.warn('referrals listener:',e.message)));
+    _listeners.push(col('clients').onSnapshot(snap=>{ if(!trust(snap))return; clients=_live(snap.docs.map(d=>d.data()));DB.save('clients',clients);refresh(); }, e=>console.warn('clients listener:',e.message)));
+    _listeners.push(col('notes').onSnapshot(snap=>{ if(!trust(snap))return; notes=_live(snap.docs.map(d=>d.data()));DB.save('notes',notes); }, e=>console.warn('notes listener:',e.message)));
+    _listeners.push(col('timelogs').onSnapshot(snap=>{ if(!trust(snap))return; timeLogs=_live(snap.docs.map(d=>d.data()));DB.save('timelogs',timeLogs); }, e=>console.warn('timelogs listener:',e.message)));
+    _listeners.push(col('referrals').onSnapshot(snap=>{ if(!trust(snap))return; referrals=_live(snap.docs.map(d=>d.data()));DB.save('referrals',referrals); if(currentPage==='referrals')setTimeout(()=>showPage('referrals'),50); }, e=>console.warn('referrals listener:',e.message)));
     _listeners.push(col('policies').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; const pl=doc.exists?doc.data().list:null; if(pl){ policies=pl; DB.save('policies',policies); if(currentPage==='policies')setTimeout(()=>showPage('policies'),50); } }, e=>console.warn('policies listener:',e.message)));
     _listeners.push(col('walkins').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; const l=doc.exists?doc.data().list:null; if(l){ walkins=l; DB.save('walkins',walkins); if(currentPage==='walkins')setTimeout(()=>showPage('walkins'),50); } }, e=>console.warn('walkins listener:',e.message)));
     _listeners.push(col('calevents').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; const l=doc.exists?doc.data().list:null; if(l){ calEvents=l; DB.save('calevents',calEvents); if(currentPage==='calendar')setTimeout(()=>showPage('calendar'),50); } }, e=>console.warn('calevents listener:',e.message)));
@@ -701,15 +703,55 @@ const FSYNC = (() => {
   // through JSON to drop undefined values before writing.
   function _clean(o){ try { return JSON.parse(JSON.stringify(o===undefined?null:o)); } catch(e){ return o; } }
 
-  async function _batch(colName, items, idFn) {
+  // ── DIRTY TRACKING (QA H1) ────────────────────────────────────────────────
+  // Previously every save re-uploaded the ENTIRE database (measured: 10,600
+  // documents / 2.11 MB per save at 3-year scale). We now fingerprint each
+  // record and only send the ones that actually changed. The map is seeded
+  // from the cloud after _loadAll, so a page reload doesn't trigger a full
+  // re-upload, and it's persisted so it survives restarts.
+  let _syncHash = DB.load('_syncHash', {}) || {};
+  function _hashOf(o){
+    const s = JSON.stringify(o); let h = 5381;
+    for (let i=0;i<s.length;i++) h = ((h<<5)+h+s.charCodeAt(i))|0;
+    return h.toString(36)+':'+s.length;               // length guards collisions
+  }
+  function _saveHashes(){ try { DB.save('_syncHash', _syncHash); } catch(e){} }
+  // Seed the map from what the cloud already holds, so we never re-push data
+  // that is already there (called after a successful load).
+  function _seedHashes(colName, docs){
+    const m = _syncHash[colName] = {};
+    docs.forEach(d=>{ const v=d.data(); if(v && v.id!=null) m[String(v.id)] = _hashOf(v); });
+    _saveHashes();
+  }
+  function _forgetHash(colName, id){ if(_syncHash[colName]) { delete _syncHash[colName][String(id)]; _saveHashes(); } }
+
+  async function _batch(colName, items, idFn, force) {
     if (!db||!items.length) return;
-    for (let i=0;i<items.length;i+=400) {
+    const map = _syncHash[colName] = _syncHash[colName] || {};
+    // Only send records whose content actually changed since the last push.
+    const pending = [];
+    items.forEach(item=>{
+      const id = String(idFn(item));
+      const clean = _clean(item);
+      const h = _hashOf(clean);
+      if (force || map[id] !== h) pending.push({id, clean, h});
+    });
+    if (!pending.length) return;                      // nothing changed — no writes
+    let committed = 0;
+    for (let i=0;i<pending.length;i+=400) {
+      const slice = pending.slice(i,i+400);
       const batch=db.batch();
       // merge:true — a concurrent edit by another worker must not blow away
       // fields this device didn't touch (QA C3: silent last-write-wins loss).
-      items.slice(i,i+400).forEach(item=>batch.set(col(colName).doc(idFn(item)), _clean(item), {merge:true}));
-      await batch.commit().catch(e=>{ console.warn('Sync write:',e.message); _syncFailed(colName, e); });
+      // It also means a stale device cannot clear another device's _deleted
+      // tombstone, which is what makes the C2 fix hold.
+      slice.forEach(r=>batch.set(col(colName).doc(r.id), r.clean, {merge:true}));
+      const ok = await batch.commit().then(()=>true).catch(e=>{ console.warn('Sync write:',e.message); _syncFailed(colName, e); return false; });
+      // Only mark records as pushed if the commit actually succeeded, so a
+      // failed batch is retried on the next save instead of being lost.
+      if (ok) { slice.forEach(r=>{ map[r.id]=r.h; }); committed += slice.length; }
     }
+    if (committed) _saveHashes();
   }
   // Surface sync failures instead of swallowing them (QA H3).
   let _syncErrCount = 0;
@@ -726,6 +768,19 @@ const FSYNC = (() => {
   }
 
   async function pushAll()     { if(!db)return; await Promise.all([_batch('clients',clients.map(_sanitiseClient),c=>c.id),_batch('notes',notes,n=>n.id),_batch('timelogs',timeLogs,t=>t.id||t.date+'-'+t.clientId)]); }
+  // Safety valve: wipe the fingerprints and force a complete re-upload. Use if
+  // a device is ever suspected of being out of step with the cloud.
+  async function resyncAll(){
+    _syncHash = {}; _saveHashes();
+    if(!db) return false;
+    await Promise.all([
+      _batch('clients',clients.map(_sanitiseClient),c=>c.id,true),
+      _batch('notes',notes,n=>n.id,true),
+      _batch('timelogs',timeLogs,t=>t.id||t.date+'-'+t.clientId,true),
+      _batch('referrals',referrals,r=>r.id||uid(),true),
+    ]);
+    return true;
+  }
   async function pushClients() { await _batch('clients',clients.map(_sanitiseClient),c=>c.id); }
   async function pushBrokerage(clientId) { const c=clients.find(cl=>cl.id===clientId);if(!db||!c)return; col('clients').doc(clientId).set(_sanitiseClient(c),{merge:true}).catch(e=>console.warn(e.message)); }
   async function pushNotes()    { await _batch('notes',notes,n=>n.id); }
@@ -743,7 +798,23 @@ const FSYNC = (() => {
   async function pushWalkins()  { if(db) col('walkins').doc('list').set({list:_clean(walkins)||[]}).catch(e=>{console.warn('Walk-in sync:',e.message);_syncFailed('walk-ins',e);}); }
   async function pushCalEvents(){ if(db) col('calevents').doc('list').set({list:_clean(calEvents)||[]}).catch(e=>{console.warn('Calendar sync:',e.message);_syncFailed('calendar',e);}); }
   async function pushResources(){ if(db) col('resources').doc('list').set({list:(resources||[]).map(r=>{ const {data,...rest}=r; return _clean(rest); })}).catch(e=>{console.warn('Resource sync:',e.message);_syncFailed('resources',e);}); }
-  async function deleteDoc(colName,id) { if(db&&id) col(colName).doc(id).delete().catch(()=>{}); }
+  // ── TOMBSTONES (QA C2) ────────────────────────────────────────────────────
+  // A hard delete left nothing behind, so a device still holding a stale copy
+  // re-uploaded the record on its next save and the deletion silently undid
+  // itself. Instead we mark the record deleted. Because all writes use
+  // merge:true, a stale device's re-push CANNOT clear the flag — the record
+  // stays deleted everywhere. Readers filter tombstones out (see _live()).
+  async function deleteDoc(colName,id){
+    if(!db||!id) return;
+    _forgetHash(colName,id);   // force the tombstone write through dirty-tracking
+    const who = (typeof currentUser!=='undefined' && currentUser && currentUser.name) || '';
+    await col(colName).doc(String(id)).set(
+      { id:String(id), _deleted:true, _deletedAt:new Date().toISOString(), _deletedBy:who },
+      { merge:true }
+    ).catch(e=>{ console.warn('Delete sync:',e.message); _syncFailed(colName,e); });
+  }
+  // Strip tombstoned records from anything read out of the cloud.
+  function _live(rows){ return (rows||[]).filter(r => r && r._deleted !== true); }
 
   // ===== FIREBASE STORAGE (large files: client attachments, resources) =====
   // Files go to the cloud bucket instead of being base64-stuffed into the
@@ -849,7 +920,7 @@ const FSYNC = (() => {
 
   return { init, isReady, pushAll, pushClients, pushNotes, pushReferrals, pushWorkers, pushTasks, pushAudit, pushBrokerage, deleteDoc, getCfg, saveCfg, showSetupModal, clearConfig,
     storageReady, uploadFile, deleteStorageFile, getStorageURL, pushPolicies,
-    pushFpho, pushWalkins, pushCalEvents, pushResources };
+    pushFpho, pushWalkins, pushCalEvents, pushResources, resyncAll };
 })();
 
 let clients = DB.load('clients', []);
@@ -3404,7 +3475,9 @@ function deleteNote(noteId, clientId) {
     return;
   }
   if(!confirm('Delete this note?')) return;
-  notes = notes.filter(n=>n.id!==noteId); saveAll();
+  notes = notes.filter(n=>n.id!==noteId);
+  if(FSYNC.isReady()) FSYNC.deleteDoc('notes', noteId);   // tombstone (QA C2)
+  saveAll();
   openClientProfile(clientId);
 }
 
@@ -3446,7 +3519,10 @@ function openTimeModal(clientId) {
 
 function deleteTime(timeId, clientId) {
   if(!confirm('Delete this time entry?')) return;
-  timeLogs = timeLogs.filter(t=>t.id!==timeId); saveAll();
+  const _tl = timeLogs.find(t=>t.id===timeId);
+  timeLogs = timeLogs.filter(t=>t.id!==timeId);
+  if(FSYNC.isReady()) FSYNC.deleteDoc('timelogs', timeId || (_tl && (_tl.date+'-'+_tl.clientId)));   // tombstone (QA C2)
+  saveAll();
   openClientProfile(clientId);
 }
 
@@ -10083,7 +10159,13 @@ function chatCol(name) {
 // ---- render chat page ----
 // ===== ALL CASE NOTES (dashboard "View all") =====
 let _notesTypeFilter = 'all';
-function _allNotesList() {
+// QA M3 — rendering every note at once took ~1.4–2.5s at 6,000 notes, which
+// reads as a frozen screen. Searching/filtering still covers ALL notes; only
+// the number painted to the page is capped, with a "Show more" control.
+const NOTES_PAGE = 100;
+let _notesShown = NOTES_PAGE;
+// Build the filtered set once so the list and the counter agree.
+function _allNotesFiltered() {
   const q = (document.getElementById('notes-search')?.value || '').toLowerCase();
   const all = notes.slice()
     .filter(n=>{ const c=clients.find(cl=>cl.id===n.clientId); return !c || canViewClient(c); })
@@ -10094,27 +10176,52 @@ function _allNotesList() {
     const c = clients.find(cl=>cl.id===n.clientId);
     return (n.text||'').toLowerCase().includes(q) || (c?.fullName||'').toLowerCase().includes(q) || (n.worker||n.author||'').toLowerCase().includes(q);
   });
+  return { all, filtered };
+}
+// Counter text is computed directly (not written into the DOM from inside the
+// list builder) so it is correct on the very first render too, before the
+// #notes-count element exists.
+function _notesCountText(){
+  const { all, filtered } = _allNotesFiltered();
+  const shown = Math.min(_notesShown, filtered.length);
+  return filtered.length > shown
+    ? `showing ${shown} of ${filtered.length} (${all.length} total)`
+    : `${filtered.length} of ${all.length}`;
+}
+function _allNotesList() {
+  const { all, filtered } = _allNotesFiltered();
   const count = document.getElementById('notes-count');
-  if(count) count.textContent = `${filtered.length} of ${all.length}`;
-  return filtered.length===0 ? '<div class="empty-state"><div class="icon">📝</div><p>No notes match your search</p></div>' :
-    filtered.map(n=>{
+  const shown = Math.min(_notesShown, filtered.length);
+  if(count) count.textContent = _notesCountText();
+  if(!filtered.length) return '<div class="empty-state"><div class="icon">📝</div><p>No notes match your search</p></div>';
+  const rows = filtered.slice(0, shown).map(n=>{
       const c = clients.find(cl=>cl.id===n.clientId);
       return `<div class="note-entry ${n.type||'general'}" style="margin-bottom:10px;cursor:pointer" onclick="openClientProfile('${n.clientId}')">
         <div class="note-meta"><span class="section-badge badge-${n.type||'general'}">${n.type||'general'}</span><span style="font-weight:600">${sanitize(c?.fullName||'Unknown client')}</span><span>${sanitize(n.worker||n.author||'Staff')}</span><span>${fmtdt(n.created)}</span></div>
         <div class="note-text">${sanitize(n.text||'')}</div>
       </div>`;
     }).join('');
+  const more = filtered.length > shown
+    ? `<div style="text-align:center;margin-top:14px">
+         <button class="btn btn-outline" onclick="_showMoreNotes()">Show ${Math.min(NOTES_PAGE, filtered.length-shown)} more</button>
+         <div style="font-size:11.5px;color:var(--muted);margin-top:6px">${filtered.length - shown} older note${filtered.length-shown!==1?'s':''} not shown — refine your search to narrow the list</div>
+       </div>` : '';
+  return rows + more;
 }
+function _showMoreNotes(){ _notesShown += NOTES_PAGE; _filterAllNotes(); }
 function _filterAllNotes() { const el = document.getElementById('notes-results'); if(el) el.innerHTML = _allNotesList(); }
-function _setNotesType(t) { _notesTypeFilter = t; document.querySelectorAll('.notes-type-chip').forEach(b=>{ b.className='notes-type-chip btn btn-sm '+(b.dataset.t===t?'btn-primary':'btn-outline'); }); _filterAllNotes(); }
+// Any change of filter/search starts the list again from the top page.
+function _resetNotesPaging(){ _notesShown = NOTES_PAGE; }
+function _setNotesType(t) { _notesTypeFilter = t; _resetNotesPaging(); document.querySelectorAll('.notes-type-chip').forEach(b=>{ b.className='notes-type-chip btn btn-sm '+(b.dataset.t===t?'btn-primary':'btn-outline'); }); _filterAllNotes(); }
 function renderAllNotes() {
+  _resetNotesPaging();
   const types = ['all','general','sewb','aod','justice','cultural','disability'];
   const chip = t => `<button class="notes-type-chip btn btn-sm ${_notesTypeFilter===t?'btn-primary':'btn-outline'}" data-t="${t}" onclick="_setNotesType('${t}')" style="text-transform:capitalize">${t==='all'?'All types':t}</button>`;
   return `
   <div class="card" style="margin-bottom:16px">
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-      <input id="notes-search" oninput="_filterAllNotes()" placeholder="🔍 Search notes, client or worker…" style="flex:1;min-width:220px;padding:9px 12px;border:1px solid var(--border);border-radius:8px;font-size:13px">
-      <span id="notes-count" style="font-size:12px;color:var(--muted)"></span>
+      <input id="notes-search" oninput="_resetNotesPaging();_filterAllNotes()" placeholder="🔍 Search notes, client or worker…" style="flex:1;min-width:220px;padding:9px 12px;border:1px solid var(--border);border-radius:8px;font-size:13px">
+      <span id="notes-count" style="font-size:12px;color:var(--muted)">${_notesCountText()}</span>
     </div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">${types.map(chip).join('')}</div>
   </div>
