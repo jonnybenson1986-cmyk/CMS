@@ -93,6 +93,25 @@ service cloud.firestore {
       allow update, delete: if isSys();     // messages are never edited by the app
     }
 
+    // Newly-synced operational stores (QA C4/H5). FPHO holds client records,
+    // so reads follow the same signed-in rule; deletes are manager-only.
+    match /teams/{teamId}/fpho/{id} {
+      allow read, create, update: if signedIn();
+      allow delete: if isMgr();
+    }
+    match /teams/{teamId}/walkins/{id} {
+      allow read, create, update: if signedIn();
+      allow delete: if isMgr();
+    }
+    match /teams/{teamId}/calevents/{id} {
+      allow read, create, update: if signedIn();
+      allow delete: if signedIn();
+    }
+    match /teams/{teamId}/resources/{id} {
+      allow read, create, update: if signedIn();
+      allow delete: if isMgr();
+    }
+
     // Audit log: append-only for EVERYONE, including admins. The in-app
     // "Clear audit log" only clears the local copy — the cloud record stays.
     // (Known trade-off: the login entry's IP backfill won't replicate to the
