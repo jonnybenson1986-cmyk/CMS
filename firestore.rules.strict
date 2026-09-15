@@ -130,6 +130,17 @@ service cloud.firestore {
       allow write: if isSys();
     }
 
+    // Staff directory (doc id "list"): display names + roles for every account.
+    // EVERY device reads this on sign-in to learn its own role — without it a
+    // staff member signing in on a clean device is created as a fresh "worker",
+    // which is how the System Manager got silently demoted. Read must therefore
+    // stay open to any signed-in account; only managers may change it.
+    match /teams/{teamId}/staff/{id} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && (unchanged() || isMgr());
+      allow delete: if isSys();
+    }
+
     // Role mirror: written exclusively by the Cloud Functions (Admin SDK
     // bypasses rules). Clients may read it, never write it.
     match /teams/{teamId}/roles/{uid} {
