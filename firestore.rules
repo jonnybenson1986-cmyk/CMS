@@ -43,6 +43,11 @@ service cloud.firestore {
     // tightening to sysmanager-only comes with custom claims (strict rules).
     match /teams/{teamId}/userAccess/{id}    { allow read, write: if signedIn(); }
 
+    // ── Staff directory (roles + display names, doc id "list") ──────────────
+    // Every device reads this on sign-in to learn its own role, so a worker
+    // signing in on a clean device is no longer created as a fresh "worker".
+    match /teams/{teamId}/staff/{id}         { allow read, write: if signedIn(); }
+
     // ── Newly-synced operational stores (QA C4/H5) ─────────────────────────
     match /teams/{teamId}/fpho/{id}         { allow read, write: if signedIn(); }
     match /teams/{teamId}/walkins/{id}      { allow read, write: if signedIn(); }

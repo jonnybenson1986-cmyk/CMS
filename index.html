@@ -643,6 +643,8 @@ const FSYNC = (() => {
       col('referrals').get(), col('workersList').get(), col('workflowTasks').get(),
     ]);
     try { const ps = await col('policies').doc('list').get(); const pl = ps.exists ? ps.data().list : null; if(pl){ policies = pl; DB.save('policies', policies); } } catch(e){}
+    // Staff roles must be known BEFORE the profile is resolved at login.
+    try { const st = await col('staff').doc('list').get(); const sl = st.exists ? st.data().list : null; if(Array.isArray(sl) && sl.length) _mergeStaffDirectory(sl); } catch(e){}
     // QA C4/H5 — pull the stores that used to be device-local only.
     try { const f = await col('fpho').doc('list').get(); if(f.exists){ const d=f.data();
       if(Array.isArray(d.clients)){ fphoClients=d.clients; DB.save('fphoClients',fphoClients); }
@@ -688,6 +690,7 @@ const FSYNC = (() => {
     _listeners.push(col('notes').onSnapshot(snap=>{ if(!trust(snap))return; notes=_live(snap.docs.map(d=>d.data()));DB.save('notes',notes); }, e=>console.warn('notes listener:',e.message)));
     _listeners.push(col('timelogs').onSnapshot(snap=>{ if(!trust(snap))return; timeLogs=_live(snap.docs.map(d=>d.data()));DB.save('timelogs',timeLogs); }, e=>console.warn('timelogs listener:',e.message)));
     _listeners.push(col('referrals').onSnapshot(snap=>{ if(!trust(snap))return; referrals=_live(snap.docs.map(d=>d.data()));DB.save('referrals',referrals); if(currentPage==='referrals')setTimeout(()=>showPage('referrals'),50); }, e=>console.warn('referrals listener:',e.message)));
+    _listeners.push(col('staff').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; const l=doc.exists?doc.data().list:null; if(Array.isArray(l)&&l.length){ _mergeStaffDirectory(l); if(currentPage==='settings')setTimeout(()=>showPage('settings'),50); } }, e=>console.warn('staff listener:',e.message)));
     _listeners.push(col('policies').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; const pl=doc.exists?doc.data().list:null; if(pl){ policies=pl; DB.save('policies',policies); if(currentPage==='policies')setTimeout(()=>showPage('policies'),50); } }, e=>console.warn('policies listener:',e.message)));
     _listeners.push(col('walkins').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; const l=doc.exists?doc.data().list:null; if(l){ walkins=l; DB.save('walkins',walkins); if(currentPage==='walkins')setTimeout(()=>showPage('walkins'),50); } }, e=>console.warn('walkins listener:',e.message)));
     _listeners.push(col('calevents').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; const l=doc.exists?doc.data().list:null; if(l){ calEvents=l; DB.save('calevents',calEvents); if(currentPage==='calendar')setTimeout(()=>showPage('calendar'),50); } }, e=>console.warn('calevents listener:',e.message)));
@@ -787,6 +790,35 @@ const FSYNC = (() => {
   async function pushReferrals(){ await _batch('referrals',referrals,r=>r.id||uid()); }
   async function pushWorkers()  { if(db) col('workersList').doc('list').set({list:workersList}).catch(()=>{}); }
   async function pushTasks()    { if(db) col('workflowTasks').doc('list').set({list:workflowTasks}).catch(()=>{}); }
+  // Staff directory: name/role/page-access per person, shared across devices so
+  // a role is a property of the PERSON, not of whichever browser they used.
+  // One-shot read used at sign-in, before the profile is resolved, so the role
+  // is right on the FIRST paint on a device that has never been used before —
+  // the live listener alone would leave that first session mis-scoped.
+  async function fetchStaff() {
+    if(!db) return false;
+    try {
+      const st = await col('staff').doc('list').get();
+      const sl = st.exists ? st.data().list : null;
+      if(Array.isArray(sl) && sl.length){ _mergeStaffDirectory(sl); return true; }
+    } catch(e){ console.warn('Staff fetch:', e.message); }
+    return false;
+  }
+  async function pushStaff() {
+    if(!db) return;
+    // Only a manager may publish the directory. A worker's device holds whatever
+    // profiles that browser happens to have cached; letting it write would let a
+    // stale device quietly downgrade everyone else. This mirrors the server-side
+    // rule in firestore.rules.strict.
+    const myRole = (typeof currentUser!=='undefined' && currentUser && currentUser.role) || '';
+    if(!['sysmanager','admin','supervisor'].includes(myRole)) return;
+    const list = (typeof userProfiles!=='undefined'?userProfiles:[])
+      .filter(u=>u && u.email)
+      .map(u=>_clean({ id:u.id, email:(u.email||'').trim().toLowerCase(), name:u.name||'',
+                       role:u.role||'worker', hiddenPages:u.hiddenPages||[] }));
+    if(!list.length) return;                       // never publish an empty directory
+    await col('staff').doc('list').set({list}).catch(e=>{ console.warn('Staff sync:',e.message); _syncFailed('staff directory',e); });
+  }
   async function pushPolicies() { if(db) col('policies').doc('list').set({list:policies.map(p=>{ const {data,...rest}=p; return rest; })}).catch(e=>console.warn('Policy sync:',e.message)); }
   async function pushAudit()    { await _batch('auditlog',auditLog,a=>a.id); }
   // QA C4/H5 — these were device-local only. FPHO holds real client records, so
@@ -920,7 +952,7 @@ const FSYNC = (() => {
 
   return { init, isReady, pushAll, pushClients, pushNotes, pushReferrals, pushWorkers, pushTasks, pushAudit, pushBrokerage, deleteDoc, getCfg, saveCfg, showSetupModal, clearConfig,
     storageReady, uploadFile, deleteStorageFile, getStorageURL, pushPolicies,
-    pushFpho, pushWalkins, pushCalEvents, pushResources, resyncAll };
+    pushFpho, pushWalkins, pushCalEvents, pushResources, resyncAll, pushStaff, fetchStaff };
 })();
 
 let clients = DB.load('clients', []);
@@ -9905,7 +9937,7 @@ async function createStaffAccount() {
       userProfiles.push({ id: cred.user.uid, name, email, role, firebaseUid: cred.user.uid });
     }
     saveUserProfiles();
-    /* userProfiles stay per-device; section access syncs via the userAccess collection */
+    /* saveUserProfiles() publishes the shared staff directory (managers only) */
     showToast(`✓ Account created for ${name}`);
     showPage('settings');
     return true;
@@ -9956,6 +9988,12 @@ async function saveStaffEdit(userId) {
   const role  = document.getElementById('se-role')?.value;
   const errEl = document.getElementById('se-error');
   if(!name){errEl.textContent='Name is required';return false;}
+  // The account of record cannot be demoted from the UI — doing so removes the
+  // only route back into Settings and locks the organisation out of its own CMS.
+  if(_isOwnerEmail(email||u.email) && role!=='sysmanager'){
+    errEl.textContent='This is the organisation’s System Manager account — its role cannot be changed here.';
+    return false;
+  }
   u.name=name; u.email=email||u.email; u.role=role;
   const pageBoxes = [...document.querySelectorAll('.se-page')];
   if (pageBoxes.length && currentUser?.role==='sysmanager') {
@@ -9974,11 +10012,11 @@ async function saveStaffEdit(userId) {
     errEl.style.color='#d97706';
     errEl.textContent='⚠️ To reset a password, go to Firebase Console → Authentication → Users → Reset password. Profile saved.';
     saveUserProfiles();
-    /* userProfiles stay per-device; section access syncs via the userAccess collection */
+    /* saveUserProfiles() publishes the shared staff directory (managers only) */
     return false; // keep modal open so user can see the message
   }
   saveUserProfiles();
-  /* userProfiles stay per-device; section access syncs via the userAccess collection */
+  /* saveUserProfiles() publishes the shared staff directory (managers only) */
   showToast('Staff profile updated ✓');
   showPage('settings');
   return true;
@@ -9987,10 +10025,11 @@ async function saveStaffEdit(userId) {
 function removeStaffAccount(userId) {
   if(currentUser?.role!=='sysmanager'){ showToast('Only the System Manager can manage staff accounts'); return; }
   const u = userProfiles.find(p=>p.id===userId); if(!u) return;
+  if(_isOwnerEmail(u.email)){ showToast('The organisation’s System Manager account cannot be removed'); return; }
   if(!confirm(`Remove ${sanitize(u.name)} from the CMS?\n\nThis removes their profile from this system. Their Firebase Authentication account will remain — delete it from the Firebase Console if needed.`)) return;
   userProfiles = userProfiles.filter(p=>p.id!==userId);
   saveUserProfiles();
-  /* userProfiles stay per-device; section access syncs via the userAccess collection */
+  /* saveUserProfiles() publishes the shared staff directory (managers only) */
   showToast(`${sanitize(u.name)} removed from CMS`);
   showPage('settings');
 }
@@ -10527,11 +10566,82 @@ const ROLES = {
   reception:  { label:'Reception',      color:'#1e40af', bg:'#dbeafe', icon:'🎫', desc:'Referral holding bay, calendar, and client search — no case notes' },
 };
 
+// ── OWNER ACCOUNT (lock-out safety net) ──────────────────────────────────────
+// Staff roles are stored per-device. Signing in on a new or cleared device used
+// to create a fresh profile defaulted to 'worker' — and because Settings and
+// Staff Accounts are System-Manager-only, that silently locked the owner out of
+// the very screen needed to restore their own access, with no way back in.
+// These accounts therefore always resolve to System Manager. This is the
+// account of record for the organisation; change it only with the owner's
+// agreement.
+const OWNER_EMAILS = ['jon.benson@worngundidj.org.au'];
+const OWNER_NAMES  = { 'jon.benson@worngundidj.org.au': 'Jon Benson' };
+function _isOwnerEmail(e){ return OWNER_EMAILS.includes((e||'').trim().toLowerCase()); }
+
 // Always require login on page load — clear any persisted session for security
 DB.save('currentUser', null);
 let currentUser = null;
 let userProfiles = DB.load('userProfiles', []);
-function saveUserProfiles() { DB.save('userProfiles', userProfiles); }
+// Cloud-held staff directory (email -> name/role/hiddenPages). Roles used to
+// live ONLY in each device's browser storage, so the same person could be a
+// System Manager on one machine and a Case Worker on another. This is the
+// shared source of truth.
+let _staffDirectory = DB.load('staffDirectory', []);
+// Fold the cloud directory into this device's profiles. The cloud wins on role
+// so an out-of-date device cannot quietly downgrade (or upgrade) anyone.
+function _mergeStaffDirectory(list){
+  if(!Array.isArray(list)) return;
+  _staffDirectory = list;
+  DB.save('staffDirectory', _staffDirectory);
+  list.forEach(s2=>{
+    const e=(s2.email||'').trim().toLowerCase(); if(!e) return;
+    let p = userProfiles.find(x=>(x.email||'').trim().toLowerCase()===e);
+    if(!p){ p={ id:s2.id||uid(), email:e }; userProfiles.push(p); }
+    if(s2.name) p.name=s2.name;
+    if(s2.role) p.role=s2.role;
+    if(Array.isArray(s2.hiddenPages)) p.hiddenPages=s2.hiddenPages;
+  });
+  // The owner is always System Manager, whatever the directory says.
+  userProfiles.forEach(p=>{ if(_isOwnerEmail(p.email)) p.role='sysmanager'; });
+  saveUserProfilesLocal();
+  // Apply to the session in flight too — a role correction that only landed in
+  // storage would leave the signed-in person on the wrong menu until reload.
+  if (currentUser && currentUser.email) {
+    const mine = userProfiles.find(p=>(p.email||'').trim().toLowerCase()===(currentUser.email||'').trim().toLowerCase());
+    if (mine && (mine.role !== currentUser.role || mine.name !== currentUser.name)) {
+      currentUser.role = mine.role; currentUser.name = mine.name || currentUser.name;
+      currentUser.hiddenPages = mine.hiddenPages || currentUser.hiddenPages;
+      DB.save('currentUser', currentUser);
+      try { _refreshUserChrome(); } catch(_) {}
+    }
+  }
+}
+// One email = one profile. Duplicates for the same person are a real hazard:
+// _resolveUserProfile() takes the FIRST match, so a stale duplicate carrying an
+// old role can shadow the correct one. Keeps the highest-privilege role and the
+// fullest name, then drops the extras.
+const _ROLE_RANK = { sysmanager:5, admin:4, supervisor:3, worker:2, reception:1 };
+function _dedupeProfiles() {
+  const byEmail = new Map(); const keep = []; let merged = 0;
+  userProfiles.forEach(p => {
+    const e = (p && p.email || '').trim().toLowerCase();
+    if (!e) { keep.push(p); return; }
+    const prev = byEmail.get(e);
+    if (!prev) { byEmail.set(e, p); keep.push(p); return; }
+    merged++;
+    if ((_ROLE_RANK[p.role]||0) > (_ROLE_RANK[prev.role]||0)) prev.role = p.role;
+    if (!prev.name || (p.name && p.name.length > prev.name.length)) prev.name = p.name || prev.name;
+    if (!prev.firebaseUid && p.firebaseUid) prev.firebaseUid = p.firebaseUid;
+    if (!prev.hiddenPages && Array.isArray(p.hiddenPages)) prev.hiddenPages = p.hiddenPages;
+  });
+  if (merged) { userProfiles = keep; DB.save('userProfiles', userProfiles); }
+  return merged;
+}
+function saveUserProfilesLocal() { DB.save('userProfiles', userProfiles); }
+function saveUserProfiles() {
+  DB.save('userProfiles', userProfiles);
+  if (typeof FSYNC!=='undefined' && FSYNC.isReady && FSYNC.isReady()) FSYNC.pushStaff?.();
+}
 function saveCurrentUser(u) { currentUser = u; DB.save('currentUser', u); }
 
 // Resolve which local staff profile belongs to a Firebase account.
@@ -10548,6 +10658,9 @@ function _resolveUserProfile(firebaseUser, email) {
   // 2. Otherwise a profile already bound to this exact uid (legacy / no email).
   if (!u && fbUid) u = userProfiles.find(p => p.firebaseUid && p.firebaseUid === fbUid);
   // 3. Otherwise a brand-new profile for this account.
+  //    NOTE: defaulting to 'worker' here is what silently demoted an owner who
+  //    signed in on a clean device. The owner override below now prevents that,
+  //    and the synced staff directory means a real role is normally found first.
   if (!u) {
     u = { id: fbUid || uid(), name: firebaseUser?.displayName || emailLc.split('@')[0] || 'Staff',
           email: emailLc, role: 'worker', firebaseUid: fbUid };
@@ -10556,8 +10669,26 @@ function _resolveUserProfile(firebaseUser, email) {
     if (!u.email && emailLc) u.email = emailLc;
     if (fbUid) u.firebaseUid = fbUid;
   }
+  // The role held in the synced staff directory is authoritative — it was set
+  // by the System Manager and must outrank whatever this device happens to
+  // have cached (or just invented at step 3).
+  const dir = (_staffDirectory || []).find(s => (s.email||'').trim().toLowerCase() === emailLc);
+  if (dir) {
+    if (dir.role) u.role = dir.role;
+    if (dir.name) u.name = dir.name;
+    if (Array.isArray(dir.hiddenPages)) u.hiddenPages = dir.hiddenPages;
+  }
+  // Owner safety net — cannot be demoted by a stale or empty device cache.
+  if (_isOwnerEmail(emailLc)) {
+    u.role = 'sysmanager';
+    if (!u.name || u.name === emailLc.split('@')[0]) u.name = OWNER_NAMES[emailLc] || u.name;
+  }
   // One Firebase account = exactly one profile: strip this uid from any others.
   if (fbUid) userProfiles.forEach(p => { if (p !== u && p.firebaseUid === fbUid) p.firebaseUid = ''; });
+  _dedupeProfiles();
+  // _dedupeProfiles may have kept a different object for this email — return the
+  // surviving one so the session is never bound to a discarded duplicate.
+  if (emailLc) u = userProfiles.find(p => (p.email||'').trim().toLowerCase() === emailLc) || u;
   saveUserProfiles();
   return u;
 }
@@ -11053,6 +11184,11 @@ async function doLogin() {
           cred = await _mfaChallengeFlow(e.resolver, email);
         } else { throw e; }
       }
+      // Pull the shared staff directory BEFORE resolving the profile. Without
+      // this, a device with no cached profile invents one defaulted to 'worker'
+      // — which is how the System Manager arrived as a Case Worker and lost
+      // access to the only screen that could have put it right.
+      try { if (FSYNC.isReady()) await FSYNC.fetchStaff?.(); } catch(_) {}
       // Match Firebase user to local profile (keyed on email; self-healing)
       let u = _resolveUserProfile(cred.user, email);
       // Server-set role wins: once the role Cloud Function is deployed
@@ -11896,10 +12032,28 @@ function initApp() {
     </button>`;
   sidebar?.appendChild(badge);
 
-  FSYNC.init().then(()=>{ if(FSYNC.isReady()) _chatListenConvs(); }); // non-blocking — loads cloud data and starts listeners
+  // Non-blocking — loads cloud data and starts listeners. Once connected, a
+  // manager also seeds/refreshes the shared staff directory so roles are not
+  // stranded on one browser (this is what publishes it the very first time).
+  FSYNC.init().then(()=>{ if(FSYNC.isReady()){ _chatListenConvs(); FSYNC.pushStaff?.(); } });
   showPage('dashboard');
   setTimeout(_observeVoice, 500);
   applySidebarBg();
+}
+
+// Repaint the name/role badge and the nav when the synced staff directory
+// changes the signed-in person's role mid-session, so the menu matches the
+// role they actually hold without making them sign in again.
+function _refreshUserChrome() {
+  const bar = document.querySelector('#sidebar .user-badge-bar');
+  if (bar) {
+    const rows = bar.querySelectorAll('div[style*="flex:1"] > div');
+    if (rows[0]) rows[0].textContent = currentUser?.name || '';
+    if (rows[1]) rows[1].textContent = ROLES[currentUser?.role]?.label || '';
+    const icon = bar.querySelector('div[style*="border-radius:50%"]');
+    if (icon) icon.textContent = ROLES[currentUser?.role]?.icon || '👤';
+  }
+  try { applyNavRestrictions(); } catch(_) {}
 }
 
 // ============================================================
