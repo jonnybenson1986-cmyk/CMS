@@ -4262,7 +4262,7 @@ function renderReportsPage() {
   <div class="card no-print">
     <div class="card-header"><div class="card-title">📅 Report Date Range (applies to notes &amp; time reports)</div></div>
     <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
-      <div class="form-group" style="margin:0"><label>From</label><input type="date" id="rpt-from" value="${sanitize(new Date(Date.now()-90*24*3600*1000).toISOString().split('T')[0])}"></div>
+      <div class="form-group" style="margin:0"><label>From</label><input type="date" id="rpt-from" value="${sanitize(isoDate(new Date(Date.now()-90*24*3600*1000)))}"></div>
       <div class="form-group" style="margin:0"><label>To</label><input type="date" id="rpt-to" value="${sanitize(today())}"></div>
       <button class="btn btn-outline" style="margin-top:18px" onclick="setDateRange('month')">This Month</button>
       <button class="btn btn-outline" style="margin-top:18px" onclick="setDateRange('quarter')">This Quarter</button>
@@ -4291,7 +4291,7 @@ function setDateRange(range) {
   else if(range==='quarter') from = new Date(now.getFullYear(), Math.floor(now.getMonth()/3)*3, 1);
   else if(range==='year') from = new Date(now.getFullYear(), 0, 1);
   else from = new Date('2000-01-01');
-  document.getElementById('rpt-from').value = from.toISOString().split('T')[0];
+  document.getElementById('rpt-from').value = isoDate(from);
   document.getElementById('rpt-to').value = today();
 }
 
@@ -5429,7 +5429,7 @@ function buildAllProgramsReport(from, to) {
 }
 
 function genFunderReport(funder) {
-  const from = document.getElementById('rpt-from')?.value||new Date(new Date().getFullYear(),0,1).toISOString().split('T')[0];
+  const from = document.getElementById('rpt-from')?.value||isoDate(new Date(new Date().getFullYear(),0,1));
   const to = document.getElementById('rpt-to')?.value||today();
   openReport(buildFunderReport(funder, from, to));
 }
@@ -5751,7 +5751,9 @@ function getCourtEvents() {
       const dateMatch = line.match(/(\d{1,2}[\s\/\-]\w+[\s\/\-]\d{2,4}|\d{4}-\d{2}-\d{2})/i);
       if(dateMatch) {
         let d = new Date(dateMatch[1].replace(/(\d{1,2})[\s](\w+)[\s](\d{4})/,'$2 $1 $3'));
-        if(!isNaN(d)) evts.push({ id:'court_'+c.id+'_'+line.slice(0,20), type:'court', title:`⚖️ ${sanitize(c.fullName)} — Court`, clientId:c.id, date:d.toISOString().split('T')[0], startTime:'09:00', endTime:'10:00', notes:line, readOnly:true });
+        // isoDate() keeps this on the local calendar day — a parsed court date
+        // run through toISOString() lands a day early in Australian time zones.
+        if(!isNaN(d)) evts.push({ id:'court_'+c.id+'_'+line.slice(0,20), type:'court', title:`⚖️ ${sanitize(c.fullName)} — Court`, clientId:c.id, date:isoDate(d), startTime:'09:00', endTime:'10:00', notes:line, readOnly:true });
       }
     });
   });
@@ -5784,7 +5786,14 @@ function getWeekStart(offset) {
 }
 
 function addDays(date, n) { const d = new Date(date); d.setDate(d.getDate()+n); return d; }
-function isoDate(d) { return d.toISOString().split('T')[0]; }
+// Calendar day key. MUST be the local calendar date, never toISOString() —
+// that converts to UTC, and in Australia (UTC+10/+11) local midnight falls on
+// the PREVIOUS UTC day. That shifted every column key back one day: the column
+// labelled "Tue 22" carried the key for Mon 21, so clicking it booked the
+// client a day early, and the "today" highlight landed one column to the right
+// from 10am local onwards. localISO() is the app's existing local-date helper —
+// the same one today() uses — so the calendar now agrees with the rest of the app.
+function isoDate(d) { return localISO(d instanceof Date ? d : new Date(d)).split('T')[0]; }
 function dayLabel(d) { return d.toLocaleDateString('en-AU',{weekday:'short'}); }
 function dayNum(d) { return d.getDate(); }
 function monthYearLabel(d) { return d.toLocaleDateString('en-AU',{month:'long',year:'numeric'}); }
@@ -9797,7 +9806,7 @@ function _buildOutlookEvents() {
   const cutoff = new Date(today); cutoff.setDate(cutoff.getDate() - 30);
   const events = [];
   // Sessions
-  (notes||[]).filter(n => n.type === 'session' && n.date >= cutoff.toISOString().slice(0,10)).forEach(n => {
+  (notes||[]).filter(n => n.type === 'session' && n.date >= isoDate(cutoff)).forEach(n => {
     const client = clients.find(c=>c.id===n.clientId);
     const start = new Date(n.date + 'T' + (n.startTime||'09:00') + ':00');
     const end = new Date(n.date + 'T' + (n.endTime||'10:00') + ':00');
@@ -9811,7 +9820,7 @@ function _buildOutlookEvents() {
   });
   // Calendar events
   (typeof calendarEvents !== 'undefined' ? calendarEvents : [])
-    .filter(e => e.date >= cutoff.toISOString().slice(0,10))
+    .filter(e => e.date >= isoDate(cutoff))
     .forEach(e => {
       const start = new Date(e.date + 'T' + (e.startTime||'09:00') + ':00');
       const end = new Date(e.date + 'T' + (e.endTime||'10:00') + ':00');
