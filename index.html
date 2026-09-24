@@ -3275,6 +3275,41 @@ function openEditClientModal(id) {
   });
 }
 
+// Build <option> markup for a client-record dropdown, preserving what is stored.
+// Three things matter here, and all three were wrong:
+//   • The stored value must come back selected. Without it the browser shows the
+//     FIRST option, and saving the form writes that first option over the real
+//     answer — which is how every client's gender silently became "Male", their
+//     ATSI status "Yes — Aboriginal" and their risk level "Low".
+//   • Matching ignores case and surrounding space, because the intake, referral
+//     and client forms spell the same answer differently ("Non-Binary" from
+//     intake vs "Non-binary" here). An exact match would fail and fall straight
+//     back to the first option.
+//   • A stored value that is not in the list is KEPT and shown as its own
+//     option. These lists have changed over time, and answers recorded under an
+//     older one ("Not disclosed", "Gender diverse") are the client's own words.
+//     Dropping them would resume overwriting the very records this fixes.
+function selOpts(opts, current, placeholder) {
+  const cur  = (current === null || current === undefined) ? '' : String(current);
+  const norm = s => String(s).trim().toLowerCase();
+  let matched = false, html = '';
+  if (placeholder !== undefined) {
+    html += `<option value=""${cur === '' ? ' selected' : ''}>${sanitize(placeholder)}</option>`;
+    if (cur === '') matched = true;
+  }
+  opts.forEach(o => {
+    const val = (o && typeof o === 'object') ? o.v : o;
+    const lbl = (o && typeof o === 'object') ? o.l : o;
+    const hit = !matched && norm(val) === norm(cur);
+    if (hit) matched = true;
+    html += `<option value="${sanitize(val)}"${hit ? ' selected' : ''}>${sanitize(lbl)}</option>`;
+  });
+  if (!matched && cur !== '') {
+    html += `<option value="${sanitize(cur)}" selected>${sanitize(cur)}</option>`;
+  }
+  return html;
+}
+
 function clientFormHTML(c) {
   return `
   <div style="border-bottom:1px solid var(--border);padding-bottom:16px;margin-bottom:16px">
@@ -3285,7 +3320,7 @@ function clientFormHTML(c) {
       <div class="form-group"><label>Pronouns</label><input id="cf-pronouns" value="${sanitize(c.pronouns||'')}"></div>
       <div class="form-group"><label>Date of Birth</label><input type="date" id="cf-dob" value="${sanitize(c.dob||'')}"></div>
       <div class="form-group"><label>Gender</label>
-        <select id="cf-gender"><option>Male</option><option>Female</option><option>Non-binary</option><option>Transgender</option><option>Prefer not to say</option><option>Other</option></select></div>
+        <select id="cf-gender">${selOpts(['Male','Female','Non-binary','Transgender','Prefer not to say','Other'], c.gender, 'Not recorded')}</select></div>
       <div class="form-group"><label>Client ID</label><input id="cf-clientId" value="${sanitize(c.clientId||'')}"></div>
     </div>
   </div>
@@ -3302,12 +3337,12 @@ function clientFormHTML(c) {
     <div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:12px">CULTURAL IDENTITY</div>
     <div class="grid-3">
       <div class="form-group"><label>Aboriginal / TSI</label>
-        <select id="cf-atsi"><option>Yes — Aboriginal</option><option>Yes — Torres Strait Islander</option><option>Yes — Both</option><option>No</option><option>Prefer not to say</option></select></div>
+        <select id="cf-atsi">${selOpts(['Yes — Aboriginal','Yes — Torres Strait Islander','Yes — Both','No','Prefer not to say'], c.atsi, 'Not recorded')}</select></div>
       <div class="form-group"><label>Mob / Language Group</label><input id="cf-mob" value="${sanitize(c.mob||'')}"></div>
       <div class="form-group"><label>Country / Community</label><input id="cf-community" value="${sanitize(c.community||'')}"></div>
       <div class="form-group"><label>Languages Spoken</label><input id="cf-languages" value="${sanitize(c.languages||'')}"></div>
       <div class="form-group"><label>Interpreter Required</label>
-        <select id="cf-interpreter"><option>No</option><option>Yes</option></select></div>
+        <select id="cf-interpreter">${selOpts(['No','Yes'], c.interpreter)}</select></div>
       <div class="form-group"><label>Kinship / Family Structure</label><input id="cf-kinship" value="${sanitize(c.kinship||'')}"></div>
     </div>
   </div>
@@ -3319,9 +3354,9 @@ function clientFormHTML(c) {
       <div class="form-group"><label>NDIS No.</label><input id="cf-ndis" value="${sanitize(c.ndis||'')}"></div>
       <div class="form-group"><label>GP / Doctor</label><input id="cf-gp" value="${sanitize(c.gp||'')}"></div>
       <div class="form-group"><label>Housing Situation</label>
-        <select id="cf-housing"><option value="">Select…</option><option>Stable Housing</option><option>Public Housing</option><option>Private Rental</option><option>With Family</option><option>Transitional</option><option>Rough Sleeping</option><option>Other</option></select></div>
+        <select id="cf-housing">${selOpts(['Stable Housing','Public Housing','Private Rental','With Family','Transitional','Rough Sleeping','Other'], c.housing, 'Select…')}</select></div>
       <div class="form-group"><label>Employment Status</label>
-        <select id="cf-employment"><option value="">Select…</option><option>Employed</option><option>Part-time</option><option>Unemployed</option><option>CDEP/CDP</option><option>Carer</option><option>Student</option><option>Unable to work</option></select></div>
+        <select id="cf-employment">${selOpts(['Employed','Part-time','Unemployed','CDEP/CDP','Carer','Student','Unable to work'], c.employment, 'Select…')}</select></div>
       <div class="form-group"><label>Children / Dependants</label><input id="cf-children" value="${sanitize(c.children||'')}"></div>
       <div class="form-group"><label>Health Conditions</label><input id="cf-healthConditions" value="${sanitize(c.healthConditions||'')}"></div>
       <div class="form-group"><label>Medications</label><input id="cf-medications" value="${sanitize(c.medications||'')}"></div>
@@ -3341,9 +3376,9 @@ function clientFormHTML(c) {
         </div>
       </div>
       <div class="form-group"><label>Risk Level</label>
-        <select id="cf-riskLevel"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></div>
+        <select id="cf-riskLevel">${selOpts([{v:'low',l:'Low'},{v:'medium',l:'Medium'},{v:'high',l:'High'}], c.riskLevel||'low')}</select></div>
       <div class="form-group"><label>Status</label>
-        <select id="cf-status"><option value="active">Active</option><option value="closed">Closed</option><option value="waitlist">Waitlist</option></select></div>
+        <select id="cf-status">${selOpts([{v:'active',l:'Active'},{v:'closed',l:'Closed'},{v:'waitlist',l:'Waitlist'}], c.status||'active')}</select></div>
     </div>
     <div style="margin-top:8px">
       <div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:8px">PROGRAMS ENROLLED</div>

@@ -1,1 +1,34 @@
+# Dependencies — functions/ has a package.json, so these appear on any install
+node_modules/
+functions/node_modules/
+
+# Firebase CLI working files (may contain deploy caches and debug output)
+.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+
+# Local environment — never commit keys or service-account credentials
+.env
+.env.*
+*-service-account*.json
+serviceAccountKey.json
+
+# Editor and OS clutter
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Logs and scratch output
+*.log
+/tmp/
+
+# Client data must never be committed — these are the shapes an export takes
+*.csv
+*backup*.json
+*export*.json
+
+# One-off local tooling
 generate-icons.js
