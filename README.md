@@ -125,6 +125,15 @@ are recorded but never counted, and First Peoples Home Ownership is excluded.
 These figures are used for funding acquittal — never infer a program from
 activity type or contact mode.
 
+**Program structure.** SEWB is the umbrella program; AOD, Justice and Cultural
+Strengthening sit under it. NDIS/Disability and First Peoples Home Ownership are
+standalone. Every client — open or closed — is a SEWB client unless their only
+programs are the standalone ones. This is enforced in one place,
+`applySewbUmbrella()`, which every path that creates or saves a client calls.
+Add any new client-creation path through it. Being SEWB is not the same as
+earning a SEWB episode of care: episodes still need explicitly SEWB-typed
+contacts, and AOD and Justice keep their own funding reports.
+
 ## Data and privacy
 
 - Client records never leave Australia. Firestore is pinned to Sydney and cannot

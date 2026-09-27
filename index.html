@@ -607,6 +607,9 @@ const FSYNC = (() => {
       }
       await _loadAll();
       _log.push('Data loaded ✓');
+      // SEWB umbrella conversion runs here, on data just read from the cloud —
+      // never on a cached copy (see migrateSewbUmbrella).
+      try { if (typeof migrateSewbUmbrella === 'function') migrateSewbUmbrella('cloud load'); } catch(e){ console.warn('SEWB umbrella:', e.message); }
       _startListeners();
       _showSyncBadge(true);
       console.log('Firebase init steps:', _log.join(' → '));
@@ -686,7 +689,9 @@ const FSYNC = (() => {
       if (snap.empty && snap.metadata.fromCache) return false; // cold/offline cache — not truth
       return true;
     };
-    _listeners.push(col('clients').onSnapshot(snap=>{ if(!trust(snap))return; clients=_live(snap.docs.map(d=>d.data()));DB.save('clients',clients);refresh(); }, e=>console.warn('clients listener:',e.message)));
+    _listeners.push(col('clients').onSnapshot(snap=>{ if(!trust(snap))return; clients=_live(snap.docs.map(d=>d.data()));DB.save('clients',clients);
+      try { if (typeof migrateSewbUmbrella === 'function') migrateSewbUmbrella('live sync'); } catch(e){ console.warn('SEWB umbrella:', e.message); }
+      refresh(); }, e=>console.warn('clients listener:',e.message)));
     _listeners.push(col('notes').onSnapshot(snap=>{ if(!trust(snap))return; notes=_live(snap.docs.map(d=>d.data()));DB.save('notes',notes); }, e=>console.warn('notes listener:',e.message)));
     _listeners.push(col('timelogs').onSnapshot(snap=>{ if(!trust(snap))return; timeLogs=_live(snap.docs.map(d=>d.data()));DB.save('timelogs',timeLogs); }, e=>console.warn('timelogs listener:',e.message)));
     _listeners.push(col('referrals').onSnapshot(snap=>{ if(!trust(snap))return; referrals=_live(snap.docs.map(d=>d.data()));DB.save('referrals',referrals); if(currentPage==='referrals')setTimeout(()=>showPage('referrals'),50); }, e=>console.warn('referrals listener:',e.message)));
@@ -3310,6 +3315,65 @@ function selOpts(opts, current, placeholder) {
   return html;
 }
 
+// ===== SEWB UMBRELLA (organisation restructure, September 2026) =====
+// SEWB is the umbrella program. AOD, Justice and Cultural Strengthening sit
+// under it. NDIS/Disability and First Peoples Home Ownership are standalone.
+// So every client — open or closed — is a SEWB client, UNLESS the only programs
+// they are in are the standalone ones.
+//
+// NDIS is recognised by either flag: the client form stores it as `disability`,
+// but converting a referral stores it as `ndis: true`. `ndis` also holds an NDIS
+// NUMBER on some records, so only a literal `true` counts as enrolment.
+const SEWB_UMBRELLA_VERSION = '2026-09';
+function _inNdisProgram(c){ return !!c && (c.disability === true || c.ndis === true); }
+function _inHomeOwnershipProgram(c){ return !!c && c.homeOwnership === true; }
+function _inSewbFamily(c){
+  return !!c && !!(c.sewb || c.aod || c.justice || c.cultural || c.workFoundations);
+}
+function isStandaloneOnlyClient(c){
+  return (_inNdisProgram(c) || _inHomeOwnershipProgram(c)) && !_inSewbFamily(c);
+}
+// Apply the umbrella rule to one record, in place. Used by every path that
+// creates or saves a client, so no path can quietly produce a non-SEWB client.
+function applySewbUmbrella(c){
+  if (!c) return c;
+  if (!isStandaloneOnlyClient(c)) c.sewb = true;
+  c._sewbUmbrella = SEWB_UMBRELLA_VERSION;
+  return c;
+}
+// One-time conversion of EXISTING records, as the organisation asked: every
+// open and closed client becomes SEWB unless they are NDIS- or Home
+// Ownership-only.
+//   • Runs only for a signed-in person, so the audit entry names who ran it.
+//   • Runs only on FRESH cloud data (straight after the cloud load, or from the
+//     live listener). Running it on a device's cached copy would push that stale
+//     copy of every client back to the cloud, overwriting newer edits made
+//     elsewhere.
+//   • Each record is stamped, so it is converted once. After that a manual edit
+//     is respected rather than re-applied on every load.
+//   • Records it flips are tagged `_sewbAutoAssigned`, so the change can be
+//     identified — and reversed — later. Nothing is deleted.
+function migrateSewbUmbrella(source){
+  if (typeof currentUser === 'undefined' || !currentUser) return 0;
+  if (!(typeof FSYNC !== 'undefined' && FSYNC.isReady && FSYNC.isReady())) return 0;
+  const pending = (clients || []).filter(c => c && c._sewbUmbrella !== SEWB_UMBRELLA_VERSION);
+  if (!pending.length) return 0;
+  let assigned = 0, standalone = 0;
+  pending.forEach(c => {
+    if (isStandaloneOnlyClient(c)) standalone++;
+    else if (!c.sewb) { c.sewb = true; c._sewbAutoAssigned = SEWB_UMBRELLA_VERSION; assigned++; }
+    c._sewbUmbrella = SEWB_UMBRELLA_VERSION;
+  });
+  saveAll();
+  if (assigned || standalone) {
+    audit('SEWB umbrella applied',
+      `${assigned} existing client${assigned===1?'':'s'} (open and closed) assigned to SEWB; ` +
+      `${standalone} NDIS / Home Ownership-only client${standalone===1?'':'s'} left standalone. ` +
+      `Source: ${source}. Changed records are tagged _sewbAutoAssigned=${SEWB_UMBRELLA_VERSION}.`);
+  }
+  return assigned;
+}
+
 function clientFormHTML(c) {
   // Org restructure: SEWB is now the umbrella program, so a brand-new client
   // record defaults to SEWB ticked. This is a DEFAULT only — the worker can
@@ -3390,15 +3454,22 @@ function clientFormHTML(c) {
     </div>
     <div style="margin-top:8px">
       <div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:8px">PROGRAMS ENROLLED</div>
-      <div style="display:flex;gap:20px;flex-wrap:wrap">
-        <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="cf-sewb" ${sewbDefaultChecked?'checked':''}> SEWB</label>
-        <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="cf-aod" ${c.aod?'checked':''}> AOD</label>
-        <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="cf-justice" ${c.justice?'checked':''}> Justice</label>
-        <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="cf-cultural" ${c.cultural?'checked':''}> Cultural Strengthening</label>
-        <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="cf-disability" ${c.disability?'checked':''}> ♿ Disability</label>
-        <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="cf-workfoundations" ${c.workFoundations?'checked':''}> 🔨 Work Foundations</label>
+      <div style="border:1px solid #bbf7d0;background:#f0fdf4;border-radius:8px;padding:10px 12px;margin-bottom:10px">
+        <label style="display:flex;align-items:center;gap:6px;font-size:13.5px;font-weight:700;color:#065f46"><input type="checkbox" id="cf-sewb" ${sewbDefaultChecked?'checked':''}> 💚 SEWB — umbrella program</label>
+        <div style="display:flex;gap:18px;flex-wrap:wrap;margin:8px 0 0 22px">
+          <span style="font-size:11px;color:var(--muted);align-self:center">Sub-programs:</span>
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="cf-aod" ${c.aod?'checked':''} onchange="if(this.checked)document.getElementById('cf-sewb').checked=true"> SEWB – AOD</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="cf-justice" ${c.justice?'checked':''} onchange="if(this.checked)document.getElementById('cf-sewb').checked=true"> SEWB – Justice</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="cf-cultural" ${c.cultural?'checked':''} onchange="if(this.checked)document.getElementById('cf-sewb').checked=true"> SEWB – Cultural Strengthening</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="cf-workfoundations" ${c.workFoundations?'checked':''}> 🔨 Work Foundations</label>
+        </div>
+      </div>
+      <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:center">
+        <span style="font-size:11px;color:var(--muted)">Standalone programs:</span>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="cf-disability" ${c.disability?'checked':''}> ♿ NDIS / Disability</label>
         <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="cf-homeownership" ${c.homeOwnership?'checked':''}> 🏠 First Peoples Home Ownership</label>
       </div>
+      <div style="font-size:11px;color:var(--muted);margin-top:8px">Every client is a SEWB client unless their only program is NDIS or Home Ownership — SEWB is re-ticked on save if it is left unticked with nothing standalone selected.</div>
     </div>
   </div>
   <div>
@@ -3412,7 +3483,8 @@ function clientFormHTML(c) {
 function collectClientForm() {
   const g = id => document.getElementById(id)?.value||'';
   const gc = id => document.getElementById(id)?.checked||false;
-  return {
+  // SEWB umbrella: applied to every save, new or edit (see applySewbUmbrella).
+  return applySewbUmbrella({
     fullName: g('cf-fullName'), preferredName: g('cf-preferredName'), pronouns: g('cf-pronouns'),
     dob: g('cf-dob'), gender: g('cf-gender'), clientId: g('cf-clientId'),
     phone: g('cf-phone'), email: g('cf-email'), address: g('cf-address'), emergencyContact: g('cf-emergencyContact'),
@@ -3427,7 +3499,7 @@ function collectClientForm() {
     riskLevel: g('cf-riskLevel'), status: g('cf-status'),
     sewb: gc('cf-sewb'), aod: gc('cf-aod'), justice: gc('cf-justice'), cultural: gc('cf-cultural'), disability: gc('cf-disability'), workFoundations: gc('cf-workfoundations'), homeOwnership: gc('cf-homeownership'),
     referralReason: g('cf-referralReason'), goals: g('cf-goals'), strengths: g('cf-strengths'),
-  };
+  });
 }
 
 // ===== NOTE MODAL =====
@@ -3995,6 +4067,7 @@ function renderCultural() {
       }
 
       c.id = uid(); c.created = now();
+      applySewbUmbrella(c);
       clients.push(c);
       created++;
 
@@ -4688,6 +4761,7 @@ function bulkImportConfirm() {
       attachments: [], goalPlan: [], caseNotes: [],
     };
     if (dest==='closed') { newClient.closedDate = today(); newClient.closedReason = 'Historical record — bulk import'; }
+    applySewbUmbrella(newClient);
     clients.push(newClient);
     audit(dest==='closed' ? 'Bulk imported client (closed/archive)' : 'Bulk imported client', newClient.fullName, newClient.id);
     added++;
@@ -6945,6 +7019,7 @@ function convertToClient(id) {
     ndis:r.ndis||false, clientId:'REF-'+id.slice(-6).toUpperCase(),
     attachments:[], keyWorkers: r.allocatedTo ? [{name:r.allocatedTo, role:'Key Worker', primary:true, consentShare:true, startDate:today()}] : [],
   };
+  applySewbUmbrella(newClient);
   clients.push(newClient);
   r.status='converted'; r.convertedClientId=newClient.id;
   if(!r.actions) r.actions=[];
@@ -7439,6 +7514,7 @@ function convertWalkin(id) {
     sewb:w.programs?.includes('SEWB'), aod:w.programs?.includes('AOD'),
     justice:w.programs?.includes('Justice'), cultural:w.programs?.includes('Cultural'),
     disability:w.programs?.includes('Disability'), clientId:'WI-'+id.slice(-6).toUpperCase() };
+  applySewbUmbrella(nc);
   clients.push(nc); w.converted=true; w.convertedClientId=nc.id;
   audit('Converted walk-in to client', nc.fullName, nc.id);
   saveAll(); saveWalkins(); showToast('Client record created');
