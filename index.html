@@ -3311,6 +3311,14 @@ function selOpts(opts, current, placeholder) {
 }
 
 function clientFormHTML(c) {
+  // Org restructure: SEWB is now the umbrella program, so a brand-new client
+  // record defaults to SEWB ticked. This is a DEFAULT only — the worker can
+  // still untick it before saving, and it never touches an EXISTING record:
+  // c.id is only absent on a genuinely new client (openNewClientModal calls
+  // this with {}), so editing a real client whose SEWB box was already
+  // unticked or never set is left exactly as it was.
+  const isNewClient = !c.id;
+  const sewbDefaultChecked = isNewClient ? (c.sewb !== false) : !!c.sewb;
   return `
   <div style="border-bottom:1px solid var(--border);padding-bottom:16px;margin-bottom:16px">
     <div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:12px">PERSONAL INFORMATION</div>
@@ -3383,7 +3391,7 @@ function clientFormHTML(c) {
     <div style="margin-top:8px">
       <div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:8px">PROGRAMS ENROLLED</div>
       <div style="display:flex;gap:20px;flex-wrap:wrap">
-        <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="cf-sewb" ${c.sewb?'checked':''}> SEWB</label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="cf-sewb" ${sewbDefaultChecked?'checked':''}> SEWB</label>
         <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="cf-aod" ${c.aod?'checked':''}> AOD</label>
         <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="cf-justice" ${c.justice?'checked':''}> Justice</label>
         <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="cf-cultural" ${c.cultural?'checked':''}> Cultural Strengthening</label>
@@ -4065,6 +4073,12 @@ function renderReportsPage() {
         <div class="rc-title">SEWB Program Report</div>
         <div class="rc-desc">All SEWB clients, domain assessments, goals, and notes summary</div>
         <span class="rc-badge" style="background:#d1fae5;color:#065f46">${clients.filter(c=>c.sewb).length} clients</span>
+      </div>
+      <div class="report-card" onclick="generateProgramReport('sewb-combined')">
+        <div class="rc-icon">🌿</div>
+        <div class="rc-title">SEWB Program Report (Combined)</div>
+        <div class="rc-desc">SEWB umbrella — Direct, AOD, Justice and Cultural Strengthening as sub-groups. Open + closed, no case notes</div>
+        <span class="rc-badge" style="background:#ccfbf1;color:#0f5257">${clients.filter(c=>c.sewb||SEWB_UMBRELLA_SUBGROUPS.some(g=>c[g.key])).length} clients</span>
       </div>
       <div class="report-card" onclick="generateProgramReport('aod')">
         <div class="rc-icon">🔴</div>
@@ -5095,6 +5109,7 @@ function generateProgramReport(type) {
   const from = document.getElementById('rpt-from')?.value||'2000-01-01';
   const to = document.getElementById('rpt-to')?.value||today();
   if(type==='sewb') openReport(buildSEWBProgramReport(from, to));
+  else if(type==='sewb-combined') openReport(buildSEWBCombinedReport(from, to));
   else if(type==='aod') openReport(buildAODProgramReport(from, to));
   else if(type==='justice') openReport(buildJusticeProgramReport(from, to));
   else if(type==='cultural') openReport(buildCulturalProgramReport(from, to));
@@ -5618,6 +5633,84 @@ function buildSEWBProgramReport(from, to) {
     const c=clients.find(cl=>cl.id===n.clientId);
     return `<div class="note-block sewb"><div class="note-meta"><strong>${sanitize(c?.fullName||'Unknown')}</strong> — ${fmtdt(n.created)} | ${sanitize(n.worker||'—')}</div><p>${sanitize(n.text||'').replace(/\n/g,'<br>')}</p></div>`;
   }).join('') || '<p>No SEWB notes in this period</p>'}`;
+}
+
+// ---- SEWB PROGRAM REPORT (COMBINED / UMBRELLA) ----
+// Added for the organisation's restructure: SEWB is now the umbrella program,
+// with AOD, Justice and Cultural Strengthening reported as sub-groups within
+// it. This is a NEW, separate report, additive to everything above it:
+//   • buildSEWBProgramReport (above) is UNCHANGED — still generated as before.
+//   • The standalone AOD/Justice Official Funding Reports and their
+//     episode-of-care targets (FUNDING_PROGRAMS, fundingKPI) are UNCHANGED —
+//     those figures are used for funding acquittal and the org confirmed
+//     they stay separate from this restructure.
+//   • Disability/NDIS, Work Foundations and First Peoples Home Ownership are
+//     explicitly excluded from the SEWB umbrella and do not appear here.
+//
+// Grouping uses each client's EXISTING program checkboxes — it does not set
+// or change any client's sewb/aod/justice/cultural flag, so no historical
+// record is retroactively reclassified. A client holding more than one flag
+// (the app has always allowed this) appears once per matching sub-group,
+// consistent with how those flags already work everywhere else in the app.
+//
+// Per the request this report responds to: case notes are deliberately
+// excluded, and both open and closed clients are included.
+const SEWB_UMBRELLA_SUBGROUPS = [
+  { key:'aod',      label:'AOD' },
+  { key:'justice',  label:'Justice' },
+  { key:'cultural', label:'Cultural Strengthening' },
+];
+function buildSEWBCombinedReport(from, to) {
+  const isOpen = c => (c.status||'active') !== 'closed';
+  // "SEWB — Direct" = flagged SEWB but none of the umbrella sub-programs, so a
+  // client isn't silently double-counted as both Direct and a sub-group.
+  const direct = clients.filter(c => c.sewb && !SEWB_UMBRELLA_SUBGROUPS.some(g => c[g.key]));
+  const groups = [
+    { label:'SEWB — Direct', rows: direct },
+    ...SEWB_UMBRELLA_SUBGROUPS.map(g => ({ label:`SEWB — ${g.label}`, rows: clients.filter(c => c[g.key]) })),
+  ];
+  const totalOpen   = groups.reduce((n,g)=>n+g.rows.filter(isOpen).length, 0);
+  const totalClosed = groups.reduce((n,g)=>n+g.rows.filter(c=>!isOpen(c)).length, 0);
+
+  return `
+  ${reportHeader('SEWB Program Report (Combined)', `Period: ${fmt(from)} — ${fmt(to)} · SEWB umbrella: Direct, AOD, Justice, Cultural Strengthening`)}
+  <p style="font-size:12px;color:var(--muted);margin-bottom:16px">
+    Internal reporting view only. It does not change any client's recorded program,
+    and does not affect the standalone SEWB, AOD or Justice Official Funding Reports
+    or their episode-of-care funding targets — those remain separate. Disability/NDIS,
+    Work Foundations and First Peoples Home Ownership are reported on their own and
+    are not included here.
+  </p>
+  <h2>Client Summary</h2>
+  <table><tr><th>Sub-Program</th><th>Open</th><th>Closed</th><th>Total</th></tr>
+  ${groups.map(g=>{
+    const open=g.rows.filter(isOpen).length, closed=g.rows.length-open;
+    return `<tr><td>${sanitize(g.label)}</td><td>${open}</td><td>${closed}</td><td>${g.rows.length}</td></tr>`;
+  }).join('')}
+  <tr style="font-weight:700;background:#f0f7f3"><td>Total rows (a client in &gt;1 sub-program is counted once per row)</td><td>${totalOpen}</td><td>${totalClosed}</td><td>${totalOpen+totalClosed}</td></tr>
+  </table>
+  <p style="font-size:11px;color:var(--muted);margin:6px 0 0">"Open" = status Active or Waitlist. "Closed" = status Closed. The Client Roster below shows the exact status for each client.</p>
+
+  <h2>Client Roster</h2>
+  <table>
+    <tr><th>Client ID</th><th>Name</th><th>Sub-Program</th><th>Status</th><th>Client Created</th></tr>
+    ${groups.flatMap(g=>g.rows.map(c=>`<tr>
+      <td>${sanitize(c.clientId||c.id||'—')}</td>
+      <td>${sanitize(c.fullName)}</td>
+      <td>${sanitize(g.label)}</td>
+      <td><span class="badge badge-${sanitize(c.status||'active')}">${sanitize((c.status||'active').toUpperCase())}</span></td>
+      <td>${c.created?fmt(c.created):'—'}</td>
+    </tr>`)).join('') || '<tr><td colspan="5">No clients in this scope</td></tr>'}
+  </table>
+  <p style="font-size:11px;color:var(--muted);margin-top:10px">
+    "Client ID" falls back to the internal record ID when no Client ID has been
+    entered on the client's file. "Client Created" is the date the client
+    record itself was created — the system does not record a separate
+    enrolment date per program, so no such date is shown here rather than
+    guessing one. Case notes are intentionally excluded from this report;
+    open the client's file, or the SEWB/AOD/Justice program report, for
+    clinical detail.
+  </p>`;
 }
 
 // ---- AOD PROGRAM REPORT ----
