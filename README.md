@@ -138,6 +138,10 @@ contacts, and AOD and Justice keep their own funding reports.
 
 - Client records never leave Australia. Firestore is pinned to Sydney and cannot
   be moved after creation.
+- Case notes appear **only in individual client reports**, never in program or
+  other aggregate reports. Program reports may show note *counts*, but never
+  note text, follow-ups or time-log descriptions. Any new aggregate report must
+  follow this — `programReportNotesPointer()` is the standard replacement.
 - Never paste real client data into commits, issues, pull requests or logs.
 - The audit log is append-only. It cannot be edited or deleted by anyone,
   including a System Manager — "Clear audit log" only clears the local view.

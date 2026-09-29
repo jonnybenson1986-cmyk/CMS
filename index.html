@@ -4144,7 +4144,7 @@ function renderReportsPage() {
       <div class="report-card" onclick="generateProgramReport('sewb')">
         <div class="rc-icon">💚</div>
         <div class="rc-title">SEWB Program Report</div>
-        <div class="rc-desc">All SEWB clients, domain assessments, goals, and notes summary</div>
+        <div class="rc-desc">All SEWB clients, domain assessments and goals (case notes are in individual client reports)</div>
         <span class="rc-badge" style="background:#d1fae5;color:#065f46">${clients.filter(c=>c.sewb).length} clients</span>
       </div>
       <div class="report-card" onclick="generateProgramReport('sewb-combined')">
@@ -5673,6 +5673,17 @@ function buildGoalsReport() {
 }
 
 // ---- SEWB PROGRAM REPORT ----
+// Program reports must NOT carry case-note content. A program report lists
+// many clients and is used for management and funding purposes; case notes are
+// individual clinical records, disclosed only to those who need them for that
+// client's care. They remain available in each client's individual report
+// (buildSEWBClientReport, buildNotesReport, etc.), which is where the
+// organisation has directed they be accessed. Note COUNTS stay — a count is
+// aggregate activity, not a disclosure of anyone's record.
+function programReportNotesPointer(){
+  return `<p style="font-size:12px;color:#6b7280;margin-top:18px">Case notes are not included in program reports. To view a client's case notes, generate their individual report under <strong>Individual Client Reports</strong>.</p>`;
+}
+
 function buildSEWBProgramReport(from, to) {
   const cl = clients.filter(c=>c.sewb);
   const domains = ['Body','Mind & Emotions','Family & Kinship','Community','Culture','Country','Spirit & Ancestors','Sovereignty'];
@@ -5702,11 +5713,7 @@ function buildSEWBProgramReport(from, to) {
     return `<tr><td>${sanitize(c.fullName)}</td><td>${sanitize(c.mob||'—')} / ${sanitize(c.community||'—')}</td><td>${assessed}/8</td><td>${c.sewbGoals?'✅':'—'}</td><td><span class="badge badge-${sanitize(c.riskLevel||'low')}">${(c.riskLevel||'low').toUpperCase()}</span></td><td><span class="badge badge-${sanitize(c.status||'active')}">${sanitize(c.status||'active')}</span></td></tr>`;
   }).join('')}
   </table>
-  <h2>SEWB Notes Summary (${fmt(from)} — ${fmt(to)})</h2>
-  ${notes.filter(n=>n.type==='sewb'&&n.created>=from&&n.created<=to+'T23:59:59').sort((a,b)=>b.created.localeCompare(a.created)).map(n=>{
-    const c=clients.find(cl=>cl.id===n.clientId);
-    return `<div class="note-block sewb"><div class="note-meta"><strong>${sanitize(c?.fullName||'Unknown')}</strong> — ${fmtdt(n.created)} | ${sanitize(n.worker||'—')}</div><p>${sanitize(n.text||'').replace(/\n/g,'<br>')}</p></div>`;
-  }).join('') || '<p>No SEWB notes in this period</p>'}`;
+  ${programReportNotesPointer()}`;
 }
 
 // ---- SEWB PROGRAM REPORT (COMBINED / UMBRELLA) ----
@@ -5782,7 +5789,7 @@ function buildSEWBCombinedReport(from, to) {
     record itself was created — the system does not record a separate
     enrolment date per program, so no such date is shown here rather than
     guessing one. Case notes are intentionally excluded from this report;
-    open the client's file, or the SEWB/AOD/Justice program report, for
+    generate the client's individual report for
     clinical detail.
   </p>`;
 }
@@ -5808,11 +5815,7 @@ function buildAODProgramReport(from, to) {
   <table><tr><th>Client</th><th>Primary Substance</th><th>Stage of Change</th><th>Treatment</th><th>Readiness</th><th>Risk</th></tr>
   ${cl.map(c=>`<tr><td>${sanitize(c.fullName)}</td><td>${sanitize((c.aodPrimary||'—').slice(0,30))}</td><td>${sanitize(c.aodStage||'—')}</td><td>${sanitize(c.aodTreatment||'—')}</td><td>${sanitize(c.aodReadiness||'—')}/10</td><td><span class="badge badge-${sanitize(c.riskLevel||'low')}">${(c.riskLevel||'low').toUpperCase()}</span></td></tr>`).join('')}
   </table>
-  <h2>AOD Notes Summary (${fmt(from)} — ${fmt(to)})</h2>
-  ${notes.filter(n=>n.type==='aod'&&n.created>=from&&n.created<=to+'T23:59:59').sort((a,b)=>b.created.localeCompare(a.created)).map(n=>{
-    const c=clients.find(cl=>cl.id===n.clientId);
-    return `<div class="note-block aod"><div class="note-meta"><strong>${sanitize(c?.fullName||'Unknown')}</strong> — ${fmtdt(n.created)} | ${sanitize(n.worker||'—')}</div><p>${sanitize(n.text||'').replace(/\n/g,'<br>')}</p></div>`;
-  }).join('') || '<p>No AOD notes in this period</p>'}`;
+  ${programReportNotesPointer()}`;
 }
 
 // ---- JUSTICE PROGRAM REPORT ----
@@ -5836,11 +5839,7 @@ function buildJusticeProgramReport(from, to) {
   <table><tr><th>Client</th><th>Community</th><th>Diversion</th><th>Legal Rep</th><th>Court Dates</th><th>Risk</th></tr>
   ${cl.map(c=>`<tr><td>${sanitize(c.fullName)}</td><td>${sanitize(c.community||'—')}</td><td>${sanitize(c.jusDiversion||'None')}</td><td>${sanitize((c.jusLegal||'—').slice(0,25))}</td><td style="font-size:10px">${sanitize((c.jusCourts||'—').slice(0,40))}</td><td><span class="badge badge-${sanitize(c.riskLevel||'low')}">${(c.riskLevel||'low').toUpperCase()}</span></td></tr>`).join('')}
   </table>
-  <h2>Justice Notes (${fmt(from)} — ${fmt(to)})</h2>
-  ${notes.filter(n=>n.type==='justice'&&n.created>=from&&n.created<=to+'T23:59:59').sort((a,b)=>b.created.localeCompare(a.created)).map(n=>{
-    const c=clients.find(cl=>cl.id===n.clientId);
-    return `<div class="note-block justice"><div class="note-meta"><strong>${sanitize(c?.fullName||'Unknown')}</strong> — ${fmtdt(n.created)} | ${sanitize(n.worker||'—')}</div><p>${sanitize(n.text||'').replace(/\n/g,'<br>')}</p></div>`;
-  }).join('') || '<p>No justice notes in this period</p>'}`;
+  ${programReportNotesPointer()}`;
 }
 
 // ---- CULTURAL PROGRAM REPORT ----
@@ -5858,11 +5857,7 @@ function buildCulturalProgramReport(from, to) {
   <table><tr><th>Client</th><th>Mob</th><th>Community / Country</th><th>Cultural Goals</th><th>Elders Involved</th><th>Risk</th></tr>
   ${cl.map(c=>`<tr><td>${sanitize(c.fullName)}</td><td>${sanitize(c.mob||'—')}</td><td>${sanitize(c.community||'—')}</td><td style="font-size:10px">${sanitize((c.cultGoals||'—').slice(0,50))}</td><td>${c.cultElders?'✅':'—'}</td><td><span class="badge badge-${sanitize(c.riskLevel||'low')}">${(c.riskLevel||'low').toUpperCase()}</span></td></tr>`).join('')}
   </table>
-  <h2>Cultural Notes (${fmt(from)} — ${fmt(to)})</h2>
-  ${notes.filter(n=>n.type==='cultural'&&n.created>=from&&n.created<=to+'T23:59:59').sort((a,b)=>b.created.localeCompare(a.created)).map(n=>{
-    const c=clients.find(cl=>cl.id===n.clientId);
-    return `<div class="note-block cultural"><div class="note-meta"><strong>${sanitize(c?.fullName||'Unknown')}</strong> — ${fmtdt(n.created)} | ${sanitize(n.worker||'—')}</div><p>${sanitize(n.text||'').replace(/\n/g,'<br>')}</p></div>`;
-  }).join('') || '<p>No cultural notes in this period</p>'}`;
+  ${programReportNotesPointer()}`;
 }
 
 // ---- FULL CASELOAD REPORT ----
