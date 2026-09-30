@@ -641,6 +641,7 @@ const FSYNC = (() => {
   }
 
   async function _loadAll() {
+    await _flushDeletes();   // queued deletes land before anything is read back
     const [cs,ns,ts,rs,ws,wks] = await Promise.all([
       col('clients').get(), col('notes').get(), col('timelogs').get(),
       col('referrals').get(), col('workersList').get(), col('workflowTasks').get(),
@@ -841,17 +842,44 @@ const FSYNC = (() => {
   // itself. Instead we mark the record deleted. Because all writes use
   // merge:true, a stale device's re-push CANNOT clear the flag — the record
   // stays deleted everywhere. Readers filter tombstones out (see _live()).
+  // A delete has to reach the cloud, or the record comes back on the next load
+  // (how a cancelled referral kept reappearing in the Holding Bay). Every delete
+  // is queued on this device first and written as a tombstone; if the cloud
+  // isn't connected, or the write fails, it stays queued and is retried before
+  // the next cloud load. Until then, anything read back from the cloud is
+  // checked against the queue, so a deleted record can't slip back in.
+  const _pendingDeletes = () => { const a = DB.load('_pendingDeletes', []); return Array.isArray(a) ? a : []; };
   async function deleteDoc(colName,id){
-    if(!db||!id) return;
-    _forgetHash(colName,id);   // force the tombstone write through dirty-tracking
+    if(!id) return;
+    id = String(id);
     const who = (typeof currentUser!=='undefined' && currentUser && currentUser.name) || '';
-    await col(colName).doc(String(id)).set(
-      { id:String(id), _deleted:true, _deletedAt:new Date().toISOString(), _deletedBy:who },
-      { merge:true }
-    ).catch(e=>{ console.warn('Delete sync:',e.message); _syncFailed(colName,e); });
+    const pd = _pendingDeletes();
+    if (!pd.some(d=>d.col===colName && d.id===id)) {
+      pd.push({ col:colName, id, at:new Date().toISOString(), by:who });
+      DB.save('_pendingDeletes', pd);
+    }
+    await _flushDeletes();
   }
-  // Strip tombstoned records from anything read out of the cloud.
-  function _live(rows){ return (rows||[]).filter(r => r && r._deleted !== true); }
+  async function _flushDeletes(){
+    if(!db) return;
+    const pd = _pendingDeletes(); if(!pd.length) return;
+    const done = new Set();
+    for (const d of pd) {
+      try {
+        _forgetHash(d.col, d.id);   // force the tombstone write through dirty-tracking
+        await col(d.col).doc(d.id).set({ id:d.id, _deleted:true, _deletedAt:d.at, _deletedBy:d.by }, { merge:true });
+        done.add(d.col+'|'+d.id);
+      } catch(e) { console.warn('Delete sync (will retry):', e.message); _syncFailed(d.col, e); }
+    }
+    // Re-read: a delete queued while this was running must not be dropped.
+    DB.save('_pendingDeletes', _pendingDeletes().filter(d=>!done.has(d.col+'|'+d.id)));
+  }
+  // Strip tombstoned records, and records deleted here but not yet confirmed
+  // by the cloud, from anything read out of the cloud.
+  function _live(rows){
+    const gone = new Set(_pendingDeletes().map(d=>d.id));
+    return (rows||[]).filter(r => r && r._deleted !== true && !gone.has(String(r.id)));
+  }
 
   // ===== FIREBASE STORAGE (large files: client attachments, resources) =====
   // Files go to the cloud bucket instead of being base64-stuffed into the
@@ -3623,7 +3651,7 @@ function deleteNote(noteId, clientId) {
   }
   if(!confirm('Delete this note?')) return;
   notes = notes.filter(n=>n.id!==noteId);
-  if(FSYNC.isReady()) FSYNC.deleteDoc('notes', noteId);   // tombstone (QA C2)
+  FSYNC.deleteDoc('notes', noteId);   // tombstone (QA C2) — queued if offline
   saveAll();
   openClientProfile(clientId);
 }
@@ -3676,7 +3704,7 @@ function deleteTime(timeId, clientId) {
   if(!confirm('Delete this time entry?')) return;
   const _tl = timeLogs.find(t=>t.id===timeId);
   timeLogs = timeLogs.filter(t=>t.id!==timeId);
-  if(FSYNC.isReady()) FSYNC.deleteDoc('timelogs', timeId || (_tl && (_tl.date+'-'+_tl.clientId)));   // tombstone (QA C2)
+  FSYNC.deleteDoc('timelogs', timeId || (_tl && (_tl.date+'-'+_tl.clientId)));   // tombstone (QA C2) — queued if offline
   saveAll();
   openClientProfile(clientId);
 }
@@ -7515,7 +7543,12 @@ function convertToClient(id) {
 function deleteReferral(id) {
   const r = referrals.find(rf=>rf.id===id);
   if(!confirm(`Delete referral for ${sanitize(r?.name)}? This cannot be undone.`)) return;
-  referrals = referrals.filter(rf=>rf.id!==id); saveReferrals(); showPage('referrals');
+  referrals = referrals.filter(rf=>rf.id!==id); saveReferrals();
+  // Without this the referral was only removed from THIS device; the cloud copy
+  // stayed, and it reappeared in the Holding Bay on the next sign-in.
+  FSYNC.deleteDoc('referrals', id);
+  audit('Deleted referral', r?.name || '');
+  showPage('referrals');
 }
 
 // ============================================================
@@ -11071,6 +11104,10 @@ function removeDemoData() {
   const n = clients.filter(c=>c._demo).length + fphoClients.filter(c=>c._demo).length;
   if(n===0) { showToast('No demo data found'); return; }
   if(!confirm(`Remove all ${n} demo records? Your real data is untouched.`)) return;
+  // Tombstone each demo record in the cloud too, or they return on next sign-in.
+  clients.filter(c=>c._demo).forEach(c=>FSYNC.deleteDoc('clients', c.id));
+  notes.filter(x=>x._demo).forEach(x=>FSYNC.deleteDoc('notes', x.id));
+  timeLogs.filter(x=>x._demo).forEach(x=>FSYNC.deleteDoc('timelogs', x.id));
   clients     = clients.filter(c=>!c._demo);
   notes       = notes.filter(x=>!x._demo);
   timeLogs    = timeLogs.filter(x=>!x._demo);
