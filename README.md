@@ -60,9 +60,11 @@ A deploy is three independent things. Netlify handles the app; the rules and
 functions are deployed separately and do not happen automatically.
 
 **1 — The application.** Merging to `main` triggers a Netlify build. Before
-merging, bump `CACHE_NAME` in `service-worker.js` (for example `wg-cms-v59` →
-`v60`). Skipping this is the most common cause of staff running an old build
-after a deploy.
+merging, bump `CACHE_NAME` in `service-worker.js` (for example `wg-cms-v67` →
+`v68`) **and** `APP_VERSION` in `index.html` to match. Skipping this is the most
+common cause of staff running an old build after a deploy. The version shows
+under Sign Out, so anyone can check which build they have; a hard refresh
+(Ctrl+Shift+R) picks up the latest.
 
 **2 — Security rules.** Firebase Console → Firestore Database → Rules → paste
 `firestore.rules` → Publish. Same for Storage with `storage.rules`. **Copy the
