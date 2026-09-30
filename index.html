@@ -4278,12 +4278,12 @@ function renderReportsPage() {
     </div>
     <div id="bulk-import-body" style="display:none">
       <p style="font-size:13px;color:var(--muted);margin-bottom:14px">
-        Paste a client list below — copied from Excel, a spreadsheet, or a CSV. By default each row is matched by name to an <strong>existing</strong> open or closed client file and that file's demographic details are updated. <strong>No new client files are created</strong> — rows that match no file are listed and left alone. Everything is previewed before anything changes.
+        Paste client information below — a table copied from Excel or a CSV, or labelled text copied from a referral, intake or email. Each client is matched by name to their <strong>existing</strong> client file and the details go into the right places on that file, including the <strong>📄 Summary</strong> (goals, strengths, housing, GP, key worker, risk and more). <strong>No new client files are created.</strong> Everything is previewed before anything changes.
       </p>
       <div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:12px;font-size:12px;margin-bottom:14px">
-        <strong>Accepted formats:</strong> CSV (comma or tab-separated), Excel copy-paste, or one client per line.<br>
-        <strong>Recognised columns (any order, partial match ok):</strong> name / full name, dob / date of birth, gender, phone / mobile, home phone, email, address, medicare, mob / community, atsi / indigenous, program (sewb/aod/justice/cultural/disability), referral source, key worker.<br>
-        <strong>Names</strong> match in either order ("Citizen Jordan" = "Jordan Citizen"), and nicknames in quotes are recognised (Taylor "Sam" Samantha).
+        <strong>Table:</strong> CSV, tab-separated or Excel copy-paste, with a heading row — e.g. <code>Name, Address, Mobile, Housing, GP, Short-term goal, Strengths</code>.<br>
+        <strong>Labelled text:</strong> one detail per line — <code>Name: Jordan Citizen</code>, <code>Presenting issues: …</code>, <code>Key worker: …</code>. Start each new client with a Name line; a paragraph under a label stays with that label.<br>
+        <strong>Recognised details:</strong> name, date of birth, gender, phone / mobile / home phone, email, address, emergency contact, mob, community, Aboriginal / TSI, languages, interpreter, kinship, housing, employment, children, GP, health conditions, medications, Medicare, CRN, NDIS number, key worker / case manager, risk, referral source / date, presenting issues, goals (short, medium, long-term), strengths, AOD and justice summary details. Names match in either order ("Citizen Jordan" = "Jordan Citizen"), and nicknames in quotes are recognised (Taylor "Sam" Samantha).
       </div>
       <div class="form-group">
         <label>Paste data here</label>
@@ -4751,77 +4751,294 @@ function _importAuPhone(v) {
   if (n.length===10 && /^0[2378]/.test(n)) return `${n.slice(0,2)} ${n.slice(2,6)} ${n.slice(6)}`;
   return raw;
 }
-const IMPORT_EMPTY_ADDRESS = ['unknown','n/a','na','-','none','nil','tbc'];
+const IMPORT_EMPTY_VALUE = ['unknown','n/a','na','-','--','none','nil','tbc','tba','not known','not recorded','?'];
 const IMPORT_ATSI_FORM = { 'aboriginal':'Yes — Aboriginal', 'torres strait islander':'Yes — Torres Strait Islander', 'both':'Yes — Both' };
-const IMPORT_FIELDS = [
-  ['preferredName','Preferred name'], ['dob','Date of birth'], ['gender','Gender'],
-  ['atsi','Aboriginal / TSI'], ['mob','Mob / community'], ['address','Address'],
-  ['phone','Phone'], ['email','Email'], ['medicare','Medicare number'],
+
+// Every client-file field the importer can fill, where it shows up, and the
+// column headings / labels that mean it. Headings are compared lower-case with
+// punctuation removed, so "D.O.B" and "Date of Birth" both work.
+// Program enrolment, open/closed status and case notes are deliberately NOT
+// here: those are decisions and clinical records, not details to paste in.
+const IMPORT_CATALOGUE = [
+  // Summary · Personal
+  { f:'dob',            label:'Date of birth',       where:'Summary · Personal',   syn:['dob','date of birth','birth date','birthdate','d o b'] },
+  { f:'gender',         label:'Gender',              where:'Summary · Personal',   syn:['gender','sex'] },
+  { f:'mob',            label:'Mob / language group', where:'Summary · Personal',  syn:['mob','language group','mob language group','nation','clan','tribe'] },
+  { f:'community',      label:'Country / community', where:'Summary · Personal',   syn:['community','country','country community','home community'] },
+  { f:'phone',          label:'Phone',               where:'Summary · Personal',   syn:['phone','mobile','mobile phone','mobile number','phone number','contact number','ph','mob phone','cell'] },
+  { f:'housing',        label:'Housing',             where:'Summary · Personal',   syn:['housing','housing status','accommodation','living situation','housing situation'] },
+  { f:'gp',             label:'GP',                  where:'Summary · Personal',   syn:['gp','doctor','gp clinic','general practitioner','medical centre','medical center','gp name'] },
+  { f:'keyWorker',      label:'Key worker',          where:'Summary · Personal',   syn:['key worker','keyworker','case manager','case worker','caseworker','worker','allocated worker','allocated to'] },
+  { f:'riskLevel',      label:'Risk level',          where:'Summary · Risk',       syn:['risk','risk level','risk rating'] },
+  // Summary · Goals & strengths
+  { f:'ifGoalShort',    label:'Short-term goal',     where:'Summary · Goals',      syn:['short term goal','short term goals','short goal','goals short term','immediate goal'] },
+  { f:'ifGoalMedium',   label:'Medium-term goal',    where:'Summary · Goals',      syn:['medium term goal','medium term goals','medium goal','goals medium term'] },
+  { f:'ifGoalLong',     label:'Longer-term goal',    where:'Summary · Goals',      syn:['long term goal','long term goals','longer term goal','longer term goals','long goal','goals long term'] },
+  { f:'goals',          label:'Goals',               where:'Summary · Goals',      syn:['goals','goal','client goals','goals support plan'] },
+  { f:'strengths',      label:'Strengths',           where:'Summary · Strengths',  syn:['strengths','client strengths','protective factors','strengths protective factors'] },
+  // Summary · AOD / Justice (shown on the Summary when the client is in that program)
+  { f:'aodPrimary',     label:'Primary substance',   where:'Summary · AOD',        syn:['primary substance','primary drug','drug of concern','substance of concern','primary substance of concern'] },
+  { f:'aodStage',       label:'Stage of change',     where:'Summary · AOD',        syn:['stage of change','readiness stage'] },
+  { f:'aodTreatment',   label:'AOD treatment',       where:'Summary · AOD',        syn:['aod treatment','treatment type','current treatment'] },
+  { f:'jusCharges',     label:'Charges / matters',   where:'Summary · Justice',    syn:['charges','current charges','matters','legal matters','current matters'] },
+  { f:'jusCourts',      label:'Court dates',         where:'Summary · Justice',    syn:['court dates','court date','next court date','court'] },
+  { f:'jusLegal',       label:'Legal representation', where:'Summary · Justice',   syn:['legal representation','lawyer','legal rep','solicitor','legal representative'] },
+  { f:'jusDiversion',   label:'Diversion',           where:'Summary · Justice',    syn:['diversion','diversion program'] },
+  // Client details
+  { f:'preferredName',  label:'Preferred name',      where:'Client details',       syn:['preferred name','known as','nickname','aka','preferred'] },
+  { f:'pronouns',       label:'Pronouns',            where:'Client details',       syn:['pronouns','pronoun'] },
+  { f:'clientId',       label:'Client ID',           where:'Client details',       syn:['client id','client number','file number','client no','client ref'] },
+  { f:'email',          label:'Email',               where:'Client details · Contact', syn:['email','e mail','email address'] },
+  { f:'address',        label:'Address',             where:'Client details · Contact', syn:['address','residential address','home address','street address','postal address'] },
+  { f:'emergencyContact', label:'Emergency contact', where:'Client details · Contact', syn:['emergency contact','next of kin','nok','emergency contact details'] },
+  { f:'atsi',           label:'Aboriginal / TSI',    where:'Client details · Cultural identity', syn:['atsi','aboriginal tsi','aboriginal or torres strait islander','indigenous status','aboriginality','indigenous','cultural identity','atsi status'] },
+  { f:'languages',      label:'Languages',           where:'Client details · Cultural identity', syn:['languages','language','languages spoken','language spoken','first language'] },
+  { f:'interpreter',    label:'Interpreter needed',  where:'Client details · Cultural identity', syn:['interpreter','interpreter required','interpreter needed','needs interpreter'] },
+  { f:'kinship',        label:'Kinship / family',    where:'Client details · Cultural identity', syn:['kinship','kinship family','family connections','family'] },
+  { f:'medicare',       label:'Medicare number',     where:'Client details · Health', syn:['medicare','medicare number','medicare card number','medicare no','medicare card'] },
+  { f:'crn',            label:'Centrelink CRN',      where:'Client details · Health', syn:['crn','centrelink crn','centrelink','customer reference number','centrelink number'] },
+  { f:'ndis',           label:'NDIS number',         where:'Client details · Health', syn:['ndis number','ndis no','ndis participant number','ndis id'] },
+  { f:'healthConditions', label:'Health conditions', where:'Client details · Health', syn:['health conditions','health','medical conditions','diagnoses','diagnosis','conditions','health issues'] },
+  { f:'medications',    label:'Medications',         where:'Client details · Health', syn:['medications','medication','meds','current medications'] },
+  { f:'employment',     label:'Employment',          where:'Client details · Circumstances', syn:['employment','employment status','work status','occupation'] },
+  { f:'children',       label:'Children / dependants', where:'Client details · Circumstances', syn:['children','kids','dependants','dependents','children dependants'] },
+  { f:'referralSource', label:'Referral source',     where:'Client details · Referral', syn:['referral source','referred by','referrer','source of referral','referral from'] },
+  { f:'referralDate',   label:'Referral date',       where:'Client details · Referral', syn:['referral date','date referred','date of referral'] },
+  { f:'referralReason', label:'Presenting issues / reason for referral', where:'Client details · Referral', syn:['presenting issues','presenting issue','reason for referral','referral reason','presenting concerns','presenting problems','reason'] },
 ];
+// The name, in whatever shape the source has it. Name fields are matched by
+// exact heading only — never by "contains" — so "Client Group" is not a name.
+const IMPORT_NAME_HEADINGS = {
+  fullName:  ['name','full name','client name','client','fullname','client full name','participant','participant name'],
+  firstName: ['first name','given name','given names','firstname','first names','forename'],
+  surname:   ['surname','last name','family name','lastname'],
+  homePhone: ['home phone','landline','home number','home ph','phone home'],
+};
+// Only these distinctive words/phrases may match a heading that merely CONTAINS
+// them (e.g. "Client Medicare No." → Medicare). Everything else must match a
+// heading exactly, so generic words like "client", "source" or "family" inside
+// an unrelated heading are never misread.
+const IMPORT_FUZZY_OK = new Set(['medicare','email','address','mobile','pronouns','interpreter','medications',
+  'housing','employment','kinship','strengths','gender','atsi','aboriginality','crn','diversion','accommodation',
+  'emergency contact','next of kin','presenting issues','reason for referral','referral source','referral date',
+  'short term goal','medium term goal','long term goal','longer term goal','stage of change','primary substance',
+  'court dates','legal representation','health conditions','date of birth','key worker','case manager','ndis number',
+  'preferred name','language group','risk level']);
+const _importNorm = s => String(s||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+function _importFieldFor(heading) {
+  const k = _importNorm(heading);
+  if (!k) return null;
+  for (const [f, list] of Object.entries(IMPORT_NAME_HEADINGS)) if (list.includes(k)) return f;
+  for (const e of IMPORT_CATALOGUE) if (e.syn.includes(k)) return e.f;
+  let best = null, bestLen = 0;
+  for (const e of IMPORT_CATALOGUE) for (const s of e.syn) {
+    if (!IMPORT_FUZZY_OK.has(s) || s.length <= bestLen) continue;
+    if ((' '+k+' ').includes(' '+s+' ')) { best = e.f; bestLen = s.length; }
+  }
+  return best;
+}
+const _importEntry = f => IMPORT_CATALOGUE.find(e=>e.f===f);
+// Paragraph-type fields: keep line breaks, and accept continuation lines.
+const IMPORT_LONG_TEXT = new Set(['referralReason','goals','strengths','ifGoalShort','ifGoalMedium','ifGoalLong',
+  'healthConditions','medications','jusCharges','jusCourts','kinship','children','emergencyContact']);
+
+// Split one CSV/TSV line. RFC 4180: "" inside a quoted field is a literal quote.
+function _importSplit(line, delim) {
+  if (delim === '\t') return line.split('\t').map(c=>c.trim());
+  const cols=[]; let cur='', inQ=false;
+  for (let i=0;i<line.length;i++) {
+    const ch=line[i];
+    if (ch==='"') { if (inQ && line[i+1]==='"') { cur+='"'; i++; } else inQ=!inQ; }
+    else if (ch===delim && !inQ) { cols.push(cur.trim()); cur=''; }
+    else cur+=ch;
+  }
+  cols.push(cur.trim()); return cols;
+}
+
+// Turn pasted text into one record per client. Two shapes are accepted:
+//   • a table — CSV, tab-separated or copied from Excel — with a heading row;
+//   • labelled text — "Name: …", "Presenting issues: …" — as copied from a
+//     referral, intake or email. A new client starts at each Name line; a line
+//     without a recognised label continues the previous field, so a long
+//     paragraph under "Presenting issues:" stays together.
+function parseImportText(raw) {
+  const lines = String(raw||'').replace(/\r\n?/g,'\n').split('\n');
+  const nonEmpty = lines.filter(l=>l.trim());
+  const labelRe = /^\s*([A-Za-z][A-Za-z0-9 \/&().'’\-]{0,48}?)\s*:\s*(.*)$/;
+  const firstDelim = (nonEmpty[0]||'').includes('\t') ? '\t' : ',';
+  const firstCells = nonEmpty.length ? _importSplit(nonEmpty[0], firstDelim) : [];
+  const tableHeads = firstCells.filter(h=>_importFieldFor(h)).length;
+  const labelled = nonEmpty.filter(l=>{ const m=l.match(labelRe); return m && _importFieldFor(m[1]); }).length;
+  const isTable = firstCells.length >= 2 && tableHeads >= 2 && tableHeads >= labelled;
+
+  const records = [], notImported = new Set();
+  const finish = r => {
+    if (!r) return;
+    if (!r.fullName && (r.firstName || r.surname)) r.fullName = [r.firstName, r.surname].filter(Boolean).join(' ');
+    delete r.firstName; delete r.surname;
+    if (Object.keys(r).length) records.push(r);
+  };
+  const put = (r, f, v) => { v = String(v||'').trim(); if (!v) return; r[f] = r[f] ? r[f]+'\n'+v : v; };
+
+  if (isTable) {
+    const heads = firstCells, map = heads.map(_importFieldFor);
+    heads.forEach((h,i)=>{ if (!map[i] && h) notImported.add(h); });
+    nonEmpty.slice(1).forEach(line => {
+      const cells = _importSplit(line, firstDelim);
+      if (cells.every(c=>!c)) return;
+      const r = {};
+      cells.forEach((v,i)=>{ if (map[i] && !r[map[i]] && String(v).trim()) r[map[i]] = String(v).trim(); });
+      finish(r);
+    });
+  } else {
+    let cur = null, last = null;
+    const isName = f => f==='fullName' || f==='firstName' || f==='surname';
+    lines.forEach(line => {
+      if (!line.trim()) return;
+      const m = line.match(labelRe);
+      const f = m ? _importFieldFor(m[1]) : null;
+      if (f) {
+        // A second Name line means the next client has started.
+        if (isName(f) && cur && (cur.fullName || cur[f] || (f==='fullName' && (cur.firstName || cur.surname)))) { finish(cur); cur = null; }
+        cur = cur || {};
+        put(cur, f, m[2]); last = f;
+      } else if (m && m[1].trim().split(/\s+/).length <= 4 && m[2].trim()
+                 && !(cur && IMPORT_LONG_TEXT.has(last) && m[2].trim().split(/\s+/).length >= 4)) {
+        // Short, label-shaped line we don't recognise ("Site: Portland"):
+        // report it, don't guess. But a sentence inside a paragraph that
+        // happens to contain a colon ("Sam reports: difficulty sleeping and…")
+        // is part of that paragraph, and falls through to be kept with it.
+        notImported.add(m[1].trim()); last = null;
+      } else if (cur && last) {
+        put(cur, last, line);            // continuation of a multi-line value
+      }
+    });
+    finish(cur);
+  }
+  records.meta = { format: isTable ? 'table' : 'labelled', notImported: [...notImported] };
+  return records;
+}
+
+function _importDob(v) {
+  const s = String(v||'').trim(); if (!s) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const dmy = s.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$/);
+  if (dmy) { let y=dmy[3]; if (y.length===2) y=(parseInt(y)>30?'19':'20')+y; return `${y}-${dmy[2].padStart(2,'0')}-${dmy[1].padStart(2,'0')}`; }
+  const months={jan:'01',feb:'02',mar:'03',apr:'04',may:'05',jun:'06',jul:'07',aug:'08',sep:'09',oct:'10',nov:'11',dec:'12'};
+  const txt = s.match(/^(\d{1,2})\s+([a-z]+)\s+(\d{4})$/i);
+  if (txt && months[txt[2].toLowerCase().slice(0,3)]) return `${txt[3]}-${months[txt[2].toLowerCase().slice(0,3)]}-${txt[1].padStart(2,'0')}`;
+  return s;
+}
 function _importCmp(field, v) {
   if (field==='phone') return String(v||'').replace(/\D/g,'').replace(/^61/,'0');
   return String(v||'').toLowerCase().replace(/[.,]/g,' ').replace(/\s+/g,' ').trim();
 }
-// Clean one parsed row into the values it would contribute to a client file.
+
+// Clean one record into the values it would put on a client file.
 function _importRowValues(r) {
   const v = {}, warnings = [];
+  const empty = x => !String(x||'').trim() || IMPORT_EMPTY_VALUE.includes(String(x).trim().toLowerCase());
   const np = _importNameParts(r.fullName);
-  if (r.preferredName) v.preferredName = r.preferredName.trim();
+  if (!empty(r.preferredName)) v.preferredName = r.preferredName.trim();
   else if (np.nickname && _importNameParts(np.nickname).core !== np.givenKey) v.preferredName = np.nickname;
-  if (r.dob) v.dob = r.dob;
-  if (r.gender && r.gender !== 'Not disclosed') v.gender = r.gender;
-  if (r.atsi) v.atsi = IMPORT_ATSI_FORM[String(r.atsi).toLowerCase()] || r.atsi;
-  if (r.mob) v.mob = r.mob.trim();
-  const addr = String(r.address||'').replace(/\s+/g,' ').trim();
-  if (addr && !IMPORT_EMPTY_ADDRESS.includes(addr.toLowerCase())) v.address = addr;
-  const mob = _importAuPhone(r.phone), home = _importAuPhone(r.homePhone);
+  const mob = _importAuPhone(empty(r.phone)?'':r.phone), home = _importAuPhone(empty(r.homePhone)?'':r.homePhone);
   if (mob && home && _importCmp('phone',mob)!==_importCmp('phone',home)) v.phone = `${mob} / ${home} (home)`;
   else if (mob || home) v.phone = mob || home;
-  const email = String(r.email||'').trim().toLowerCase();
-  if (email) {
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) warnings.push(`Email "${email}" is not a valid address — not imported`);
-    // A staff mailbox is never the client's own address. Importing it would
-    // route client correspondence to a staff member.
-    else if (/@worngundidj\.org\.au$/.test(email)) warnings.push(`Email ${email} is an organisation address, not the client's — not imported`);
-    else v.email = email;
+  if (!empty(r.email)) {
+    const e = String(r.email).trim().toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) warnings.push(`Email "${e}" is not a valid address — not imported`);
+    // A staff mailbox is never the client's own address.
+    else if (/@worngundidj\.org\.au$/.test(e)) warnings.push(`Email ${e} is an organisation address, not the client's — not imported`);
+    else v.email = e;
   }
-  if (r.medicare) v.medicare = String(r.medicare).trim();
+  if (!empty(r.dob)) {
+    const d = _importDob(r.dob);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(d)) v.dob = d; else warnings.push(`Date of birth "${r.dob}" not understood — not imported`);
+  }
+  if (!empty(r.gender)) {
+    const g = r.gender.trim().toLowerCase();
+    v.gender = g==='m'||g==='male'||g==='man' ? 'Male' : g==='f'||g==='female'||g==='woman' ? 'Female'
+             : /non.?binary|^nb$/.test(g) ? 'Non-binary' : /trans/.test(g) ? 'Transgender' : r.gender.trim();
+  }
+  if (!empty(r.atsi)) {
+    const a = r.atsi.trim().toLowerCase();
+    v.atsi = /both/.test(a) ? IMPORT_ATSI_FORM.both : /torres/.test(a) ? IMPORT_ATSI_FORM['torres strait islander']
+           : /^(no|n|non.?indigenous|neither)$/.test(a) ? 'No' : /abor|^(yes|y)$/.test(a) ? IMPORT_ATSI_FORM.aboriginal
+           : /prefer|declin/.test(a) ? 'Prefer not to say' : r.atsi.trim();
+  }
+  if (!empty(r.riskLevel)) {
+    // Risk is a clinical rating: accept only a recognisable level, never a
+    // word that merely contains one.
+    const k = r.riskLevel.trim().toLowerCase().replace(/[^a-z ]/g,' ').replace(/\brisk\b/g,'').replace(/\s+/g,' ').trim();
+    const lvl = ['high','h','very high','extreme','severe'].includes(k) ? 'high'
+              : ['medium','med','m','moderate','mod'].includes(k) ? 'medium'
+              : ['low','l','minimal','minor'].includes(k) ? 'low' : '';
+    if (lvl) v.riskLevel = lvl; else warnings.push(`Risk "${r.riskLevel}" not understood — not imported`);
+  }
+  if (!empty(r.interpreter)) {
+    const k = r.interpreter.trim().toLowerCase();
+    v.interpreter = /^(y|yes|required|needed|true)/.test(k) ? 'Yes' : /^(n|no|not|false)/.test(k) ? 'No' : r.interpreter.trim();
+  }
+  if (!empty(r.referralDate)) {
+    const d = _importDob(r.referralDate);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(d)) v.referralDate = d; else warnings.push(`Referral date "${r.referralDate}" not understood — not imported`);
+  }
+  const special = new Set(['preferredName','phone','email','dob','gender','atsi','riskLevel','interpreter','referralDate']);
+  IMPORT_CATALOGUE.forEach(({f}) => {
+    if (special.has(f) || empty(r[f])) return;
+    // Single-line fields: collapse spacing. Long text keeps its line breaks.
+    v[f] = IMPORT_LONG_TEXT.has(f) ? String(r[f]).trim() : String(r[f]).replace(/\s+/g,' ').trim();
+  });
   return { values: v, warnings };
 }
 
 // Work out, without changing anything, what an import would do.
-function buildImportUpdatePlan(rows) {
-  const files = (clients||[]).filter(c=>c && c.fullName).map(c=>({ c, n:_importNameParts(c.fullName) }));
-  const groups = new Map(), unmatched = [], ambiguous = [];
+// scope 'open' (default) matches open clients only; 'all' includes closed.
+function buildImportUpdatePlan(rows, scope) {
+  const isClosed = c => (c.status||'active')==='closed';
+  const all = (clients||[]).filter(c=>c && c.fullName).map(c=>({ c, n:_importNameParts(c.fullName) }));
+  const files = scope==='all' ? all : all.filter(x=>!isClosed(x.c));
+  const groups = new Map(), unmatched = [], ambiguous = [], closedOnly = [];
+  const find = (n, list) => {
+    let hits = list.filter(f=>_importSameName(n, f.n)), how = 'name';
+    if (!hits.length) { hits = list.filter(f=>_importPrefName(n, f.n)); how = 'preferred name'; }
+    return { hits, how };
+  };
   rows.forEach((r, i) => {
     const n = _importNameParts(r.fullName);
-    if (!n.core) { unmatched.push({ row:i+1, name:r.fullName||'(blank)' }); return; }
-    let hits = files.filter(f=>_importSameName(n, f.n)), how = 'name';
-    if (!hits.length) { hits = files.filter(f=>_importPrefName(n, f.n)); how = 'preferred name'; }
-    if (!hits.length)   { unmatched.push({ row:i+1, name:r.fullName }); return; }
-    if (hits.length>1)  { ambiguous.push({ row:i+1, name:r.fullName, count:hits.length }); return; }
+    if (!n.core) { unmatched.push({ row:i+1, name:r.fullName||'(no name)' }); return; }
+    const { hits, how } = find(n, files);
+    if (!hits.length) {
+      if (scope!=='all' && find(n, all.filter(x=>isClosed(x.c))).hits.length) closedOnly.push({ row:i+1, name:r.fullName });
+      else unmatched.push({ row:i+1, name:r.fullName });
+      return;
+    }
+    if (hits.length>1) { ambiguous.push({ row:i+1, name:r.fullName, count:hits.length }); return; }
     const c = hits[0].c;
-    const g = groups.get(c.id) || { client:c, rows:[], how:new Set() };
+    const g = groups.get(c.id) || { client:c, rows:[], how:new Set(), closedAlso:0 };
+    // Open-only mode: say so if the person ALSO has a closed file — it's a
+    // likely duplicate worth tidying, and it is not being updated.
+    if (scope!=='all') g.closedAlso = Math.max(g.closedAlso, find(n, all.filter(x=>isClosed(x.c))).hits.length);
     g.rows.push({ row:i+1, name:r.fullName, ...(_importRowValues(r)) });
     g.how.add(how); groups.set(c.id, g);
   });
   const updates = [...groups.values()].map(g => {
     const changes = [], conflicts = [];
-    IMPORT_FIELDS.forEach(([f, label]) => {
-      // One row per person is usual; the export can repeat a person. Values
-      // that agree are merged; values that disagree are NOT guessed between.
+    IMPORT_CATALOGUE.forEach(({ f, label, where }) => {
+      // The same person can appear more than once. Values that agree are
+      // merged; values that disagree are NOT guessed between.
       const distinct = [...new Map(g.rows.map(x=>x.values[f]).filter(Boolean)
                          .map(v=>[_importCmp(f,v), v])).values()];
       if (!distinct.length) return;
-      if (distinct.length > 1) { conflicts.push({ f, label, values:distinct }); return; }
+      if (distinct.length > 1) { conflicts.push({ f, label, where, values:distinct }); return; }
       const to = distinct[0], from = g.client[f] ? String(g.client[f]) : '';
-      if (!from.trim()) changes.push({ f, label, from:'', to, kind:'add' });
-      else if (_importCmp(f,from) !== _importCmp(f,to)) changes.push({ f, label, from, to, kind:'differs' });
+      if (!from.trim()) changes.push({ f, label, where, from:'', to, kind:'add' });
+      else if (_importCmp(f,from) !== _importCmp(f,to)) changes.push({ f, label, where, from, to, kind:'differs' });
     });
-    return { client:g.client, rows:g.rows, how:[...g.how], changes, conflicts,
+    return { client:g.client, rows:g.rows, how:[...g.how], closedAlso:g.closedAlso||0, changes, conflicts,
              warnings:[...new Set(g.rows.flatMap(x=>x.warnings))] };
   });
-  return { total:rows.length, updates, unmatched, ambiguous };
+  return { total:rows.length, updates, unmatched, ambiguous, closedOnly, scope: scope==='all'?'all':'open' };
 }
 
 // Apply a plan to the selected files. Blanks are filled; a value already on
@@ -4850,85 +5067,98 @@ function applyImportUpdatePlan(plan, excluded, overwrite) {
 let _bulkExcluded = new Set();
 function _bulkToggleRow(id, on) { if (on) _bulkExcluded.delete(id); else _bulkExcluded.add(id); bulkImportPreview(); }
 const _canBulkUpdate = () => ['sysmanager','admin','supervisor'].includes(currentUser?.role);
+const _bulkScope = () => document.getElementById('bulk-scope')?.value === 'all' ? 'all' : 'open';
 
 function _bulkUpdatePreviewHTML(rows) {
-  const plan = buildImportUpdatePlan(rows);
+  const scope = _bulkScope();
+  const plan = buildImportUpdatePlan(rows, scope);
   const overwrite = !!document.getElementById('bulk-overwrite')?.checked;
   const willChange = u => u.changes.some(ch => ch.kind==='add' || (overwrite && ch.kind==='differs'));
   const actionable = plan.updates.filter(willChange);
   const selected = actionable.filter(u => !_bulkExcluded.has(u.client.id));
   const isClosed = c => (c.status||'active')==='closed';
   const dupRows = plan.updates.reduce((n,u)=>n+u.rows.length-1, 0);
-  const skipped = (rows.meta?.headers||[]).filter((h,i) => {
-    const f = rows.meta.map[i];
-    return !f || (f!=='fullName' && f!=='homePhone' && !IMPORT_FIELDS.some(([k])=>k===f));
-  });
+  const pool = clients.filter(c=>scope==='all'||!isClosed(c)).length;
   const td = 'padding:6px 8px;border:1px solid var(--border);vertical-align:top';
+  const clip = s => { s = String(s||''); return s.length > 220 ? s.slice(0,220)+'…' : s; };
   const stat = (n,l,col) => `<div style="border:1px solid var(--border);border-radius:8px;padding:8px 12px;min-width:120px"><div style="font-size:18px;font-weight:700;color:${col||'inherit'}">${n}</div><div style="font-size:11px;color:var(--muted)">${l}</div></div>`;
+  const place = ch => `<span style="color:var(--muted);font-size:11px">${sanitize(ch.where)} ›</span> <strong>${sanitize(ch.label)}</strong>`;
   const changeLine = ch => ch.kind==='add'
-    ? `<div><strong>${sanitize(ch.label)}:</strong> <span style="color:#065f46">+ ${sanitize(ch.to)}</span></div>`
-    : `<div><strong>${sanitize(ch.label)}:</strong> <span style="color:#92400e">${sanitize(ch.from)} → ${sanitize(ch.to)}</span> ${overwrite?'':'<em style="color:var(--muted)">(on file already — kept)</em>'}</div>`;
+    ? `<div style="margin-bottom:3px">${place(ch)}: <span style="color:#065f46;white-space:pre-wrap">+ ${sanitize(clip(ch.to))}</span></div>`
+    : `<div style="margin-bottom:3px">${place(ch)}: <span style="color:#92400e;white-space:pre-wrap">${sanitize(clip(ch.from))} → ${sanitize(clip(ch.to))}</span> ${overwrite?'':'<em style="color:var(--muted)">(on file already — kept)</em>'}</div>`;
 
   return `
-  <div style="font-weight:700;font-size:13px;margin-bottom:10px">Matching ${plan.total} row${plan.total!==1?'s':''} against ${clients.length} existing open and closed client files. <span style="color:#065f46">No new client files will be created.</span></div>
+  <div style="font-weight:700;font-size:13px;margin-bottom:10px">
+    Read ${plan.total} client${plan.total!==1?'s':''} from ${rows.meta?.format==='labelled'?'labelled text':'a table'} and matched against ${pool} ${scope==='all'?'open and closed':'open'} client files.
+    <span style="color:#065f46">No new client files will be created.</span></div>
+  <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-bottom:12px;font-size:13px">
+    <label style="display:flex;align-items:center;gap:6px;margin:0">Match against
+      <select id="bulk-scope" onchange="_bulkExcluded=new Set();bulkImportPreview()" style="width:auto">
+        <option value="open" ${scope==='open'?'selected':''}>Open clients only</option>
+        <option value="all" ${scope==='all'?'selected':''}>Open and closed clients</option>
+      </select></label>
+    <label style="display:flex;align-items:center;gap:6px;margin:0"><input type="checkbox" id="bulk-overwrite" ${overwrite?'checked':''} onchange="bulkImportPreview()"> Overwrite details already on file when the paste differs <span style="color:var(--muted)">(off: only blank fields are filled)</span></label>
+  </div>
   <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
     ${stat(selected.length,'client files to update','#065f46')}
-    ${stat(`${selected.filter(u=>!isClosed(u.client)).length} / ${selected.filter(u=>isClosed(u.client)).length}`,'open / closed')}
     ${stat(plan.updates.length-actionable.length,'matched — nothing new')}
-    ${stat(plan.unmatched.length,'rows with no matching file','#92400e')}
-    ${stat(plan.ambiguous.length,'rows matching 2+ files','#991b1b')}
-    ${stat(dupRows,'repeated rows merged')}
+    ${stat(plan.unmatched.length,'no matching file','#92400e')}
+    ${scope==='open'?stat(plan.closedOnly.length,'match a closed file only'):''}
+    ${stat(plan.ambiguous.length,'match 2+ files','#991b1b')}
+    ${dupRows?stat(dupRows,'repeated entries merged'):''}
   </div>
-  ${skipped.length?`<div style="font-size:12px;color:var(--muted);margin-bottom:10px">Columns not imported (not demographic details): ${skipped.map(sanitize).join(', ')}</div>`:''}
-  <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin:0 0 10px"><input type="checkbox" id="bulk-overwrite" ${overwrite?'checked':''} onchange="bulkImportPreview()"> Overwrite details already on file when the import differs <span style="color:var(--muted)">(off: only blank fields are filled)</span></label>
+  ${rows.meta?.notImported?.length?`<div style="font-size:12px;color:var(--muted);margin-bottom:10px">Not imported — not a client-file detail, or not recognised: ${rows.meta.notImported.map(sanitize).join(', ')}</div>`:''}
   <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">
-    <thead><tr style="background:var(--bg-secondary)"><th style="${td}">Update</th><th style="${td}">Import row</th><th style="${td}">Client file</th><th style="${td}">Changes</th></tr></thead>
+    <thead><tr style="background:var(--bg-secondary)"><th style="${td}">Update</th><th style="${td}">From the paste</th><th style="${td}">Client file</th><th style="${td}">What goes where</th></tr></thead>
     <tbody>
     ${plan.updates.map(u => {
       const act = willChange(u);
       return `<tr style="${act?'':'opacity:.55'}">
         <td style="${td};text-align:center">${act?`<input type="checkbox" ${_bulkExcluded.has(u.client.id)?'':'checked'} onchange="_bulkToggleRow('${sanitize(u.client.id)}',this.checked)">`:'—'}</td>
-        <td style="${td}">${u.rows.map(x=>`${sanitize(x.name)} <span style="color:var(--muted)">(row ${x.row})</span>`).join('<br>')}</td>
+        <td style="${td}">${u.rows.map(x=>`${sanitize(x.name)} <span style="color:var(--muted)">(#${x.row})</span>`).join('<br>')}</td>
         <td style="${td}"><strong>${sanitize(u.client.fullName)}</strong> <span class="badge badge-${isClosed(u.client)?'closed':'active'}">${isClosed(u.client)?'CLOSED':'OPEN'}</span>
-          ${u.how.includes('preferred name')?'<div style="color:#92400e;font-size:11px;margin-top:3px">⚠ Matched on preferred name only — check this is the same person</div>':''}</td>
-        <td style="${td}">${u.changes.map(changeLine).join('') || '<span style="color:var(--muted)">Details already match the file</span>'}
-          ${u.conflicts.map(k=>`<div style="color:#991b1b"><strong>${sanitize(k.label)}:</strong> rows disagree (${k.values.map(sanitize).join(' | ')}) — not imported</div>`).join('')}
+          ${u.how.includes('preferred name')?'<div style="color:#92400e;font-size:11px;margin-top:3px">⚠ Matched on preferred name only — check this is the same person</div>':''}
+          ${u.closedAlso?`<div style="color:var(--muted);font-size:11px;margin-top:3px">Also has ${u.closedAlso} closed file${u.closedAlso!==1?'s':''} under this name — not updated</div>`:''}</td>
+        <td style="${td}">${u.changes.map(changeLine).join('') || '<span style="color:var(--muted)">Everything pasted already matches the file</span>'}
+          ${u.conflicts.map(k=>`<div style="color:#991b1b"><strong>${sanitize(k.label)}:</strong> entries disagree (${k.values.map(v=>sanitize(clip(v))).join(' | ')}) — not imported</div>`).join('')}
           ${u.warnings.map(w=>`<div style="color:#991b1b">${sanitize(w)}</div>`).join('')}</td>
       </tr>`;
-    }).join('') || `<tr><td colspan="4" style="${td};color:var(--muted)">No rows matched an existing client file.</td></tr>`}
+    }).join('') || `<tr><td colspan="4" style="${td};color:var(--muted)">Nothing matched an existing ${scope==='all'?'':'open '}client file.</td></tr>`}
     </tbody></table></div>
-  ${(plan.unmatched.length||plan.ambiguous.length)?`<div style="margin-top:12px;font-size:12px">
-    ${plan.ambiguous.length?`<div style="margin-bottom:6px"><strong style="color:#991b1b">Matches more than one file — skipped, fix the duplicate files first:</strong> ${plan.ambiguous.map(a=>`${sanitize(a.name)} (row ${a.row}, ${a.count} files)`).join('; ')}</div>`:''}
-    ${plan.unmatched.length?`<div><strong style="color:#92400e">No matching file — not created:</strong> ${plan.unmatched.map(a=>`${sanitize(a.name)} (row ${a.row})`).join('; ')}</div>`:''}
+  ${(plan.unmatched.length||plan.ambiguous.length||plan.closedOnly.length)?`<div style="margin-top:12px;font-size:12px">
+    ${plan.ambiguous.length?`<div style="margin-bottom:6px"><strong style="color:#991b1b">Matches more than one file — skipped, fix the duplicate files first:</strong> ${plan.ambiguous.map(a=>`${sanitize(a.name)} (#${a.row}, ${a.count} files)`).join('; ')}</div>`:''}
+    ${plan.closedOnly.length?`<div style="margin-bottom:6px"><strong>Matches a closed file only — not updated</strong> <span style="color:var(--muted)">(choose "Open and closed clients" to include)</span>: ${plan.closedOnly.map(a=>`${sanitize(a.name)} (#${a.row})`).join('; ')}</div>`:''}
+    ${plan.unmatched.length?`<div><strong style="color:#92400e">No matching file — not created:</strong> ${plan.unmatched.map(a=>`${sanitize(a.name)} (#${a.row})`).join('; ')}</div>`:''}
   </div>`:''}
   <div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
     ${_canBulkUpdate()
       ? `<button class="btn btn-primary" onclick="bulkImportConfirm()" ${selected.length?'':'disabled'}>✅ Update ${selected.length} client file${selected.length!==1?'s':''}</button>`
-      : `<span style="font-size:12px;color:#991b1b">Only a System Manager, Admin or Supervisor can update client files in bulk.</span>`}
+      : `<span style="font-size:12px;color:#991b1b">Only a System Manager, Admin or Supervisor can update client files from an import.</span>`}
   </div>`;
 }
 
 function _bulkUpdateConfirm(raw) {
-  if (!_canBulkUpdate()) { showToast('Only a System Manager, Admin or Supervisor can update client files in bulk'); return; }
-  // A bulk edit on a device's cached copy would push stale versions of every
+  if (!_canBulkUpdate()) { showToast('Only a System Manager, Admin or Supervisor can update client files from an import'); return; }
+  // An update on a device's cached copy would push stale versions of every
   // matched file back over newer edits made elsewhere.
-  if (!(FSYNC.isReady && FSYNC.isReady())) { showToast('Connect to cloud sync first — bulk updates run on the latest client files'); return; }
-  const rows = _bulkParseRows(raw);
-  const plan = buildImportUpdatePlan(rows);
+  if (!(FSYNC.isReady && FSYNC.isReady())) { showToast('Connect to cloud sync first — imports update the latest client files'); return; }
+  const rows = parseImportText(raw);
+  const scope = _bulkScope();
+  const plan = buildImportUpdatePlan(rows, scope);
   const overwrite = !!document.getElementById('bulk-overwrite')?.checked;
   const before = clients.length;
   const res = applyImportUpdatePlan(plan, _bulkExcluded, overwrite);
-  if (!res.files) { showToast('Nothing to update — selected files already match the import'); return; }
+  if (!res.files) { showToast('Nothing to update — selected files already match what was pasted'); return; }
   saveAll();
   audit('Bulk client file update from import',
-    `${res.files} existing client files updated (${res.fields} fields) from ${plan.total} import rows. ` +
-    `${plan.unmatched.length} rows had no matching file and were NOT created; ${plan.ambiguous.length} matched more than one file and were skipped. ` +
-    `Overwrite existing values: ${overwrite?'yes':'no'}.`);
+    `${res.files} existing ${scope==='all'?'open/closed':'open'} client files updated (${res.fields} fields) from ${plan.total} pasted entries. ` +
+    `${plan.unmatched.length} had no matching file and were NOT created; ${plan.ambiguous.length} matched more than one file and were skipped` +
+    `${scope==='open'?`; ${plan.closedOnly.length} matched a closed file only and were not updated`:''}. Overwrite existing values: ${overwrite?'yes':'no'}.`);
   _bulkExcluded = new Set();
   document.getElementById('bulk-paste').value = '';
   document.getElementById('bulk-preview').innerHTML = `<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:12px;font-size:13px">
-    ✅ Updated <strong>${res.files}</strong> client file${res.files!==1?'s':''} (${res.fields} field${res.fields!==1?'s':''}). No new files were created — client count unchanged at ${clients.length}${clients.length!==before?' (⚠ changed from '+before+')':''}.
-    ${plan.unmatched.length?` ${plan.unmatched.length} row${plan.unmatched.length!==1?'s':''} had no matching file.`:''}</div>`;
+    ✅ Updated <strong>${res.files}</strong> client file${res.files!==1?'s':''} (${res.fields} field${res.fields!==1?'s':''}). Open a client and check the <strong>📄 Summary</strong> tab to see the result. No new files were created — client count unchanged at ${clients.length}${clients.length!==before?' (⚠ changed from '+before+')':''}.
+    ${plan.unmatched.length?` ${plan.unmatched.length} entr${plan.unmatched.length!==1?'ies':'y'} had no matching file.`:''}</div>`;
   showToast(`✅ Updated ${res.files} client file${res.files!==1?'s':''}`);
 }
 
@@ -4938,9 +5168,14 @@ function bulkImportPreview() {
   if(!el) return;
   if(!raw) { el.innerHTML=''; return; }
 
+  if(document.getElementById('bulk-dest')?.value==='update') {
+    const recs = parseImportText(raw);
+    el.innerHTML = recs.length ? _bulkUpdatePreviewHTML(recs)
+      : `<p style="color:var(--muted);font-size:13px">Couldn't find any client details. Paste a table with a heading row (for example <strong>Name, Address, Mobile, Goals</strong>), or labelled lines such as <strong>Name: …</strong> and <strong>Presenting issues: …</strong>.</p>`;
+    return;
+  }
   const rows = _bulkParseRows(raw);
   if(!rows.length) { el.innerHTML='<p style="color:var(--muted);font-size:13px">No data detected. Make sure each client is on a separate line.</p>'; return; }
-  if(document.getElementById('bulk-dest')?.value==='update') { el.innerHTML=_bulkUpdatePreviewHTML(rows); return; }
 
   const already = rows.map(r => clients.find(c=>c.fullName?.toLowerCase()===r.fullName?.toLowerCase()));
 
