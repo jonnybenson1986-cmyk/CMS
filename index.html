@@ -4278,21 +4278,23 @@ function renderReportsPage() {
     </div>
     <div id="bulk-import-body" style="display:none">
       <p style="font-size:13px;color:var(--muted);margin-bottom:14px">
-        Paste a list of client data below — copied from Excel, a spreadsheet, or typed freehand. The system will detect columns automatically and preview records before importing. Each row becomes a client file.
+        Paste a client list below — copied from Excel, a spreadsheet, or a CSV. By default each row is matched by name to an <strong>existing</strong> open or closed client file and that file's demographic details are updated. <strong>No new client files are created</strong> — rows that match no file are listed and left alone. Everything is previewed before anything changes.
       </p>
       <div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:12px;font-size:12px;margin-bottom:14px">
         <strong>Accepted formats:</strong> CSV (comma or tab-separated), Excel copy-paste, or one client per line.<br>
-        <strong>Recognised columns (any order, partial match ok):</strong> name / full name, dob / date of birth, gender, phone, email, address, mob / community, atsi / indigenous, program (sewb/aod/justice/cultural/disability), referral source, key worker.
+        <strong>Recognised columns (any order, partial match ok):</strong> name / full name, dob / date of birth, gender, phone / mobile, home phone, email, address, medicare, mob / community, atsi / indigenous, program (sewb/aod/justice/cultural/disability), referral source, key worker.<br>
+        <strong>Names</strong> match in either order ("Citizen Jordan" = "Jordan Citizen"), and nicknames in quotes are recognised (Taylor "Sam" Samantha).
       </div>
       <div class="form-group">
         <label>Paste data here</label>
         <textarea id="bulk-paste" style="min-height:180px;font-family:monospace;font-size:12px" placeholder="Paste CSV, Excel rows, or free text here…" oninput="bulkImportPreview()"></textarea>
       </div>
       <div class="form-group" style="max-width:420px">
-        <label>Import into</label>
-        <select id="bulk-dest" onchange="bulkImportPreview()">
-          <option value="active">Active clients — current caseload</option>
-          <option value="closed">Closed clients — historical / archived records</option>
+        <label>Import mode</label>
+        <select id="bulk-dest" onchange="_bulkExcluded=new Set();bulkImportPreview()">
+          <option value="update" selected>Update existing client files — match by name (open &amp; closed)</option>
+          <option value="active">Create NEW client files — active caseload</option>
+          <option value="closed">Create NEW client files — closed / archived records</option>
         </select>
       </div>
       <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">
@@ -4561,11 +4563,17 @@ function _bulkParseRows(raw) {
 
   const splitLine = line => {
     if(delim === '\t') return line.split('\t').map(c=>c.trim());
-    // CSV-aware comma split
+    // RFC 4180 comma split. Inside a quoted field, "" is a literal quote — the
+    // client export writes nicknames that way: "Taylor ""Sam"" Samantha" is
+    // Taylor "Sam" Samantha. The old toggle-on-every-quote parser silently
+    // dropped those quotes, losing which part of the name was the nickname.
     const cols=[]; let cur='', inQ=false;
     for(let i=0;i<line.length;i++){
       const ch=line[i];
-      if(ch==='"'){inQ=!inQ;}
+      if(ch==='"'){
+        if(inQ && line[i+1]==='"'){ cur+='"'; i++; }
+        else inQ=!inQ;
+      }
       else if(ch===','&&!inQ){cols.push(cur.trim());cur='';}
       else cur+=ch;
     }
@@ -4574,7 +4582,8 @@ function _bulkParseRows(raw) {
 
   // Try to detect header row
   const KNOWN = ['name','fullname','full name','dob','date of birth','dateofbirth','gender','phone','mobile',
-    'email','address','mob','community','atsi','indigenous','program','referral','source','worker','keyworker'];
+    'email','address','mob','community','atsi','indigenous','program','referral','source','worker','keyworker',
+    'homephone','home phone','medicare'];
   const firstCols = splitLine(lines[0]).map(c=>c.toLowerCase().replace(/[^a-z0-9]/g,''));
   const looksLikeHeader = firstCols.filter(c=>KNOWN.some(k=>k.replace(/[^a-z0-9]/g,'').includes(c)||c.includes(k.replace(/[^a-z0-9]/g,'')))).length >= 2;
 
@@ -4588,7 +4597,9 @@ function _bulkParseRows(raw) {
     if(c.includes('preferred')) return 'preferredName';
     if(c.includes('dob')||c.includes('dateofbirth')||c.includes('birthdate')) return 'dob';
     if(c.includes('gender')) return 'gender';
-    if(c==='phone'||c==='mobile'||c.includes('phonenumber')) return 'phone';
+    if(c.includes('medicare')) return 'medicare';
+    if(c.includes('homephone')||c.includes('landline')) return 'homePhone';
+    if(c==='phone'||c==='mobile'||c.includes('mobilephone')||c.includes('phonenumber')) return 'phone';
     if(c.includes('email')) return 'email';
     if(c.includes('address')) return 'address';
     if(c==='mob'||c.includes('community')||c.includes('country')) return 'mob';
@@ -4648,7 +4659,7 @@ function _bulkParseRows(raw) {
     };
   };
 
-  return dataLines.map(line => {
+  const out = dataLines.map(line => {
     const cols = splitLine(line);
     if(cols.every(c=>!c)) return null;
 
@@ -4681,6 +4692,244 @@ function _bulkParseRows(raw) {
     if(obj.program) { const p=normPrograms(obj.program); Object.assign(obj,{sewb:p.sewb,aod:p.aod,justice:p.justice,cultural:p.cultural,disability:p.disability}); delete obj.program; }
     return obj;
   }).filter(Boolean);
+  // Which source columns were read, and as what — so the update preview can say
+  // plainly which columns were NOT imported.
+  out.meta = { headers: looksLikeHeader ? splitLine(lines[0]) : [], map: headers ? headers.map(colMap) : [] };
+  return out;
+}
+
+// ===== BULK IMPORT — UPDATE EXISTING CLIENT FILES =====
+// Matches each row to an EXISTING open or closed client file by name and fills
+// in demographic details. It NEVER creates a client file: a row that matches no
+// file, or more than one, is listed and left alone.
+
+// Split a name into comparable tokens. Handles "Surname Given", "Given Surname"
+// and the export's nickname form, Surname "Nick" Given. Case, order, extra
+// spaces and the nickname quotes are all ignored for matching.
+function _importNameParts(raw) {
+  const s = String(raw||'').replace(/\s+/g,' ').trim();
+  const tok = str => String(str).toLowerCase().replace(/[^a-z0-9'\-\s\/]/g,' ')
+    .split(/[\s\/]+/).map(t=>t.replace(/^[-']+|[-']+$/g,'')).filter(Boolean);
+  const nickRaw = [];
+  const core = s.replace(/"([^"]*)"/g, (_,n)=>{ if(n.trim()) nickRaw.push(n.trim()); return ' '; });
+  const q = s.indexOf('"');
+  const surname = q > 0 ? tok(s.slice(0,q)) : [];
+  const given   = q > 0 ? tok(s.slice(s.lastIndexOf('"')+1)) : [];
+  const set = a => [...new Set(a)].sort().join(' ');
+  const coreT = tok(core), nickT = nickRaw.flatMap(tok);
+  return {
+    core: set(coreT),
+    full: set([...coreT, ...nickT]),
+    // "Surname + nickname" — only meaningful when the name carries a nickname.
+    pref: nickT.length && surname.length ? set([...surname, ...nickT]) : '',
+    nickname: nickRaw[0] || '',
+    givenKey: set(given),
+  };
+}
+// Same person: identical name tokens once order, case and nickname quotes are
+// set aside. Also covers files created by the old importer, which dropped the
+// quotes ("Taylor Sam Samantha").
+function _importSameName(a, b) {
+  if (!a.core || !b.core) return false;
+  return a.core===b.core || a.core===b.full || a.full===b.core || a.full===b.full;
+}
+// Matched only through the nickname ("Taylor "Sam" Samantha" ↔ "Sam Taylor").
+// Flagged in the preview so it gets a second look.
+function _importPrefName(a, b) {
+  return (a.pref && (a.pref===b.core || a.pref===b.full)) || (b.pref && (b.pref===a.core || b.pref===a.full));
+}
+
+// Australian phone numbers exported through Excel lose their leading 0
+// (0484 660 716 arrives as 484660716). Restore and format; anything that
+// doesn't look like an Australian number is kept exactly as supplied.
+function _importAuPhone(v) {
+  const raw = String(v||'').trim(); if(!raw) return '';
+  let n = raw.replace(/\D/g,'');
+  if (n.length===11 && n.startsWith('61')) n = '0'+n.slice(2);
+  if (n.length===9 && /^[23478]/.test(n)) n = '0'+n;
+  if (n.length===10 && n.startsWith('04')) return `${n.slice(0,4)} ${n.slice(4,7)} ${n.slice(7)}`;
+  if (n.length===10 && /^0[2378]/.test(n)) return `${n.slice(0,2)} ${n.slice(2,6)} ${n.slice(6)}`;
+  return raw;
+}
+const IMPORT_EMPTY_ADDRESS = ['unknown','n/a','na','-','none','nil','tbc'];
+const IMPORT_ATSI_FORM = { 'aboriginal':'Yes — Aboriginal', 'torres strait islander':'Yes — Torres Strait Islander', 'both':'Yes — Both' };
+const IMPORT_FIELDS = [
+  ['preferredName','Preferred name'], ['dob','Date of birth'], ['gender','Gender'],
+  ['atsi','Aboriginal / TSI'], ['mob','Mob / community'], ['address','Address'],
+  ['phone','Phone'], ['email','Email'], ['medicare','Medicare number'],
+];
+function _importCmp(field, v) {
+  if (field==='phone') return String(v||'').replace(/\D/g,'').replace(/^61/,'0');
+  return String(v||'').toLowerCase().replace(/[.,]/g,' ').replace(/\s+/g,' ').trim();
+}
+// Clean one parsed row into the values it would contribute to a client file.
+function _importRowValues(r) {
+  const v = {}, warnings = [];
+  const np = _importNameParts(r.fullName);
+  if (r.preferredName) v.preferredName = r.preferredName.trim();
+  else if (np.nickname && _importNameParts(np.nickname).core !== np.givenKey) v.preferredName = np.nickname;
+  if (r.dob) v.dob = r.dob;
+  if (r.gender && r.gender !== 'Not disclosed') v.gender = r.gender;
+  if (r.atsi) v.atsi = IMPORT_ATSI_FORM[String(r.atsi).toLowerCase()] || r.atsi;
+  if (r.mob) v.mob = r.mob.trim();
+  const addr = String(r.address||'').replace(/\s+/g,' ').trim();
+  if (addr && !IMPORT_EMPTY_ADDRESS.includes(addr.toLowerCase())) v.address = addr;
+  const mob = _importAuPhone(r.phone), home = _importAuPhone(r.homePhone);
+  if (mob && home && _importCmp('phone',mob)!==_importCmp('phone',home)) v.phone = `${mob} / ${home} (home)`;
+  else if (mob || home) v.phone = mob || home;
+  const email = String(r.email||'').trim().toLowerCase();
+  if (email) {
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) warnings.push(`Email "${email}" is not a valid address — not imported`);
+    // A staff mailbox is never the client's own address. Importing it would
+    // route client correspondence to a staff member.
+    else if (/@worngundidj\.org\.au$/.test(email)) warnings.push(`Email ${email} is an organisation address, not the client's — not imported`);
+    else v.email = email;
+  }
+  if (r.medicare) v.medicare = String(r.medicare).trim();
+  return { values: v, warnings };
+}
+
+// Work out, without changing anything, what an import would do.
+function buildImportUpdatePlan(rows) {
+  const files = (clients||[]).filter(c=>c && c.fullName).map(c=>({ c, n:_importNameParts(c.fullName) }));
+  const groups = new Map(), unmatched = [], ambiguous = [];
+  rows.forEach((r, i) => {
+    const n = _importNameParts(r.fullName);
+    if (!n.core) { unmatched.push({ row:i+1, name:r.fullName||'(blank)' }); return; }
+    let hits = files.filter(f=>_importSameName(n, f.n)), how = 'name';
+    if (!hits.length) { hits = files.filter(f=>_importPrefName(n, f.n)); how = 'preferred name'; }
+    if (!hits.length)   { unmatched.push({ row:i+1, name:r.fullName }); return; }
+    if (hits.length>1)  { ambiguous.push({ row:i+1, name:r.fullName, count:hits.length }); return; }
+    const c = hits[0].c;
+    const g = groups.get(c.id) || { client:c, rows:[], how:new Set() };
+    g.rows.push({ row:i+1, name:r.fullName, ...(_importRowValues(r)) });
+    g.how.add(how); groups.set(c.id, g);
+  });
+  const updates = [...groups.values()].map(g => {
+    const changes = [], conflicts = [];
+    IMPORT_FIELDS.forEach(([f, label]) => {
+      // One row per person is usual; the export can repeat a person. Values
+      // that agree are merged; values that disagree are NOT guessed between.
+      const distinct = [...new Map(g.rows.map(x=>x.values[f]).filter(Boolean)
+                         .map(v=>[_importCmp(f,v), v])).values()];
+      if (!distinct.length) return;
+      if (distinct.length > 1) { conflicts.push({ f, label, values:distinct }); return; }
+      const to = distinct[0], from = g.client[f] ? String(g.client[f]) : '';
+      if (!from.trim()) changes.push({ f, label, from:'', to, kind:'add' });
+      else if (_importCmp(f,from) !== _importCmp(f,to)) changes.push({ f, label, from, to, kind:'differs' });
+    });
+    return { client:g.client, rows:g.rows, how:[...g.how], changes, conflicts,
+             warnings:[...new Set(g.rows.flatMap(x=>x.warnings))] };
+  });
+  return { total:rows.length, updates, unmatched, ambiguous };
+}
+
+// Apply a plan to the selected files. Blanks are filled; a value already on
+// file is replaced only when the person importing ticks "overwrite" — and the
+// value it replaces is kept on the record (_importPrevious) so it can be
+// recovered. Every file changed gets its own audit entry.
+function applyImportUpdatePlan(plan, excluded, overwrite) {
+  let files = 0, fields = 0;
+  plan.updates.forEach(u => {
+    if (excluded.has(u.client.id)) return;
+    const todo = u.changes.filter(ch => ch.kind==='add' || (overwrite && ch.kind==='differs'));
+    if (!todo.length) return;
+    todo.forEach(ch => {
+      if (ch.kind==='differs') {
+        u.client._importPrevious = Object.assign({}, u.client._importPrevious, { [ch.f]: ch.from, at: now() });
+      }
+      u.client[ch.f] = ch.to;
+    });
+    audit('Updated client file from import',
+      todo.map(ch => `${ch.label} ${ch.kind==='add'?'added':'replaced'}`).join('; '), u.client.id);
+    files++; fields += todo.length;
+  });
+  return { files, fields };
+}
+
+let _bulkExcluded = new Set();
+function _bulkToggleRow(id, on) { if (on) _bulkExcluded.delete(id); else _bulkExcluded.add(id); bulkImportPreview(); }
+const _canBulkUpdate = () => ['sysmanager','admin','supervisor'].includes(currentUser?.role);
+
+function _bulkUpdatePreviewHTML(rows) {
+  const plan = buildImportUpdatePlan(rows);
+  const overwrite = !!document.getElementById('bulk-overwrite')?.checked;
+  const willChange = u => u.changes.some(ch => ch.kind==='add' || (overwrite && ch.kind==='differs'));
+  const actionable = plan.updates.filter(willChange);
+  const selected = actionable.filter(u => !_bulkExcluded.has(u.client.id));
+  const isClosed = c => (c.status||'active')==='closed';
+  const dupRows = plan.updates.reduce((n,u)=>n+u.rows.length-1, 0);
+  const skipped = (rows.meta?.headers||[]).filter((h,i) => {
+    const f = rows.meta.map[i];
+    return !f || (f!=='fullName' && f!=='homePhone' && !IMPORT_FIELDS.some(([k])=>k===f));
+  });
+  const td = 'padding:6px 8px;border:1px solid var(--border);vertical-align:top';
+  const stat = (n,l,col) => `<div style="border:1px solid var(--border);border-radius:8px;padding:8px 12px;min-width:120px"><div style="font-size:18px;font-weight:700;color:${col||'inherit'}">${n}</div><div style="font-size:11px;color:var(--muted)">${l}</div></div>`;
+  const changeLine = ch => ch.kind==='add'
+    ? `<div><strong>${sanitize(ch.label)}:</strong> <span style="color:#065f46">+ ${sanitize(ch.to)}</span></div>`
+    : `<div><strong>${sanitize(ch.label)}:</strong> <span style="color:#92400e">${sanitize(ch.from)} → ${sanitize(ch.to)}</span> ${overwrite?'':'<em style="color:var(--muted)">(on file already — kept)</em>'}</div>`;
+
+  return `
+  <div style="font-weight:700;font-size:13px;margin-bottom:10px">Matching ${plan.total} row${plan.total!==1?'s':''} against ${clients.length} existing open and closed client files. <span style="color:#065f46">No new client files will be created.</span></div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+    ${stat(selected.length,'client files to update','#065f46')}
+    ${stat(`${selected.filter(u=>!isClosed(u.client)).length} / ${selected.filter(u=>isClosed(u.client)).length}`,'open / closed')}
+    ${stat(plan.updates.length-actionable.length,'matched — nothing new')}
+    ${stat(plan.unmatched.length,'rows with no matching file','#92400e')}
+    ${stat(plan.ambiguous.length,'rows matching 2+ files','#991b1b')}
+    ${stat(dupRows,'repeated rows merged')}
+  </div>
+  ${skipped.length?`<div style="font-size:12px;color:var(--muted);margin-bottom:10px">Columns not imported (not demographic details): ${skipped.map(sanitize).join(', ')}</div>`:''}
+  <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin:0 0 10px"><input type="checkbox" id="bulk-overwrite" ${overwrite?'checked':''} onchange="bulkImportPreview()"> Overwrite details already on file when the import differs <span style="color:var(--muted)">(off: only blank fields are filled)</span></label>
+  <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">
+    <thead><tr style="background:var(--bg-secondary)"><th style="${td}">Update</th><th style="${td}">Import row</th><th style="${td}">Client file</th><th style="${td}">Changes</th></tr></thead>
+    <tbody>
+    ${plan.updates.map(u => {
+      const act = willChange(u);
+      return `<tr style="${act?'':'opacity:.55'}">
+        <td style="${td};text-align:center">${act?`<input type="checkbox" ${_bulkExcluded.has(u.client.id)?'':'checked'} onchange="_bulkToggleRow('${sanitize(u.client.id)}',this.checked)">`:'—'}</td>
+        <td style="${td}">${u.rows.map(x=>`${sanitize(x.name)} <span style="color:var(--muted)">(row ${x.row})</span>`).join('<br>')}</td>
+        <td style="${td}"><strong>${sanitize(u.client.fullName)}</strong> <span class="badge badge-${isClosed(u.client)?'closed':'active'}">${isClosed(u.client)?'CLOSED':'OPEN'}</span>
+          ${u.how.includes('preferred name')?'<div style="color:#92400e;font-size:11px;margin-top:3px">⚠ Matched on preferred name only — check this is the same person</div>':''}</td>
+        <td style="${td}">${u.changes.map(changeLine).join('') || '<span style="color:var(--muted)">Details already match the file</span>'}
+          ${u.conflicts.map(k=>`<div style="color:#991b1b"><strong>${sanitize(k.label)}:</strong> rows disagree (${k.values.map(sanitize).join(' | ')}) — not imported</div>`).join('')}
+          ${u.warnings.map(w=>`<div style="color:#991b1b">${sanitize(w)}</div>`).join('')}</td>
+      </tr>`;
+    }).join('') || `<tr><td colspan="4" style="${td};color:var(--muted)">No rows matched an existing client file.</td></tr>`}
+    </tbody></table></div>
+  ${(plan.unmatched.length||plan.ambiguous.length)?`<div style="margin-top:12px;font-size:12px">
+    ${plan.ambiguous.length?`<div style="margin-bottom:6px"><strong style="color:#991b1b">Matches more than one file — skipped, fix the duplicate files first:</strong> ${plan.ambiguous.map(a=>`${sanitize(a.name)} (row ${a.row}, ${a.count} files)`).join('; ')}</div>`:''}
+    ${plan.unmatched.length?`<div><strong style="color:#92400e">No matching file — not created:</strong> ${plan.unmatched.map(a=>`${sanitize(a.name)} (row ${a.row})`).join('; ')}</div>`:''}
+  </div>`:''}
+  <div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+    ${_canBulkUpdate()
+      ? `<button class="btn btn-primary" onclick="bulkImportConfirm()" ${selected.length?'':'disabled'}>✅ Update ${selected.length} client file${selected.length!==1?'s':''}</button>`
+      : `<span style="font-size:12px;color:#991b1b">Only a System Manager, Admin or Supervisor can update client files in bulk.</span>`}
+  </div>`;
+}
+
+function _bulkUpdateConfirm(raw) {
+  if (!_canBulkUpdate()) { showToast('Only a System Manager, Admin or Supervisor can update client files in bulk'); return; }
+  // A bulk edit on a device's cached copy would push stale versions of every
+  // matched file back over newer edits made elsewhere.
+  if (!(FSYNC.isReady && FSYNC.isReady())) { showToast('Connect to cloud sync first — bulk updates run on the latest client files'); return; }
+  const rows = _bulkParseRows(raw);
+  const plan = buildImportUpdatePlan(rows);
+  const overwrite = !!document.getElementById('bulk-overwrite')?.checked;
+  const before = clients.length;
+  const res = applyImportUpdatePlan(plan, _bulkExcluded, overwrite);
+  if (!res.files) { showToast('Nothing to update — selected files already match the import'); return; }
+  saveAll();
+  audit('Bulk client file update from import',
+    `${res.files} existing client files updated (${res.fields} fields) from ${plan.total} import rows. ` +
+    `${plan.unmatched.length} rows had no matching file and were NOT created; ${plan.ambiguous.length} matched more than one file and were skipped. ` +
+    `Overwrite existing values: ${overwrite?'yes':'no'}.`);
+  _bulkExcluded = new Set();
+  document.getElementById('bulk-paste').value = '';
+  document.getElementById('bulk-preview').innerHTML = `<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:12px;font-size:13px">
+    ✅ Updated <strong>${res.files}</strong> client file${res.files!==1?'s':''} (${res.fields} field${res.fields!==1?'s':''}). No new files were created — client count unchanged at ${clients.length}${clients.length!==before?' (⚠ changed from '+before+')':''}.
+    ${plan.unmatched.length?` ${plan.unmatched.length} row${plan.unmatched.length!==1?'s':''} had no matching file.`:''}</div>`;
+  showToast(`✅ Updated ${res.files} client file${res.files!==1?'s':''}`);
 }
 
 function bulkImportPreview() {
@@ -4691,6 +4940,7 @@ function bulkImportPreview() {
 
   const rows = _bulkParseRows(raw);
   if(!rows.length) { el.innerHTML='<p style="color:var(--muted);font-size:13px">No data detected. Make sure each client is on a separate line.</p>'; return; }
+  if(document.getElementById('bulk-dest')?.value==='update') { el.innerHTML=_bulkUpdatePreviewHTML(rows); return; }
 
   const already = rows.map(r => clients.find(c=>c.fullName?.toLowerCase()===r.fullName?.toLowerCase()));
 
@@ -4742,6 +4992,7 @@ function bulkImportPreview() {
 function bulkImportConfirm() {
   const raw = document.getElementById('bulk-paste')?.value?.trim();
   if(!raw) return;
+  if(document.getElementById('bulk-dest')?.value==='update') return _bulkUpdateConfirm(raw);
   const rows = _bulkParseRows(raw);
   const dest = document.getElementById('bulk-dest')?.value || 'active';
   let added = 0, skipped = 0;
