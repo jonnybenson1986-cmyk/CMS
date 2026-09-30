@@ -142,6 +142,10 @@ contacts, and AOD and Justice keep their own funding reports.
   other aggregate reports. Program reports may show note *counts*, but never
   note text, follow-ups or time-log descriptions. Any new aggregate report must
   follow this — `programReportNotesPointer()` is the standard replacement.
+- Unsaved note drafts (autosaved while a session note is being written) stay
+  on the device, per worker and per client, and are never uploaded. They
+  survive the 15-minute inactivity sign-out, are deleted by a deliberate Sign
+  Out (after a warning), and expire after 7 days. Attachments are not kept.
 - Never paste real client data into commits, issues, pull requests or logs.
 - The audit log is append-only. It cannot be edited or deleted by anyone,
   including a System Manager — "Clear audit log" only clears the local view.

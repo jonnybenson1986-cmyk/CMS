@@ -7621,6 +7621,141 @@ function searchSessions(q) {
 // ============================================================
 // UNIFIED SESSION MODAL (replaces separate Note + Time modals)
 // ============================================================
+// ===== NOTE DRAFT AUTOSAVE =====
+// A session note typed into the Log Session form (also used for Add Note and
+// Log Time) used to vanish if the form was closed without saving: ✕, Cancel,
+// a click outside the form, Esc, the 15-minute inactivity sign-out, or a
+// browser refresh/close. The form now autosaves a draft as you type.
+//
+//   • Stored on THIS device only, per signed-in worker and per client. Drafts
+//     are not uploaded — nothing reaches the client file until Save.
+//   • Reopening the form for that client restores the draft, with a banner and
+//     a Discard button. Saving the note deletes the draft.
+//   • Kept through the inactivity sign-out (the case most worth protecting)
+//     and shown again when that worker next signs in on this device.
+//   • A deliberate Sign Out asks first, then deletes them — drafts are client
+//     information and must not linger on a shared computer.
+//   • Drafts expire after 7 days. Attachments are not kept in drafts.
+const DRAFT_TTL_MS = 7 * 24 * 3600 * 1000;
+const SESSION_DRAFT_FIELDS = ['sm-type','sm-contact','sm-location','sm-date','sm-duration','sm-worker',
+  'sm-text','sm-followup','sm-followupDate','sm-ndis-item','sm-ndis-qty','sm-ndis-cat','sm-addtocal'];
+function _draftUser() { return String(currentUser?.email || currentUser?.id || currentUser?.name || '').toLowerCase(); }
+function _draftStore() { const s = DB.load('noteDrafts', {}); return (s && typeof s === 'object') ? s : {}; }
+function _draftsMine() {
+  const u = _draftUser(); if (!u) return {};
+  const all = _draftStore(), mine = all[u] || {}, t = Date.now();
+  let changed = false;
+  Object.keys(mine).forEach(k => { if (!mine[k] || t - (mine[k].savedAt||0) > DRAFT_TTL_MS) { delete mine[k]; changed = true; } });
+  if (changed) _draftsWriteMine(mine);
+  return mine;
+}
+function _draftsWriteMine(mine) {
+  const u = _draftUser(); if (!u) return;
+  const all = _draftStore(), t = Date.now();
+  // Housekeeping for every worker on this device: drop anything expired.
+  Object.keys(all).forEach(w => { Object.keys(all[w]||{}).forEach(k => { if (t - (all[w][k]?.savedAt||0) > DRAFT_TTL_MS) delete all[w][k]; });
+                                  if (!Object.keys(all[w]||{}).length) delete all[w]; });
+  if (Object.keys(mine).length) all[u] = mine; else delete all[u];
+  DB.save('noteDrafts', all);
+}
+function _draftDelete(key) { const m = _draftsMine(); if (m[key]) { delete m[key]; _draftsWriteMine(m); } }
+function _draftCount() { return Object.keys(_draftsMine()).length; }
+function _draftClientName(id) { return clients.find(c=>c.id===id)?.fullName || 'a client'; }
+function _draftTime(ts) { return new Date(ts).toLocaleString('en-AU',{hour:'numeric',minute:'2-digit',day:'numeric',month:'short'}); }
+function discardSessionDraft() {
+  const mc = document.getElementById('modal-container');
+  if (!confirm('Discard this draft note? The text you typed will be deleted.')) return;
+  mc._draft && mc._draft.discard();
+}
+
+// Wire autosave + restore into the open Log Session form.
+function _attachSessionDraft(requestedClientId) {
+  const mc = document.getElementById('modal-container');
+  const sel = document.getElementById('sm-client');
+  if (!sel || !_draftUser()) return;
+  const $ = id => document.getElementById(id);
+  const mine = _draftsMine();
+  // Opened without a client (e.g. from the dashboard): offer the most recent draft.
+  if (!requestedClientId) {
+    const latest = Object.entries(mine).filter(([k])=>k.startsWith('session:'))
+      .sort((a,b)=>(b[1].savedAt||0)-(a[1].savedAt||0))[0];
+    if (latest && clients.some(c=>c.id===latest[1].clientId)) sel.value = latest[1].clientId;
+  }
+  const state = { key: 'session:' + sel.value, done: false, timer: null, interval: null, last: '' };
+  const hasContent = () => !!(($('sm-text')?.value||'').trim() || ($('sm-followup')?.value||'').trim());
+  const snapshot = () => {
+    const f = {};
+    SESSION_DRAFT_FIELDS.forEach(id => { const el = $(id); if (!el || el.readOnly) return; f[id] = el.type==='checkbox' ? el.checked : el.value; });
+    return f;
+  };
+  const indicator = msg => { const el = $('sm-draft-status'); if (el) el.textContent = msg; };
+  const save = () => {
+    if (state.done || !$('sm-text')) return false;
+    if (!hasContent()) { _draftDelete(state.key); indicator(''); state.last=''; return false; }
+    const fields = snapshot(), sig = JSON.stringify(fields);
+    if (sig === state.last) return true;
+    const m = _draftsMine();
+    m[state.key] = { clientId: sel.value, fields, savedAt: Date.now() };
+    _draftsWriteMine(m); state.last = sig;
+    indicator('💾 Draft autosaved ' + new Date().toLocaleTimeString('en-AU',{hour:'numeric',minute:'2-digit',second:'2-digit'}));
+    return true;
+  };
+  const stop = () => { state.done = true; clearTimeout(state.timer); clearInterval(state.interval); };
+
+  // Banner area at the top of the form.
+  const body = mc.querySelector('.modal-body');
+  const banner = document.createElement('div');
+  banner.id = 'sm-draft-banner';
+  body.insertBefore(banner, body.firstChild);
+  const renderBanner = restored => {
+    const others = Object.entries(_draftsMine()).filter(([k,d])=>k.startsWith('session:') && k!==state.key && clients.some(c=>c.id===d.clientId));
+    banner.innerHTML = `
+      ${restored?`<div style="background:#fef9c3;border:1px solid #fde047;border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:13px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <span>✏️ <strong>Unsaved draft restored</strong> — last saved ${sanitize(_draftTime(restored.savedAt))}. Check the details, then Save. Attachments aren't kept in drafts.</span>
+        <button type="button" class="btn btn-sm btn-outline" onclick="discardSessionDraft()">Discard draft</button></div>`:''}
+      ${others.length?`<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:12px">
+        You also have unsaved note draft${others.length!==1?'s':''} for: ${others.map(([k,d])=>`<a href="#" onclick="event.preventDefault();closeModal();openSessionModal('${sanitize(d.clientId)}')">${sanitize(_draftClientName(d.clientId))}</a> <span style="color:var(--muted)">(${sanitize(_draftTime(d.savedAt))})</span>`).join(', ')}</div>`:''}
+      <div id="sm-draft-status" style="font-size:11px;color:#065f46;min-height:14px;margin-bottom:6px"></div>`;
+  };
+
+  // Restore.
+  const d = mine[state.key];
+  if (d && d.fields) {
+    Object.entries(d.fields).forEach(([id,v]) => { const el = $(id); if (!el || el.readOnly) return;
+      if (el.type==='checkbox') el.checked = !!v; else el.value = v; });
+    try { smToggleNDIS(); } catch(e) {}
+    try { if ($('sm-ndis-item')?.value) smNdisPreview(); } catch(e) {}
+    state.last = JSON.stringify(snapshot());
+  }
+  renderBanner(d && d.fields ? d : null);
+  if (d && d.fields) indicator('💾 Draft autosaved ' + _draftTime(d.savedAt));
+
+  // Autosave: shortly after typing stops, and every 5 seconds as a backstop
+  // (voice input fills the text box without a keystroke).
+  const kick = () => { clearTimeout(state.timer); state.timer = setTimeout(save, 600); };
+  body.addEventListener('input', kick);
+  body.addEventListener('change', kick);
+  state.interval = setInterval(() => { if (!$('sm-text')) { stop(); return; } save(); }, 5000);
+  // Changing the client moves the draft with the note.
+  sel.addEventListener('change', () => { const old = state.key; state.key = 'session:' + sel.value;
+    if (old !== state.key) { _draftDelete(old); state.last=''; save(); renderBanner(null); } });
+
+  mc._draft = {
+    // Form closing without saving: write the draft now and say so.
+    flush: () => { if (state.done) return; clearTimeout(state.timer); const kept = save(); stop();
+                   if (kept) showToast('📝 Draft kept — reopen Log Session for ' + _draftClientName(sel.value) + ' to carry on'); },
+    // Note saved: the draft is no longer needed.
+    saved: () => { stop(); _draftDelete(state.key); },
+    discard: () => { stop(); _draftDelete(state.key); closeModal(); showToast('Draft discarded'); },
+  };
+}
+window.addEventListener('beforeunload', () => { try { document.getElementById('modal-container')?._draft?.flush(); } catch(e) {} });
+function _draftLoginNotice() {
+  const n = _draftCount(); if (!n) return;
+  const names = Object.values(_draftsMine()).map(d=>_draftClientName(d.clientId));
+  showToast(`📝 You have ${n} unsaved note draft${n!==1?'s':''} (${names.slice(0,3).join(', ')}${n>3?'…':''}) — open Log Session for that client to carry on`);
+}
+
 function openSessionModal(clientId, defaultType) {
   const clientOpts = clients.map(c=>`<option value="${sanitize(c.id)}" ${c.id===clientId?'selected':''}>${sanitize(c.fullName)}</option>`).join('');
   const ndisOpts = NDIS_CATALOGUE.map(i=>`<option value="${i.c} — ${(i.n||'').replace(/"/g,'')} (${i.u}) — ${ndisMoney(i.p)}">`).join('');
@@ -7808,8 +7943,11 @@ function openSessionModal(clientId, defaultType) {
     audit('Logged session', `${(n.type||'general').toUpperCase()} — ${n.contactType||''} ${mins>0?'('+mins+' min)':''}`, clientId);
     saveAll(); showToast(`Session logged${mins>0?' + '+mins+' min time':''}${attachMsg}${billedMsg}`);
     if(_billedClaim) ndisGenerateInvoice(_billedClaim.clientId, _billedClaim.claim);
+    // Saved for real — the draft has done its job.
+    document.getElementById('modal-container')._draft?.saved();
     return true;
   }, '720px');
+  _attachSessionDraft(clientId);
 }
 
 // ----- Session attachments (drag & drop, all programs) -----
@@ -11300,10 +11438,17 @@ function showModal(title, html, onSave, maxWidth='720px', noSave=false) {
     </div>
   </div>`;
   mc._onSave = onSave;
+  mc._draft = null;
 }
 
 function closeModalOnOverlay(e) { if(e.target.classList.contains('modal-overlay')) closeModal(); }
-function closeModal() { document.getElementById('modal-container').innerHTML = ''; if(currentPage) showPage(currentPage); }
+function closeModal() {
+  const mc = document.getElementById('modal-container');
+  // ✕, Cancel, click outside, Esc: keep any unsaved note as a draft.
+  try { mc._draft && mc._draft.flush(); } catch(e) {}
+  mc._draft = null;
+  mc.innerHTML = ''; if(currentPage) showPage(currentPage);
+}
 function handleModalSave() {
   const mc = document.getElementById('modal-container');
   if(mc._onSave) { const ok = mc._onSave(); if(ok !== false) closeModal(); }
@@ -12093,7 +12238,21 @@ async function submitMFACode() {
 function createFirstUser() {} // legacy — no longer used
 function autoSetRole() {}     // legacy — no longer used
 
-async function logout() {
+async function logout(reason) {
+  // Any note form still open: save it as a draft, then close it. Previously
+  // the form stayed on screen over the sign-in page after an inactivity
+  // sign-out, client details and all.
+  const mc = document.getElementById('modal-container');
+  try { mc && mc._draft && mc._draft.flush(); } catch(e) {}
+  if (mc) { mc._draft = null; mc.innerHTML = ''; }
+  // Unsaved note drafts: kept through an inactivity sign-out (so the note
+  // isn't lost), but a deliberate Sign Out removes them from this device —
+  // after asking, because they are client information.
+  if (reason !== 'idle' && _draftCount()) {
+    const n = _draftCount();
+    if (!confirm(`You have ${n} unsaved note draft${n!==1?'s':''} on this device.\n\nSigning out deletes ${n!==1?'them':'it'} — draft${n!==1?'s are':' is'} never uploaded. Cancel to go back and save ${n!==1?'them':'it'} first.`)) return;
+    _draftsWriteMine({});
+  }
   saveCurrentUser(null);
   DB.save('currentUser', null);
   // Sign out of Firebase so the auth token is cleared and the login screen
@@ -12799,6 +12958,8 @@ function initApp() {
   // manager also seeds/refreshes the shared staff directory so roles are not
   // stranded on one browser (this is what publishes it the very first time).
   FSYNC.init().then(()=>{ if(FSYNC.isReady()){ _chatListenConvs(); FSYNC.pushStaff?.(); } });
+  // Unsaved note drafts from last time (e.g. an inactivity sign-out): say so.
+  setTimeout(() => { try { _draftLoginNotice(); } catch(e) {} }, 1500);
   showPage('dashboard');
   setTimeout(_observeVoice, 500);
   applySidebarBg();
@@ -13110,7 +13271,7 @@ function sanitize(str) {
     if (!currentUser) return;
     _idleTimer = setTimeout(() => {
       showToast('Session expired due to inactivity. Please sign in again.', 'warning');
-      setTimeout(logout, 1500);
+      setTimeout(() => logout('idle'), 1500);
     }, IDLE_MS);
   }
   ['mousemove','keydown','pointerdown','touchstart','scroll'].forEach(ev =>
