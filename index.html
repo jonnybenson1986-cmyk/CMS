@@ -108,6 +108,14 @@
   .btn { padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; border: none; transition: all 0.15s; display: inline-flex; align-items: center; gap: 6px; }
   .btn-primary { background: var(--primary-light); color: #fff; }
   .btn-primary:hover { background: var(--primary); }
+  /* Save bar for long forms: pinned to the bottom of the screen while the form
+     scrolls, and sitting at the end of the form once you reach it — so Save is
+     always one click away instead of a scroll back to the top. */
+  .save-bar { position: sticky; bottom: 0; z-index: 20; display: flex; justify-content: flex-end; align-items: center;
+    gap: 12px; flex-wrap: wrap; margin-top: 18px; padding: 10px 14px; background: rgba(255,255,255,0.97);
+    border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 -4px 14px rgba(0,0,0,0.08); }
+  .save-bar .save-bar-note { font-size: 12px; color: var(--muted); margin-right: auto; }
+  @media print { .save-bar { display: none !important; } }
   .btn-accent { background: var(--accent); color: #fff; }
   .btn-accent:hover { background: var(--accent2); }
   .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text); }
@@ -296,6 +304,7 @@
     #topbar .actions .btn span { display: none; }
 
     /* Bottom navigation bar */
+    .save-bar { bottom: calc(66px + env(safe-area-inset-bottom)); }
     #mob-bottomnav {
       display: flex; position: fixed; bottom: 0; left: 0; right: 0; height: 60px;
       background: var(--primary); z-index: 97;
@@ -1011,7 +1020,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v68';
+const APP_VERSION = 'v69';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -1450,7 +1459,37 @@ function switchProfileTab(tab, id, el) {
   }
 }
 
+// Long client-file forms get a save bar at the bottom (see .save-bar). One map,
+// so each tab's bar runs exactly the action its own Save button runs.
+const TAB_SAVE_BAR = {
+  intake:          { label:'Save Intake',            fn:'saveIntake' },
+  sewb:            { label:'Save SEWB',              fn:'saveSEWBGoals', note:'Domain ratings save as you tap them.' },
+  aod:             { label:'Save AOD',               fn:'saveAOD' },
+  justice:         { label:'Save Justice',           fn:'saveJustice' },
+  cultural:        { label:'Save Cultural',          fn:'saveCultural' },
+  disability:      { label:'Save Disability & NDIS', fn:'saveDisabilityTab' },
+  workfoundations: { label:'Save Work Foundations',  fn:'saveWF' },
+  safety:          { label:'Save Safety Plan',       fn:'saveSafety' },
+  feedback:        { label:'Save & Record',          fn:'saveFeedback' },
+};
+function formSaveBar(label, onclick, note) {
+  return `<div class="save-bar no-print"><span class="save-bar-note">${sanitize(note||'')}</span><button class="btn btn-primary" onclick="${onclick}">💾 ${sanitize(label)}</button></div>`;
+}
+// The Disability tab has two save actions — the form, and the NDIS budget
+// section. The bar saves both, so editing the budget and pressing the bottom
+// Save can't lose it. Order matters: saveNDISBudget redraws the tab, so the
+// form is read first. And the budget is only saved when its fields are on
+// screen — saveNDISBudget would otherwise record the budget as $0.
+function saveDisabilityTab(id) {
+  saveDisability(id);
+  if (document.getElementById('ndis-budget-core')) saveNDISBudget(id);
+}
 function renderProfileTab(tab, c, clientNotes, clientTime) {
+  const html = _renderProfileTabBody(tab, c, clientNotes, clientTime);
+  const bar = TAB_SAVE_BAR[tab];
+  return bar ? html + formSaveBar(bar.label, `${bar.fn}('${sanitize(c.id)}')`, bar.note) : html;
+}
+function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
   if(tab === 'overview') {
     const totalMins = clientTime.reduce((a,t)=>a+(t.minutes||0),0);
     const recent = clientNotes.slice(0,3);
@@ -12523,7 +12562,7 @@ function openAODForm(type){
       '#aodform-root table input[type=radio]{width:auto !important;margin:0 !important}'+
     '</style>'+
     '<div id="aodform-root">'+builder()+'</div>'+
-    '<div class="no-print" style="margin:16px 0"><button class="btn btn-primary" onclick="saveAODForm()">💾 Save Form</button></div>';
+    formSaveBar('Save Form', 'saveAODForm()', 'Scores update as you go — Save stores the form on the client\'s record.');
   _aodPopulate(saved ? saved.data : _aodPrefill(c));
   _aodUpdateScores();
   document.getElementById('content').addEventListener('change', _aodUpdateScores);
