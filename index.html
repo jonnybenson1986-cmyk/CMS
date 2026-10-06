@@ -657,7 +657,7 @@ const FSYNC = (() => {
     ]);
     try { const ps = await col('policies').doc('list').get(); const pl = ps.exists ? ps.data().list : null; if(pl){ policies = pl; DB.save('policies', policies); } } catch(e){}
     // Staff roles must be known BEFORE the profile is resolved at login.
-    try { const st = await col('staff').doc('list').get(); const sl = st.exists ? st.data().list : null; if(Array.isArray(sl) && sl.length) _mergeStaffDirectory(sl); } catch(e){}
+    try { const st = await col('staff').doc('list').get(); _noteStaffSync(true); const sl = st.exists ? st.data().list : null; if(Array.isArray(sl) && sl.length) _mergeStaffDirectory(sl); } catch(e){ _noteStaffSync(false,e); }
     // QA C4/H5 — pull the stores that used to be device-local only.
     try { const f = await col('fpho').doc('list').get(); if(f.exists){ const d=f.data();
       if(Array.isArray(d.clients)){ fphoClients=d.clients; DB.save('fphoClients',fphoClients); }
@@ -705,7 +705,7 @@ const FSYNC = (() => {
     _listeners.push(col('notes').onSnapshot(snap=>{ if(!trust(snap))return; notes=_live(snap.docs.map(d=>d.data()));DB.save('notes',notes); }, e=>console.warn('notes listener:',e.message)));
     _listeners.push(col('timelogs').onSnapshot(snap=>{ if(!trust(snap))return; timeLogs=_live(snap.docs.map(d=>d.data()));DB.save('timelogs',timeLogs); }, e=>console.warn('timelogs listener:',e.message)));
     _listeners.push(col('referrals').onSnapshot(snap=>{ if(!trust(snap))return; referrals=_live(snap.docs.map(d=>d.data()));DB.save('referrals',referrals); if(currentPage==='referrals')setTimeout(()=>showPage('referrals'),50); }, e=>console.warn('referrals listener:',e.message)));
-    _listeners.push(col('staff').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; const l=doc.exists?doc.data().list:null; if(Array.isArray(l)&&l.length){ _mergeStaffDirectory(l); if(currentPage==='settings')setTimeout(()=>showPage('settings'),50); } }, e=>console.warn('staff listener:',e.message)));
+    _listeners.push(col('staff').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; const l=doc.exists?doc.data().list:null; if(Array.isArray(l)&&l.length){ _mergeStaffDirectory(l); if(currentPage==='settings')setTimeout(()=>showPage('settings'),50); } }, e=>{ console.warn('staff listener:',e.message); _noteStaffSync(false,e); }));
     _listeners.push(col('policies').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; const pl=doc.exists?doc.data().list:null; if(pl){ policies=pl; DB.save('policies',policies); if(currentPage==='policies')setTimeout(()=>showPage('policies'),50); } }, e=>console.warn('policies listener:',e.message)));
     _listeners.push(col('walkins').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; const l=doc.exists?doc.data().list:null; if(l){ walkins=l; DB.save('walkins',walkins); if(currentPage==='walkins')setTimeout(()=>showPage('walkins'),50); } }, e=>console.warn('walkins listener:',e.message)));
     _listeners.push(col('calevents').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; const l=doc.exists?doc.data().list:null; if(l){ calEvents=l; DB.save('calevents',calEvents); if(currentPage==='calendar')setTimeout(()=>showPage('calendar'),50); } }, e=>console.warn('calevents listener:',e.message)));
@@ -814,11 +814,21 @@ const FSYNC = (() => {
     if(!db) return false;
     try {
       const st = await col('staff').doc('list').get();
+      _noteStaffSync(true);
       const sl = st.exists ? st.data().list : null;
       if(Array.isArray(sl) && sl.length){ _mergeStaffDirectory(sl); return true; }
-    } catch(e){ console.warn('Staff fetch:', e.message); }
+    } catch(e){ console.warn('Staff fetch:', e.message); _noteStaffSync(false, e); }
     return false;
   }
+  // Whether the shared staff directory can actually be read/written. Failures
+  // used to be swallowed, so when the `staff` rule wasn't published every
+  // device quietly fell back to "Case Worker" and nobody could see why.
+  let _staffSync = { ok:null, at:'', error:'' };
+  function _noteStaffSync(ok, e){
+    _staffSync = { ok, at:new Date().toISOString(),
+      error: ok ? '' : ((e && (e.code || e.message)) || 'unknown error') };
+  }
+  function staffSyncStatus(){ return Object.assign({}, _staffSync); }
   async function pushStaff() {
     if(!db) return;
     // Only a manager may publish the directory. A worker's device holds whatever
@@ -832,7 +842,8 @@ const FSYNC = (() => {
       .map(u=>_clean({ id:u.id, email:(u.email||'').trim().toLowerCase(), name:u.name||'',
                        role:u.role||'worker', hiddenPages:u.hiddenPages||[] }));
     if(!list.length) return;                       // never publish an empty directory
-    await col('staff').doc('list').set({list}).catch(e=>{ console.warn('Staff sync:',e.message); _syncFailed('staff directory',e); });
+    await col('staff').doc('list').set({list}).then(()=>_noteStaffSync(true))
+      .catch(e=>{ console.warn('Staff sync:',e.message); _noteStaffSync(false,e); _syncFailed('staff directory',e); });
   }
   async function pushPolicies() { if(db) col('policies').doc('list').set({list:policies.map(p=>{ const {data,...rest}=p; return rest; })}).catch(e=>console.warn('Policy sync:',e.message)); }
   async function pushAudit()    { await _batch('auditlog',auditLog,a=>a.id); }
@@ -994,7 +1005,7 @@ const FSYNC = (() => {
 
   return { init, isReady, pushAll, pushClients, pushNotes, pushReferrals, pushWorkers, pushTasks, pushAudit, pushBrokerage, deleteDoc, getCfg, saveCfg, showSetupModal, clearConfig,
     storageReady, uploadFile, deleteStorageFile, getStorageURL, pushPolicies,
-    pushFpho, pushWalkins, pushCalEvents, pushResources, resyncAll, pushStaff, fetchStaff };
+    pushFpho, pushWalkins, pushCalEvents, pushResources, resyncAll, pushStaff, fetchStaff, staffSyncStatus };
 })();
 
 let clients = DB.load('clients', []);
@@ -1020,7 +1031,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v69';
+const APP_VERSION = 'v70';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -10203,6 +10214,9 @@ function renderSettings() {
       Staff accounts are managed through Firebase Authentication. Add a staff member here to link their Firebase login to their CMS profile and role.${currentUser?.role==='sysmanager'?'':' <strong>Only the System Manager can add, edit or remove accounts — you have view-only access.</strong>'}
       ${FSYNC.isReady()?'':'<strong style="color:#d97706"> ⚠️ Cloud Sync must be connected first.</strong>'}
     </p>
+    ${FSYNC.staffSyncStatus?.().ok===false?`<div style="background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:8px;padding:10px 12px;font-size:13px;margin-bottom:12px">
+      <strong>⚠️ Roles are not syncing.</strong> The shared staff directory was refused (${sanitize(FSYNC.staffSyncStatus().error)}), so staff signing in on another device get the default Case Worker role.
+      Publish the <code>staff</code> rule: Firebase Console → Firestore Database → Rules → paste <code>firestore.rules</code> from the repository → Publish. Then have affected staff sign out and back in.</div>`:''}
     <div style="overflow-x:auto">
       <table style="width:100%;border-collapse:collapse;font-size:13px">
         <thead><tr style="background:var(--bg)">
@@ -10219,7 +10233,7 @@ function renderSettings() {
             : userProfiles.map(u=>`
             <tr style="border-bottom:1px solid var(--border)">
               <td style="padding:8px 10px;font-weight:600">${ROLES[u.role]?.icon||'👤'} ${sanitize(u.name)}</td>
-              <td style="padding:8px 10px;color:var(--muted)">${sanitize(u.email)||'<em>no email set</em>'}</td>
+              <td style="padding:8px 10px;color:var(--muted)">${sanitize(u.email)||'<em>no email set</em><div style="font-size:11px;color:#b45309;font-style:normal;margin-top:3px">⚠ No sign-in email — their role can\'t reach their devices. Edit to add it.</div>'}</td>
               <td style="padding:8px 10px"><span style="background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:2px 8px;font-size:11px">${ROLES[u.role]?.label||u.role}</span>${(u.hiddenPages||[]).length?`<div style="font-size:10px;color:#92400e;margin-top:3px">🔒 ${u.hiddenPages.length} section${u.hiddenPages.length!==1?'s':''} hidden</div>`:''}</td>
               <td style="padding:8px 10px">${u.firebaseUid
                 ? '<span style="color:#16a34a;font-size:12px">✓ Linked</span>'
@@ -11604,7 +11618,9 @@ function _mergeStaffDirectory(list){
   // storage would leave the signed-in person on the wrong menu until reload.
   if (currentUser && currentUser.email) {
     const mine = userProfiles.find(p=>(p.email||'').trim().toLowerCase()===(currentUser.email||'').trim().toLowerCase());
-    if (mine && (mine.role !== currentUser.role || mine.name !== currentUser.name)) {
+    const listed = list.some(s=>(s.email||'').trim().toLowerCase()===(currentUser.email||'').trim().toLowerCase());
+    if (mine && (mine.role !== currentUser.role || mine.name !== currentUser.name || (listed && currentUser._roleUnconfirmed))) {
+      if (listed) delete currentUser._roleUnconfirmed;
       currentUser.role = mine.role; currentUser.name = mine.name || currentUser.name;
       currentUser.hiddenPages = mine.hiddenPages || currentUser.hiddenPages;
       DB.save('currentUser', currentUser);
@@ -11895,34 +11911,14 @@ function showLoginScreen() {
         <p id="login-error" style="color:#dc2626;font-size:13px;text-align:center;margin-top:12px;min-height:18px"></p>
         <p style="font-size:12px;color:#9ca3af;text-align:center;margin-top:12px">Contact your system manager to create or reset your account</p>
       ` : `
-        <div class="form-group" style="margin-bottom:20px">
-          <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:8px">Select Your Name</label>
-          <select id="login-user" style="width:100%;padding:11px 14px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;box-sizing:border-box">
-            <option value="">— Select your name —</option>
-            ${userProfiles.length > 0
-              ? userProfiles.map(u=>`<option value="${sanitize(u.id)}">${ROLES[u.role]?.icon||'👤'} ${sanitize(u.name)}</option>`).join('')
-              : `<option value="__new_jon">👤 Jon Benson (System Manager)</option>
-                 <option value="__new_jade">👤 Jade Atkinson</option>
-                 <option value="__new_brett_c">👤 Brett Clarke</option>
-                 <option value="__new_simon">👤 Simon Dart</option>
-                 <option value="__new_taylem">👤 Taylem Wason</option>
-                 <option value="__new_taf">👤 Taf Chitava</option>
-                 <option value="__new_chris">👤 Chris Shepperd</option>
-                 <option value="__new_nic">👤 Nic Nitcher</option>
-                 <option value="__new_brett_n">👤 Brett Nuske</option>
-                 <option value="__new_sean">👤 Sean Bloom</option>`}
-          </select>
-        </div>
-        <button class="btn btn-primary" id="login-btn" style="width:100%;padding:13px;font-size:15px;border-radius:8px" onclick="doLogin()">Sign In →</button>
-        <p id="login-error" style="color:#dc2626;font-size:13px;text-align:center;margin-top:12px;min-height:18px"></p>
-        <p style="font-size:12px;color:#9ca3af;text-align:center;margin-top:12px">Contact your system manager if your name is not listed</p>
+        <p style="color:#dc2626;font-size:13px;text-align:center">Sign-in is unavailable — please reload the page.</p>
       `}
       <div style="margin-top:20px;padding-top:16px;border-top:1px solid #f3f4f6;text-align:center">
         <button onclick="showPrivacyPolicy()" style="background:none;border:none;color:#9ca3af;font-size:11px;cursor:pointer;text-decoration:underline">Privacy Policy (Australian Privacy Principles)</button>
       </div>
     </div>
   </div>`;
-  setTimeout(()=>(document.getElementById('login-email')||document.getElementById('login-user'))?.focus(),100);
+  setTimeout(()=>document.getElementById('login-email')?.focus(),100);
 }
 
 // ===== MULTI-FACTOR AUTHENTICATION (SMS) =====
@@ -12080,6 +12076,7 @@ async function mfaCompleteEnrol(){
     audit('Two-step sign-in enabled', currentUser?.name + ' enrolled ' + _mfaSession.phone.replace(/\d(?=\d{4})/g,'•'));
     _mfaSession = null;
     closeModal();
+    _refreshMfaBadge();
     alert('✅ Two-step sign-in is now on.\n\nFrom next sign-in you will be asked for a code texted to your mobile. Keep this device safe — if you lose it, contact your System Manager to reset it.');
   } catch(e){
     console.warn('MFA enrol complete failed:', e);
@@ -12093,6 +12090,7 @@ async function removeMfa(factorUid){
     await firebase.auth().currentUser.multiFactor.unenroll({ uid: factorUid });
     audit('Two-step sign-in removed', currentUser?.name+' removed a factor');
     closeModal();
+    _refreshMfaBadge();
     showToast('Two-step sign-in turned off');
   } catch(e){
     alert('Could not remove: ' + _mfaFriendlyError(e));
@@ -12205,7 +12203,7 @@ async function doLogin() {
         const acc = await _accessDocRef(email)?.get();
         if (acc && acc.exists) { u.hiddenPages = acc.data().hiddenPages || []; saveUserProfiles(); }
       } catch(_) {}
-      _clearFailedLogins(email); saveCurrentUser(u); _auditLogin(u); initApp();
+      _clearFailedLogins(email); saveCurrentUser(u); _auditLogin(u); _flagUnconfirmedRole(u, email); initApp();
     } catch(e) {
       btn.disabled=false; btn.textContent='Sign In →';
       const msgs = {
@@ -12222,40 +12220,50 @@ async function doLogin() {
     return;
   }
 
-  // Dropdown login (local / no Firebase)
-  const val = document.getElementById('login-user')?.value;
-  if (!val) { errEl.textContent='Please select your name'; return; }
-  const presets = {
-    '__new_jon':    {name:'Jon Benson',    role:'sysmanager'},
-    '__new_jade':   {name:'Jade Atkinson', role:'worker'},
-    '__new_brett_c':{name:'Brett Clarke',  role:'worker'},
-    '__new_simon':  {name:'Simon Dart',    role:'worker'},
-    '__new_taylem': {name:'Taylem Wason',  role:'worker'},
-    '__new_taf':    {name:'Taf Chitava',   role:'admin'},
-    '__new_chris':  {name:'Chris Shepperd',role:'admin'},
-    '__new_nic':    {name:'Nic Nitcher',   role:'reception'},
-    '__new_brett_n':{name:'Brett Nuske',   role:'supervisor'},
-    '__new_sean':   {name:'Sean Bloom',    role:'reception'},
-  };
-  let u = userProfiles.find(p=>p.id===val);
-  if (!u && presets[val]) { u={id:uid(),...presets[val]}; userProfiles.push(u); saveUserProfiles(); }
-  if (!u) { errEl.textContent='Worker not found'; return; }
-  saveCurrentUser(u); _auditLogin(u); initApp();
+  // There is no passwordless sign-in. (The old "select your name" picker, with
+  // hard-coded staff roles, was removed — Firebase email/password only.)
+  errEl.textContent='Sign-in is unavailable — please reload the page.';
+}
+
+// The role comes from the shared staff directory. If this person isn't in it
+// (the `staff` rule isn't published, or their profile on the manager's device
+// has no email so it was never shared), they silently got the 'worker' default
+// and their email prefix as a name. Say so, on screen and in the audit log,
+// instead of letting an Admin quietly arrive as a Case Worker.
+function _flagUnconfirmedRole(u, email) {
+  const e = (email || u?.email || '').trim().toLowerCase();
+  if (!u || !e || _isOwnerEmail(e)) { if (u) delete u._roleUnconfirmed; return; }
+  const listed = (_staffDirectory || []).some(s => (s.email||'').trim().toLowerCase() === e);
+  if (listed) { delete u._roleUnconfirmed; return; }
+  u._roleUnconfirmed = true;
+  if (u === currentUser) DB.save('currentUser', u);
+  const st = FSYNC.staffSyncStatus?.() || {};
+  const why = st.ok === false
+    ? 'the shared staff directory could not be read (' + st.error + ') — the Firestore "staff" rule may not be published'
+    : 'not in the shared staff directory — their Staff Accounts profile may have no email';
+  audit('Role not confirmed at sign-in',
+    e + ': ' + why + '. Signed in with the ' + (ROLES[u.role]?.label || u.role) + ' role held on this device.');
+}
+function _roleWarningHtml() {
+  return currentUser?._roleUnconfirmed
+    ? `<div class="role-unconfirmed" title="Your role wasn't found in the shared staff directory, so this device used its default. Ask your System Manager to check your Staff Accounts entry (email and role)." style="font-size:10px;line-height:1.3;background:rgba(251,191,36,0.25);border:1px solid rgba(251,191,36,0.6);border-radius:6px;padding:4px 6px">⚠ Role not confirmed — ask your System Manager</div>`
+    : '';
 }
 
 function _auditLogin(u) {
+  const mfa = _mfaEnrolled() ? 'two-step: on' : 'two-step: OFF';
   const entry = {
     id: uid(), ts: now(),
     worker: u.name || 'Unknown',
     role: u.role || '',
     action: 'Login',
-    detail: `Signed in from IP: ${window._sessionIP || 'resolving…'}`,
+    detail: `Signed in from IP: ${window._sessionIP || 'resolving…'} · ${mfa}`,
     clientId: '', clientName: '', page: 'login',
     ip: window._sessionIP || '',
   };
   // Update IP once resolved if it wasn't ready yet
   window._sessionIPReady.then(() => {
-    entry.detail = `Signed in from IP: ${window._sessionIP}`;
+    entry.detail = `Signed in from IP: ${window._sessionIP} · ${mfa}`;
     entry.ip = window._sessionIP;
     saveAuditLog();
   });
@@ -12273,7 +12281,7 @@ function _auditLogin(u) {
 
 function _finishLogin(firebaseUser, email) {
   const u = _resolveUserProfile(firebaseUser, email);
-  saveCurrentUser(u); _auditLogin(u); initApp();
+  saveCurrentUser(u); _auditLogin(u); _flagUnconfirmedRole(u, email); initApp();
 }
 
 function _showMFAScreen() {
@@ -13034,8 +13042,9 @@ function initApp() {
         <div style="font-size:10px;opacity:0.6">${ROLES[currentUser?.role]?.label||''}</div>
       </div>
     </div>
-    <button onclick="openMfaModal()" title="Turn on two-step sign-in for stronger security" style="width:100%;padding:8px;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.25);border-radius:7px;color:#fff;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;transition:background 0.15s" onmouseover="this.style.background='rgba(255,255,255,0.2)'" onmouseout="this.style.background='rgba(255,255,255,0.1)'">
-      <span style="font-size:14px">🔐</span> Two-step sign-in${(()=>{ try{ return firebase.auth().currentUser?.multiFactor?.enrolledFactors?.length ? ' ✓' : ''; }catch(_){ return ''; } })()}
+    ${_roleWarningHtml()}
+    <button id="mfa-badge-btn" onclick="openMfaModal()" title="Two-step sign-in: a code texted to your mobile at every sign-in" style="width:100%;padding:8px;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.25);border-radius:7px;color:#fff;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;transition:background 0.15s" onmouseover="this.style.background='rgba(255,255,255,0.2)'" onmouseout="this.style.background='rgba(255,255,255,0.1)'">
+      <span style="font-size:14px">🔐</span> <span class="mfa-label">${_mfaBadgeText()}</span>
     </button>
     <button onclick="logout()" style="width:100%;padding:8px;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.25);border-radius:7px;color:#fff;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;transition:background 0.15s" onmouseover="this.style.background='rgba(255,255,255,0.2)'" onmouseout="this.style.background='rgba(255,255,255,0.1)'">
       <span style="font-size:14px">⏻</span> Sign Out
@@ -13060,6 +13069,9 @@ function initApp() {
 function _refreshUserChrome() {
   const bar = document.querySelector('#sidebar .user-badge-bar');
   if (bar) {
+    bar.querySelector('.role-unconfirmed')?.remove();
+    const warn = _roleWarningHtml();
+    if (warn) bar.querySelector('#mfa-badge-btn')?.insertAdjacentHTML('beforebegin', warn);
     const rows = bar.querySelectorAll('div[style*="flex:1"] > div');
     if (rows[0]) rows[0].textContent = currentUser?.name || '';
     if (rows[1]) rows[1].textContent = ROLES[currentUser?.role]?.label || '';
@@ -13067,6 +13079,17 @@ function _refreshUserChrome() {
     if (icon) icon.textContent = ROLES[currentUser?.role]?.icon || '👤';
   }
   try { applyNavRestrictions(); } catch(_) {}
+}
+
+// Two-step state as Firebase holds it. "OFF" is spelled out: a bare label with
+// no tick was being read as "it's on" after an enrolment that never finished.
+function _mfaEnrolled() {
+  try { return !!firebase.auth().currentUser?.multiFactor?.enrolledFactors?.length; } catch(_) { return false; }
+}
+function _mfaBadgeText() { return _mfaEnrolled() ? 'Two-step sign-in: ON ✓' : 'Two-step sign-in: OFF'; }
+function _refreshMfaBadge() {
+  const l = document.querySelector('#mfa-badge-btn .mfa-label');
+  if (l) l.textContent = _mfaBadgeText();
 }
 
 // ============================================================
