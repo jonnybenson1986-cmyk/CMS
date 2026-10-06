@@ -840,7 +840,11 @@ const FSYNC = (() => {
     const list = (typeof userProfiles!=='undefined'?userProfiles:[])
       .filter(u=>u && u.email)
       .map(u=>_clean({ id:u.id, email:(u.email||'').trim().toLowerCase(), name:u.name||'',
-                       role:u.role||'worker', hiddenPages:u.hiddenPages||[] }));
+                       role:u.role||'worker', hiddenPages:u.hiddenPages||[] }))
+      // One entry per email. Two entries for the same person made their role
+      // depend on list order (one reader took the first, another the last).
+      .filter((u,i,a)=>{ const best=a.filter(x=>x.email===u.email)
+        .reduce((m,x)=>(_ROLE_RANK[x.role]||0)>(_ROLE_RANK[m.role]||0)?x:m); return best===u; });
     if(!list.length) return;                       // never publish an empty directory
     await col('staff').doc('list').set({list}).then(()=>_noteStaffSync(true))
       .catch(e=>{ console.warn('Staff sync:',e.message); _noteStaffSync(false,e); _syncFailed('staff directory',e); });
@@ -1031,7 +1035,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v70';
+const APP_VERSION = 'v71';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -10217,6 +10221,9 @@ function renderSettings() {
     ${FSYNC.staffSyncStatus?.().ok===false?`<div style="background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:8px;padding:10px 12px;font-size:13px;margin-bottom:12px">
       <strong>⚠️ Roles are not syncing.</strong> The shared staff directory was refused (${sanitize(FSYNC.staffSyncStatus().error)}), so staff signing in on another device get the default Case Worker role.
       Publish the <code>staff</code> rule: Firebase Console → Firestore Database → Rules → paste <code>firestore.rules</code> from the repository → Publish. Then have affected staff sign out and back in.</div>`:''}
+    ${_staffDuplicatePairs().map(([a,b])=>`<div class="staff-dup" style="background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:8px;padding:10px 12px;font-size:13px;margin-bottom:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <span style="flex:1;min-width:220px">⚠️ <strong>${sanitize(a.name)}</strong> (${ROLES[a.role]?.label||sanitize(a.role)}) and <strong>${sanitize(b.name)}</strong> (${ROLES[b.role]?.label||sanitize(b.role)}) look like the same person. Until they're merged, the role that reaches their devices may be the wrong one.</span>
+      ${currentUser?.role==='sysmanager'?`<button class="btn btn-sm btn-primary" onclick="openMergeStaffModal('${sanitize(a.id)}','${sanitize(b.id)}')">🔗 Merge</button>`:''}</div>`).join('')}
     <div style="overflow-x:auto">
       <table style="width:100%;border-collapse:collapse;font-size:13px">
         <thead><tr style="background:var(--bg)">
@@ -10978,7 +10985,7 @@ function openEditStaffModal(userId) {
   showModal('✏️ Edit Staff — ' + u.name, html, ()=>saveStaffEdit(userId), '640px');
 }
 
-async function saveStaffEdit(userId) {
+function saveStaffEdit(userId) {   // sync: the modal only stays open (to show an error) on a literal false
   if(currentUser?.role!=='sysmanager'){ showToast('Only the System Manager can manage staff accounts'); return false; }
   const u = userProfiles.find(p=>p.id===userId); if(!u) return false;
   const name  = document.getElementById('se-name')?.value?.trim();
@@ -10993,6 +11000,17 @@ async function saveStaffEdit(userId) {
     errEl.textContent='This is the organisation’s System Manager account — its role cannot be changed here.';
     return false;
   }
+  // Two profiles must never share a sign-in email — which one wins at sign-in
+  // would be down to list order. Same email = same person, so offer to merge.
+  const emailLc = (email||'').trim().toLowerCase();
+  const other = emailLc ? userProfiles.find(p=>p!==u && (p.email||'').trim().toLowerCase()===emailLc) : null;
+  if (other) {
+    if (_isOwnerEmail(other.email) && role!=='sysmanager') { errEl.textContent='That email belongs to the System Manager account.'; return false; }
+    if (!confirm(`${other.name} (${ROLES[other.role]?.label||other.role}) already signs in with ${emailLc}.\n\nMerge them into this profile? You'll keep one profile: ${name} — ${ROLES[role]?.label||role}. ${other.name} will be removed.`)) {
+      errEl.textContent=`${other.name} already uses that email. Two profiles can't share a sign-in email — merge them, or use a different email.`;
+      return false;
+    }
+  }
   u.name=name; u.email=email||u.email; u.role=role;
   const pageBoxes = [...document.querySelectorAll('.se-page')];
   if (pageBoxes.length && currentUser?.role==='sysmanager') {
@@ -11005,6 +11023,7 @@ async function saveStaffEdit(userId) {
     }
     if (u.hiddenPages.length) audit('Section access changed', `${u.name}: hidden — ${u.hiddenPages.join(', ')}`);
   }
+  if (other) _mergeStaffInto(u, other);
   if(pass && pass.length>=8 && u.firebaseUid) {
     errEl.textContent='Updating password…';
     // Password reset via Firebase requires Admin SDK; instruct user to use Firebase console
@@ -11031,6 +11050,89 @@ function removeStaffAccount(userId) {
   /* saveUserProfiles() publishes the shared staff directory (managers only) */
   showToast(`${sanitize(u.name)} removed from CMS`);
   showPage('settings');
+}
+
+// ── Merging duplicate staff profiles ────────────────────────────────────────
+// The same person can end up with two profiles: one set up by hand (right name
+// and role, no email) and one created automatically at their first sign-in
+// (email, but named after it and defaulted to Case Worker). The role only
+// reaches their devices through the email, so the hand-made one never applies.
+const _staffKey = v => (v||'').toLowerCase().replace(/[^a-z]/g,'');
+function _staffLooksSame(a, b) {
+  const ea=(a.email||'').trim().toLowerCase(), eb=(b.email||'').trim().toLowerCase();
+  if (ea && eb) return ea===eb;            // two different emails = two accounts
+  const names=[_staffKey(a.name), _staffKey(b.name), _staffKey(ea.split('@')[0]), _staffKey(eb.split('@')[0])];
+  const [na,nb,la,lb]=names;
+  return !!((na && (na===nb || na===lb)) || (nb && nb===la));
+}
+function _staffDuplicatePairs() {
+  const pairs=[];
+  userProfiles.forEach((a,i)=>userProfiles.slice(i+1).forEach(b=>{ if(_staffLooksSame(a,b)) pairs.push([a,b]); }));
+  return pairs;
+}
+// Default survivor: the higher role (that's normally the one set by hand).
+function _staffPreferred(a, b) {
+  const ra=_ROLE_RANK[a.role]||0, rb=_ROLE_RANK[b.role]||0;
+  if (ra!==rb) return ra>rb ? a : b;
+  return (a.email && !b.email) ? a : (b.email && !a.email) ? b : a;
+}
+function openMergeStaffModal(idA, idB) {
+  if(currentUser?.role!=='sysmanager'){ showToast('Only the System Manager can manage staff accounts'); return; }
+  const a=userProfiles.find(p=>p.id===idA), b=userProfiles.find(p=>p.id===idB); if(!a||!b) return;
+  const pref=_staffPreferred(a,b);
+  const email=(a.email||b.email||'');
+  const opt=p=>`<label style="display:flex;gap:8px;align-items:flex-start;padding:10px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px;font-weight:400;cursor:pointer">
+      <input type="radio" name="sm-keep" value="${sanitize(p.id)}" ${p===pref?'checked':''} style="margin-top:3px">
+      <span><strong>${sanitize(p.name||'')}</strong> — ${ROLES[p.role]?.label||sanitize(p.role)}<br>
+      <span style="font-size:12px;color:var(--muted)">${sanitize(p.email)||'no sign-in email'}${p.lastLoginAt?' · last sign-in '+fmtdt(p.lastLoginAt):''}</span></span></label>`;
+  const html=`<p style="font-size:13px;margin-bottom:12px">These look like the same person. Merging leaves <strong>one</strong> profile with the sign-in email <strong>${sanitize(email)||'(none)'}</strong>.</p>
+    <p style="font-size:13px;font-weight:700;margin-bottom:6px">Keep the name, role and section access from:</p>
+    ${opt(a)}${opt(b)}
+    <p style="font-size:12px;color:var(--muted);margin-top:8px">The other profile is removed. Case notes, time logs and the audit log keep their original author names. They take the new role the next time they sign in (or within a minute if they're signed in now).</p>`;
+  showModal('🔗 Merge staff profiles', html, ()=>{
+    const keepId=document.querySelector('input[name="sm-keep"]:checked')?.value;
+    const keep=keepId===a.id?a:b, drop=keep===a?b:a;
+    return mergeStaffProfiles(keep.id, drop.id);
+  }, '560px');
+}
+function mergeStaffProfiles(keepId, dropId) {
+  if(currentUser?.role!=='sysmanager'){ showToast('Only the System Manager can manage staff accounts'); return false; }
+  const keep=userProfiles.find(p=>p.id===keepId), drop=userProfiles.find(p=>p.id===dropId);
+  if(!keep||!drop||keep===drop) return false;
+  const ek=(keep.email||'').trim().toLowerCase(), ed=(drop.email||'').trim().toLowerCase();
+  if (ek && ed && ek!==ed) { alert('These profiles sign in with different emails, so they are two separate accounts and can’t be merged.'); return false; }
+  if (_isOwnerEmail(ed) && !_isOwnerEmail(ek) && keep.role!=='sysmanager') { alert('The organisation’s System Manager account can’t be merged into a lower role.'); return false; }
+  _mergeStaffInto(keep, drop);
+  showPage('settings');
+  return true;
+}
+function _mergeStaffInto(keep, drop) {
+  const dropName=drop.name||'', dropRole=drop.role;
+  if (!keep.email && drop.email) keep.email=(drop.email||'').trim().toLowerCase();
+  if (!keep.firebaseUid && drop.firebaseUid) keep.firebaseUid=drop.firebaseUid;
+  if ((drop.lastLoginAt||'') > (keep.lastLoginAt||'')) { keep.lastLoginAt=drop.lastLoginAt; keep.lastLoginIP=drop.lastLoginIP; }
+  userProfiles=userProfiles.filter(p=>p!==drop);
+  // Client-file access lists and key-worker fields go by name; move them across
+  // so the merged person doesn't lose access to files they were assigned.
+  let moved=0;
+  if (dropName && dropName!==keep.name) {
+    clients.forEach(c=>{ let hit=false;
+      if (Array.isArray(c.allowedWorkers) && c.allowedWorkers.some(w=>(w||'').trim()===dropName)) {
+        c.allowedWorkers=[...new Set(c.allowedWorkers.map(w=>(w||'').trim()===dropName?keep.name:w))]; hit=true; }
+      if ((c.keyWorker||'').trim()===dropName) { c.keyWorker=keep.name; hit=true; }
+      if (hit) moved++; });
+    if (moved) { saveAll(); if(FSYNC.isReady()) FSYNC.pushClients(); }
+  }
+  // Section-access rules are fetched by email at sign-in and override the
+  // profile, so the merged profile's settings must be written there too.
+  if (keep.email && FSYNC.isReady()) {
+    _accessDocRef(keep.email)?.set({ email:keep.email.toLowerCase(), hiddenPages:keep.hiddenPages||[],
+      updatedBy:currentUser?.name||'', updatedAt:new Date().toISOString() }).catch(e=>console.warn('Access-rule sync failed:', e.message));
+  }
+  saveUserProfiles();   // publishes the staff directory (managers only)
+  audit('Staff profiles merged', `${dropName} (${ROLES[dropRole]?.label||dropRole}) merged into ${keep.name} (${ROLES[keep.role]?.label||keep.role})`
+    + (keep.email?` — sign-in ${keep.email}`:'') + (moved?` — ${moved} client file assignment${moved!==1?'s':''} moved`:''));
+  showToast(`✓ Merged — ${keep.name} is now one profile (${ROLES[keep.role]?.label||keep.role})`);
 }
 
 // ── Encrypted backup helpers (WebCrypto AES-GCM + PBKDF2) ───────────────────
