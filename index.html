@@ -1035,7 +1035,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v75';
+const APP_VERSION = 'v76';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -3736,6 +3736,7 @@ function openTimeModal(clientId) {
       activity: document.getElementById('tm-activity')?.value,
       type: document.getElementById('tm-type')?.value,
       program: document.getElementById('tm-program')?.value || '',
+      source: 'Manual',
       worker: getWorkerValue('tm-worker','tm-worker-new'),
       notes: document.getElementById('tm-notes')?.value,
     });
@@ -3745,12 +3746,7 @@ function openTimeModal(clientId) {
 
 function deleteTime(timeId, clientId) {
   if(!confirm('Delete this time entry?')) return;
-  const _tl = timeLogs.find(t=>t.id===timeId);
-  // A deleted CorePlus entry must not come back on the next import.
-  if (_tl && _tl.importKey) { const _c = clients.find(c=>c.id===_tl.clientId); if (_c) _c.corePlusIgnoredKeys = [...new Set([...(_c.corePlusIgnoredKeys||[]), _tl.importKey])]; }
-  timeLogs = timeLogs.filter(t=>t.id!==timeId);
-  FSYNC.deleteDoc('timelogs', timeId || (_tl && (_tl.date+'-'+_tl.clientId)));   // tombstone (QA C2) — queued if offline
-  saveAll();
+  if (timeId) removeTimeEntries([timeId], 'Deleted from the client file');   // tombstone, CorePlus ignore-list, audit
   openClientProfile(clientId);
 }
 
@@ -4343,6 +4339,100 @@ function activityCategory(a) {
 }
 const _EVT_ACTIVITY = { appointment:'Client Session', court:'Court attendance', followup:'Client Session', group:'Group Program', homevisit:'Home Visit', aod:'Client Session', cultural:'Client Session', admin:'Admin / Documentation' };
 
+// ============================================================
+// REVIEW & REMOVE TIME ENTRIES
+// ============================================================
+// Time reaches the tracker four ways — typed in Log Time, logged from a
+// calendar event, created by a case note (the note's Duration field), or
+// imported from CorePlus. This lists entries for the current report filters,
+// says where each came from, and lets a manager remove the ones that should
+// not have been logged. Removal is a tracked delete (it can't come back from
+// another device or a re-import) and every removal is audited.
+const TIME_SOURCES = { note:'Case note (Duration on the note)', coreplus:'CorePlus import', calendar:'Calendar event', manual:'Log Time', demo:'Demo data', unknown:'Not recorded' };
+function timeLogSource(t) {
+  if (!t) return 'unknown';
+  if (t._demo) return 'demo';
+  if (t.source === 'CorePlus' || t.importKey) return 'coreplus';
+  if (t.fromNoteId) return 'note';
+  if (t.source === 'Calendar') return 'calendar';
+  if (t.source === 'Manual') return 'manual';
+  return 'unknown';
+}
+const _canRemoveTime = () => ['sysmanager','admin','supervisor'].includes(currentUser?.role);
+let _trSel = new Set();
+let _trOpen = false;            // stays open across page redraws (sync refreshes redraw Reports)
+function timeReviewEntries() {
+  const f = reportFilter();
+  return (timeLogs || []).filter(t => t && t.date >= f.from && t.date <= f.to)
+    .filter(t => !f.worker || canonicalWorker(t.worker) === f.worker)
+    .filter(t => !f.clientId || t.clientId === f.clientId)
+    .filter(t => { const c = clients.find(x => x.id === t.clientId); return !c || canViewClient(c); })
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)));
+}
+function timeReviewCardHTML() {
+  return `
+  <div class="card no-print" style="margin-bottom:20px" id="time-review-card">
+    <div class="card-header"><div class="card-title">🧹 Review &amp; remove time entries</div>
+      <button class="btn btn-sm btn-outline" onclick="_trOpen=!_trOpen;const b=document.getElementById('time-review-body');b.style.display=_trOpen?'':'none';if(_trOpen)renderTimeReview()">Show / Hide</button></div>
+    <div id="time-review-body" style="display:${_trOpen ? '' : 'none'}">${_trOpen ? timeReviewBodyHTML() : ''}</div>
+  </div>`;
+}
+function renderTimeReview() {
+  const body = document.getElementById('time-review-body'); if (!body) return;
+  body.innerHTML = timeReviewBodyHTML();
+}
+function timeReviewBodyHTML() {
+  const list = timeReviewEntries(), can = _canRemoveTime();
+  _trSel = new Set([..._trSel].filter(id => list.some(t => t.id === id)));
+  const bySrc = {}; list.forEach(t => { const k = timeLogSource(t); (bySrc[k] = bySrc[k] || []).push(t); });
+  const selMin = list.filter(t => _trSel.has(t.id)).reduce((a, t) => a + (t.minutes || 0), 0);
+  return `
+    <p style="font-size:13px;color:var(--muted);margin-bottom:10px">Time entries for <strong>${sanitize(reportFilterLabel(reportFilter()))}</strong> (change it in Report filters above). The Source column shows how each entry was created.${can ? ' Tick the ones that should not have been logged and remove them.' : ' Only a System Manager, Admin or Supervisor can remove entries.'}</p>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;font-size:12px">
+      ${Object.entries(bySrc).map(([k, arr]) => `<span class="tag tr-src" data-src="${k}" style="background:#f3f4f6;color:#374151">${sanitize(TIME_SOURCES[k])}: ${arr.length} (${_hm(arr.reduce((a, t) => a + (t.minutes || 0), 0))})
+        ${can ? `<a href="#" style="margin-left:4px" onclick="event.preventDefault();timeReviewSelectSource('${k}')">select all</a>` : ''}</span>`).join('') || 'No time entries in this period.'}
+    </div>
+    ${list.length ? `<div class="table-wrap" style="max-height:420px;overflow:auto"><table style="font-size:12px"><thead><tr>
+      ${can ? `<th><input type="checkbox" id="tr-all" ${list.length && list.every(t => _trSel.has(t.id)) ? 'checked' : ''} onchange="timeReviewSelectAll(this.checked)"></th>` : ''}
+      <th>Date</th><th>Client</th><th>Minutes</th><th>Activity</th><th>Worker</th><th>Source</th></tr></thead><tbody>
+      ${list.map(t => { const c = clients.find(x => x.id === t.clientId); return `<tr>
+        ${can ? `<td><input type="checkbox" class="tr-row" data-id="${sanitize(t.id)}" ${_trSel.has(t.id) ? 'checked' : ''} onchange="timeReviewToggle('${sanitize(t.id)}', this.checked)"></td>` : ''}
+        <td>${fmt(t.date)}</td><td>${sanitize(c?.fullName || 'Unknown')}</td><td>${Number(t.minutes) || 0}</td>
+        <td>${sanitize(activityCategory(t.activity))}</td><td>${sanitize(canonicalWorker(t.worker) || '—')}</td><td>${sanitize(TIME_SOURCES[timeLogSource(t)])}</td></tr>`; }).join('')}
+      </tbody></table></div>
+      ${can ? `<div style="display:flex;gap:10px;align-items:center;margin-top:10px;flex-wrap:wrap">
+        <button class="btn btn-danger" id="tr-remove" ${_trSel.size ? '' : 'disabled'} onclick="timeReviewRemove()">🗑️ Remove ${_trSel.size} selected (${selMin} min)</button>
+        <span style="font-size:11px;color:var(--muted)">Removing a time entry does not remove the case note it came from. Removed CorePlus entries are not re-imported.</span></div>` : ''}` : ''}`;
+}
+function timeReviewToggle(id, on) { on ? _trSel.add(id) : _trSel.delete(id); renderTimeReview(); }
+function timeReviewSelectAll(on) { const l = timeReviewEntries(); _trSel = on ? new Set(l.map(t => t.id)) : new Set(); renderTimeReview(); }
+function timeReviewSelectSource(k) { timeReviewEntries().filter(t => timeLogSource(t) === k).forEach(t => _trSel.add(t.id)); renderTimeReview(); }
+function timeReviewRemove() {
+  if (!_canRemoveTime()) { showToast('Only a System Manager, Admin or Supervisor can remove time entries'); return; }
+  const rm = timeLogs.filter(t => _trSel.has(t.id)); if (!rm.length) return;
+  const mins = rm.reduce((a, t) => a + (t.minutes || 0), 0);
+  if (!confirm(`Remove ${rm.length} time entr${rm.length !== 1 ? 'ies' : 'y'} (${mins} minutes = ${_hm(mins)})?\n\nCase notes are kept. This is recorded in the audit log.`)) return;
+  removeTimeEntries(rm.map(t => t.id), 'Reviewed in Reports');
+  _trSel = new Set();
+  showToast(`✓ Removed ${rm.length} time entr${rm.length !== 1 ? 'ies' : 'y'} (${mins} min)`);
+  renderTimeReview();
+}
+function removeTimeEntries(ids, why) {
+  // Never match on a missing id — that would sweep up every legacy entry without one.
+  const set = new Set((ids || []).filter(Boolean)), rm = timeLogs.filter(t => t.id && set.has(t.id));
+  if (!rm.length) return 0;
+  const perClient = {};
+  rm.forEach(t => {
+    if (t.importKey) { const c = clients.find(x => x.id === t.clientId); if (c) c.corePlusIgnoredKeys = [...new Set([...(c.corePlusIgnoredKeys || []), t.importKey])]; }
+    FSYNC.deleteDoc('timelogs', t.id || (t.date + '-' + t.clientId));    // tombstone — can't come back from another device
+    const p = perClient[t.clientId] = perClient[t.clientId] || { n: 0, m: 0, src: new Set() }; p.n++; p.m += t.minutes || 0; p.src.add(TIME_SOURCES[timeLogSource(t)]);
+  });
+  timeLogs = timeLogs.filter(t => !(t.id && set.has(t.id)));
+  Object.entries(perClient).forEach(([cid, p]) => audit('Time entries removed', `${clients.find(c => c.id === cid)?.fullName || 'Unknown client'} — ${p.n} entr${p.n !== 1 ? 'ies' : 'y'}, ${p.m} min (${[...p.src].join(', ')}). ${why || ''}`.trim(), cid));
+  saveAll();
+  return rm.length;
+}
+
 function renderReportsPage() {
   const activeClients = clients.filter(c=>c.status==='active');
   return `
@@ -4362,6 +4452,7 @@ function renderReportsPage() {
   </style>
 
   ${reportFilterBarHTML()}
+  ${timeReviewCardHTML()}
 
   <!-- SECTION: CLIENT REPORTS -->
   <div class="card no-print" style="margin-bottom:20px">
@@ -7389,7 +7480,7 @@ function logTimeFromEvent(id) {
   const e = calEvents.find(ev=>ev.id===id); if(!e) return;
   const dur = e.startTime&&e.endTime ? timeToMins(e.endTime)-timeToMins(e.startTime) : 60;
   if(e.clientId) {
-    timeLogs.push({ id:uid(), clientId:e.clientId, date:e.date, minutes:Math.max(dur,0), activity:_EVT_ACTIVITY[e.type]||'Client Session', type:'Face-to-face', worker:e.worker, notes:[e.title, e.notes].filter(Boolean).join(' — ') });
+    timeLogs.push({ id:uid(), clientId:e.clientId, date:e.date, minutes:Math.max(dur,0), activity:_EVT_ACTIVITY[e.type]||'Client Session', type:'Face-to-face', source:'Calendar', worker:e.worker, notes:[e.title, e.notes].filter(Boolean).join(' — ') });
     saveAll(); showToast('Time logged from event ✓');
   } else {
     openTimeModal(null);
@@ -8038,8 +8129,9 @@ function openSessionModal(clientId, defaultType) {
     <div class="form-group"><label>Date &amp; Time</label>
       <input type="datetime-local" id="sm-date" value="${sanitize(localISO().slice(0,16))}">
     </div>
-    <div class="form-group"><label>Duration (minutes) — auto-logged to time tracker</label>
-      <input type="number" id="sm-duration" min="0" placeholder="e.g. 60" value="60">
+    <div class="form-group"><label>Time spent (minutes)</label>
+      <input type="number" id="sm-duration" min="0" placeholder="Leave blank if no time to log">
+      <div style="font-size:11px;color:var(--muted);margin-top:3px">Logged to the time tracker only when you enter minutes. The note counts as a contact either way.</div>
     </div>
     <div class="form-group"><label>Worker</label>
       ${currentUser?.role==='sysmanager'
@@ -8116,7 +8208,9 @@ function openSessionModal(clientId, defaultType) {
     const sessionDate = document.getElementById('sm-date')?.value;
     const mins = parseInt(document.getElementById('sm-duration')?.value||'0');
     const noteDate = sessionDate ? new Date(sessionDate).toISOString() : now();
-    const noteDateStr = noteDate.split('T')[0];
+    // The calendar date of the session as the worker entered it (local time).
+    // Taking it from the UTC timestamp put morning sessions on the previous day.
+    const noteDateStr = sessionDate ? String(sessionDate).slice(0,10) : today();
     // Non-managers can only log under their own name; a System Manager may pick any worker.
     const worker = currentUser?.role==='sysmanager'
       ? getWorkerValue('sm-worker','sm-worker-new')
@@ -8178,7 +8272,7 @@ function openSessionModal(clientId, defaultType) {
       const startH = String(noteD.getHours()).padStart(2,'0');
       const startM = String(noteD.getMinutes()).padStart(2,'0');
       timeLogs.push({ id:uid(), clientId, date:noteDateStr, minutes:mins,
-        activity:contact||'Session', type:'Face-to-face', worker, notes:text.slice(0,100), fromNoteId:n.id });
+        activity:contact||'Session', type:'Face-to-face', source:'Case note', worker, notes:text.slice(0,100), fromNoteId:n.id });
 
       // Add to calendar if checked
       if(document.getElementById('sm-addtocal')?.checked && clientId) {

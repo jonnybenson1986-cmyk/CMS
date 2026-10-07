@@ -163,6 +163,12 @@ Appointment Type, never the Client Group. Every entry carries an `importKey`,
 so re-importing an export never double-logs, and a deleted imported entry is
 remembered so it doesn't come back.
 
+**Time entries.** Time reaches the tracker four ways: Log Time, a calendar
+event, a case note (only when the worker enters minutes — the box starts
+blank), or the CorePlus import. Each entry records its `source`. Reports →
+Review & remove time entries lets a manager remove wrong entries; removal is a
+tracked delete and is audited.
+
 **Client feedback.** Four plain-language questions, due after intake and at
 mid-episode, and asked at exit through the review. The worker sends them from
 their own email or phone and records the reply on the file. Messages carry the
