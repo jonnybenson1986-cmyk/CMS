@@ -1035,7 +1035,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v74';
+const APP_VERSION = 'v75';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -4233,7 +4233,7 @@ function reportFilterBarHTML() {
   const opt = (v, l, cur) => `<option value="${sanitize(v)}"${v === cur ? ' selected' : ''}>${sanitize(l)}</option>`;
   return `
   <div class="card no-print report-filter" style="margin-bottom:20px;border-left:4px solid var(--primary)">
-    <div class="card-header"><div class="card-title">🔎 Report filters</div><span id="rpt-filter-summary" style="font-size:12px;color:var(--muted)">${sanitize(reportFilterLabel(f))}</span></div>
+    <div class="card-header" style="flex-wrap:wrap;gap:6px"><div class="card-title">🔎 Report filters</div><span id="rpt-filter-summary" style="font-size:12px;color:var(--muted);white-space:normal">${sanitize(reportFilterLabel(f))}</span></div>
     <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
       <div class="form-group" style="margin:0"><label>Report by</label>
         <select id="rpt-type" onchange="rptSetType(this.value)">
@@ -4251,10 +4251,36 @@ function reportFilterBarHTML() {
           <optgroup label="Closed">${sorted.filter(c => c.status === 'closed').map(c => opt(c.id, c.fullName + ' (closed)', f.clientId)).join('')}</optgroup></select></div>
       ${(f.worker || f.clientId) ? `<button class="btn btn-outline btn-sm" onclick="rptSet('worker','');rptSet('clientId','')">✕ Clear worker / client</button>` : ''}
     </div>
+    <div class="rpt-run" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
+      <div class="form-group" style="margin:0;min-width:260px"><label>Report</label>
+        <select id="rpt-report" onchange="reportFilter().report=this.value">${REPORT_MENU.map(([grp, items]) => `<optgroup label="${sanitize(grp)}">${items.map(([v, l]) => opt(v, l, f.report || 'activity')).join('')}</optgroup>`).join('')}</select></div>
+      <button class="btn btn-primary" id="rpt-run-btn" onclick="runSelectedReport()" style="padding:10px 20px">▶ Run report</button>
+      <span style="font-size:12px;color:var(--muted)">Opens in a new tab using the filters above. You can also click any report card below.</span>
+    </div>
     <p style="font-size:11px;color:var(--muted);margin-top:8px">Applies to the program, activity, workload, outcomes and feedback reports below. Funding (episode-of-care) reports use the dates but always count every worker and client, because an episode is built from everyone's contacts.</p>
   </div>`;
 }
 function _rptRefresh() { if (currentPage === 'reports') showPage('reports'); }
+// Every report the Run button can open. [value, label] grouped for the menu.
+const REPORT_MENU = [
+  ['Time & activity', [['activity','Activity & Time Report'],['workload','Workload & Caseload Report'],['caseload','Full Caseload Report']]],
+  ['Programs', [['sewb','SEWB Program Report'],['sewb-combined','SEWB Program Report (Combined)'],['aod','AOD Program Report'],['justice','Justice Program Report'],['cultural','Cultural Strengthening Report'],['disability','Disability Program Report'],['workfoundations','Work Foundations Report'],['allprograms','All Programs Combined Report']]],
+  ['Outcomes & feedback', [['outcomes','Client Outcomes (Board)'],['goals','Goals Progress Report'],['feedback','Client Feedback Summary'],['risk','Risk Register']]],
+  ['Funding — episodes of care', [['fund:sewb','SEWB episodes of care'],['fund:aod','AOD episodes of care'],['fund:justice','Justice episodes of care'],['fund:all','All programs — episodes of care']]],
+  ['Selected client', [['client-full','Full client report (choose a client above)']]],
+];
+function runSelectedReport() {
+  const f = reportFilter(), r = document.getElementById('rpt-report')?.value || f.report || 'activity';
+  f.report = r;
+  if (r === 'workload') return generateWorkloadReport();
+  if (r.startsWith('fund:')) return generateFundingReport(r.slice(5));
+  if (r === 'client-full') {
+    const c = clients.find(x => x.id === f.clientId);
+    if (!c) { alert('Choose a client in the Client filter first.'); return; }
+    return openReport(buildFullClientReport(c, f.from, f.to));
+  }
+  generateProgramReport(r);
+}
 function rptSetType(type) {
   const f = reportFilter(); f.type = type;
   if (type === 'all') { f.from = '2000-01-01'; f.to = today(); f.period = ''; }
