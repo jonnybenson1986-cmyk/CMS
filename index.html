@@ -1035,7 +1035,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v71';
+const APP_VERSION = 'v72';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -4825,7 +4825,7 @@ function _importPrefName(a, b) {
 }
 
 // Australian phone numbers exported through Excel lose their leading 0
-// (0484 660 716 arrives as 484660716). Restore and format; anything that
+// (0491 570 156 arrives as 491570156). Restore and format; anything that
 // doesn't look like an Australian number is kept exactly as supplied.
 function _importAuPhone(v) {
   const raw = String(v||'').trim(); if(!raw) return '';
