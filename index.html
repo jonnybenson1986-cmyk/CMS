@@ -1035,7 +1035,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v71';
+const APP_VERSION = 'v73';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -1242,6 +1242,7 @@ function renderDashboard() {
 
   return `
   ${alertHTML}
+  ${renderCompletenessDashboard()}
   <div class="grid-4" style="margin-bottom:20px">
     <div class="stat-card"><div class="label">Active Clients</div><div class="value" style="color:var(--primary-light)">${active}</div><div class="sub">${clients.length} total</div></div>
     <div class="stat-card"><div class="label">Notes This Month</div><div class="value" style="color:var(--info)">${thisMonth}</div><div class="sub">${notes.length} total</div></div>
@@ -1355,37 +1356,16 @@ function renderClosedClients() {
   </div>`;
 }
 
-function closeClient(id) {
-  const c = clients.find(cl=>cl.id===id); if(!c) return;
-  const html = `
-    <p style="font-size:13px;color:var(--muted);margin-bottom:14px">Closing <strong>${sanitize(c.fullName)}</strong>'s file will move them to the Closed Clients area. You can reopen them at any time.</p>
-    <div class="form-group"><label>Closure Reason *</label>
-      <select id="close-reason">
-        <option value="">— Select reason —</option>
-        ${['Goals achieved','Moved away','Disengaged','Referred to another service','Program completed','Deceased','Client request','Other'].map(r=>`<option>${r}</option>`).join('')}
-      </select></div>
-    <div class="form-group"><label>Closure Notes</label>
-      <textarea id="close-notes" rows="3" placeholder="Any additional notes about the closure…"></textarea></div>`;
-  showModal('🔒 Close Client File — ' + c.fullName, html, () => {
-    const reason = document.getElementById('close-reason')?.value;
-    if(!reason) { alert('Please select a closure reason'); return false; }
-    c.status = 'closed';
-    c.closedDate = today();
-    c.closureReason = reason;
-    c.closureNotes = document.getElementById('close-notes')?.value || '';
-    audit('Closed client', c.fullName + ' — ' + reason, id);
-    saveAll();
-    showToast(c.fullName + ' has been closed');
-    showPage('clients');
-    return true;
-  }, '500px');
-}
+// Closing a file goes through the end-of-episode review (see openEpisodeReviewModal).
+function closeClient(id) { openEpisodeReviewModal(id); }
 
 function reopenClient(id) {
   const c = clients.find(cl=>cl.id===id); if(!c) return;
   if(!confirm('Reopen ' + c.fullName + '? They will appear in the active clients list again.')) return;
   c.status = 'active';
   c.reopenedDate = today();
+  c.episodeStart = today();          // a reopened file starts a new episode
+  c.plannedEndDate = '';
   audit('Reopened client', c.fullName, id);
   saveAll();
   showToast(c.fullName + ' has been reopened');
@@ -1433,6 +1413,7 @@ function openClientProfile(id) {
     </div>
   </div>
 
+  ${renderCompletenessBanner(c)}
   <div class="tabs" id="profile-tabs">
     <div class="tab active" onclick="switchProfileTab('overview','${id}',this)">Overview</div>
     <div class="tab" id="ptab-notes" onclick="switchProfileTab('notes','${id}',this)">📝 Notes &amp; Files (${clientNotes.length})</div>
@@ -1448,6 +1429,7 @@ function openClientProfile(id) {
     <div class="tab" onclick="switchProfileTab('cultural','${id}',this)">Cultural Strengthening</div>
     <div class="tab" onclick="switchProfileTab('time','${id}',this)">Time (${hrs}h ${mins}m)</div>
     <div class="tab" onclick="switchProfileTab('safety','${id}',this)">Safety Plan</div>
+    <div class="tab" onclick="switchProfileTab('homerisk','${id}',this)">🏠 Home Risk${homeRiskStatus(c).ok?'':' ⚠️'}</div>
     <div class="tab" onclick="switchProfileTab('goals','${id}',this)">🎯 Goals (${(c.goalPlan||[]).length})</div>
     <div class="tab" id="ptab-files" onclick="switchProfileTab('files','${id}',this)">📎 Files (${(c.attachments||[]).length})</div>
     <div class="tab" onclick="switchProfileTab('feedback','${id}',this)">⭐ Feedback</div>
@@ -1485,6 +1467,7 @@ const TAB_SAVE_BAR = {
   disability:      { label:'Save Disability & NDIS', fn:'saveDisabilityTab' },
   workfoundations: { label:'Save Work Foundations',  fn:'saveWF' },
   safety:          { label:'Save Safety Plan',       fn:'saveSafety' },
+  homerisk:        { label:'Save Home Risk Assessment', fn:'saveHomeRisk' },
   feedback:        { label:'Save & Record',          fn:'saveFeedback' },
 };
 function formSaveBar(label, onclick, note) {
@@ -1822,6 +1805,7 @@ function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
     </div>`;
   }
 
+  if(tab === 'homerisk') return renderHomeRiskTab(c);
   if(tab === 'safety') {
     return `
     <div class="card">
@@ -2528,6 +2512,7 @@ function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
     </div>`;
 
     return `
+    ${renderQuickFeedbackCard(c)}
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
       <div style="font-size:13px;color:var(--muted)">Worn Gundidj SEWB Feedback Form</div>
       <div style="display:flex;gap:8px">
@@ -2989,6 +2974,7 @@ function stopIntakeAutoSave() {
 // ===== SAVE INTAKE =====
 function saveIntake(id, quiet=false) {
   const c = clients.find(cl=>cl.id===id); if(!c) return;
+  if (!quiet) c.intakeSavedAt = now();   // an explicit Save counts as a completed intake; autosave doesn't
   const g = sel => document.getElementById(sel)?.value||'';
   const r = name => document.querySelector(`input[name="${name}"]:checked`)?.value||'';
   const gb = sel => document.getElementById(sel)?.checked||false;
@@ -3760,6 +3746,8 @@ function openTimeModal(clientId) {
 function deleteTime(timeId, clientId) {
   if(!confirm('Delete this time entry?')) return;
   const _tl = timeLogs.find(t=>t.id===timeId);
+  // A deleted CorePlus entry must not come back on the next import.
+  if (_tl && _tl.importKey) { const _c = clients.find(c=>c.id===_tl.clientId); if (_c) _c.corePlusIgnoredKeys = [...new Set([...(_c.corePlusIgnoredKeys||[]), _tl.importKey])]; }
   timeLogs = timeLogs.filter(t=>t.id!==timeId);
   FSYNC.deleteDoc('timelogs', timeId || (_tl && (_tl.date+'-'+_tl.clientId)));   // tombstone (QA C2) — queued if offline
   saveAll();
@@ -4355,6 +4343,8 @@ function renderReportsPage() {
     </div>
   </div>
 
+  ${corePlusCardHTML()}
+
   <!-- BULK CLIENT IMPORT -->
   <div class="card no-print" style="margin-bottom:20px" id="bulk-import-card">
     <div class="card-header">
@@ -4399,6 +4389,18 @@ function renderReportsPage() {
         <div class="rc-title">Goals Progress Report</div>
         <div class="rc-desc">All client goals, milestones, completion rates across caseload</div>
         <span class="rc-badge" style="background:#d1fae5;color:#065f46">${clients.filter(c=>c.goalPlan?.length).length} clients with goals</span>
+      </div>
+      <div class="report-card" onclick="generateProgramReport('outcomes')">
+        <div class="rc-icon">📈</div>
+        <div class="rc-title">Client Outcomes (Board)</div>
+        <div class="rc-desc">Goal scores at start vs. latest review, by domain — de-identified, small groups suppressed</div>
+        <span class="rc-badge" style="background:#dbeafe;color:#1e40af">${clients.filter(c=>(c.goalPlan||[]).some(goalIsMeasurable)).length} clients with measured goals</span>
+      </div>
+      <div class="report-card" onclick="generateProgramReport('feedback')">
+        <div class="rc-icon">⭐</div>
+        <div class="rc-title">Client Feedback Summary</div>
+        <div class="rc-desc">Requests sent, response rate and answers — anonymised, no names or comments</div>
+        <span class="rc-badge" style="background:#fef3c7;color:#92400e">${clients.reduce((a,c)=>a+(c.quickFeedback||[]).length,0)} responses</span>
       </div>
       <div class="report-card" onclick="openTaskModal()">
         <div class="rc-icon">✅</div>
@@ -4825,7 +4827,7 @@ function _importPrefName(a, b) {
 }
 
 // Australian phone numbers exported through Excel lose their leading 0
-// (0484 660 716 arrives as 484660716). Restore and format; anything that
+// (0491 570 156 arrives as 491570156). Restore and format; anything that
 // doesn't look like an Australian number is kept exactly as supplied.
 function _importAuPhone(v) {
   const raw = String(v||'').trim(); if(!raw) return '';
@@ -5765,6 +5767,8 @@ function generateProgramReport(type) {
   else if(type==='activity') openReport(buildActivityReport(from, to));
   else if(type==='risk') openReport(buildRiskRegister());
   else if(type==='goals') openReport(buildGoalsReport());
+  else if(type==='outcomes') openReport(buildOutcomesReport(from, to));
+  else if(type==='feedback') openReport(buildFeedbackSummaryReport(from, to));
 }
 
 // ===== EPISODE OF CARE — OFFICIAL FUNDING REPORTS =====
@@ -7105,6 +7109,7 @@ function openEventModal(date, startTime) {
     const date2 = document.getElementById('em-date')?.value;
     if(!title || !date2) { alert('Title and date are required'); return false; }
 
+    if(!homeVisitGate(document.getElementById('em-client')?.value, _isHomeVisitEvent(document.getElementById('em-type')?.value, title, document.getElementById('em-location')?.value))) return false;
     const recurring = document.getElementById('em-recurring')?.checked;
     const freq = document.getElementById('em-recur-freq')?.value;
     const until = document.getElementById('em-recur-until')?.value;
@@ -7203,6 +7208,7 @@ function editEvent(id) {
   showModal('✏️ Edit Event', html, () => {
     const title = document.getElementById('ee-title')?.value?.trim();
     if(!title) { alert('Title required'); return false; }
+    if(!homeVisitGate(document.getElementById('ee-client')?.value, _isHomeVisitEvent(document.getElementById('ee-type')?.value, title, document.getElementById('ee-location')?.value))) return false;
     Object.assign(e, {
       title, type: document.getElementById('ee-type')?.value,
       clientId: document.getElementById('ee-client')?.value||null,
@@ -13197,43 +13203,122 @@ function _refreshMfaBadge() {
 // ============================================================
 // GOAL & MILESTONE TRACKING
 // ============================================================
+// ============================================================
+// MEASURABLE GOALS
+// ============================================================
+// A goal is a structured record, not free text: a domain, a baseline score, a
+// target and a review date, re-scored at each review on the same 0–10 scale so
+// progress can be charted across the client's journey (start vs. latest).
+// 0 = "not at all where I want to be", 10 = "exactly where I want to be" —
+// rated WITH the client. Older goals (title + milestones only) still display;
+// they are flagged as not yet measurable until a baseline and target are added.
+const GOAL_DOMAINS = ['SEWB','AOD','Housing','Justice','Cultural Connection','Family & Kinship','Health','Employment','Education','Financial','Social','Other'];
+const GOAL_SCALE_HINT = '0 = not at all where I want to be · 10 = exactly where I want to be';
+const GOAL_REVIEW_DAYS = 91;   // default review interval (~3 months)
+const GOAL_OUTCOMES = ['Achieved','Partly achieved','Not achieved','No longer relevant'];
+
+const _isScore = v => v !== '' && v !== null && v !== undefined && !isNaN(Number(v)) && Number(v) >= 0 && Number(v) <= 10;
+function goalIsMeasurable(g) { return !!g && _isScore(g.baseline) && _isScore(g.target); }
+// Every score on record, oldest first: the baseline, then each review.
+function goalScores(g) {
+  if (!goalIsMeasurable(g)) return [];
+  const pts = [{ date: g.baselineDate || (g.created||'').slice(0,10), score: Number(g.baseline), kind:'baseline' }];
+  (g.reviews||[]).filter(r=>_isScore(r.score)).slice().sort((a,b)=>String(a.date).localeCompare(String(b.date)))
+    .forEach(r => pts.push({ date:r.date, score:Number(r.score), kind:r.final?'final':'review' }));
+  return pts;
+}
+function goalLatest(g) { const s = goalScores(g); return s.length ? s[s.length-1].score : null; }
+function goalChange(g) { const s = goalScores(g); return s.length ? s[s.length-1].score - s[0].score : null; }
+function goalIsOpen(g) { return !!g && !g.outcome; }
+function goalReviewOverdue(g) { return goalIsOpen(g) && !!g.reviewDate && g.reviewDate < today(); }
+
+// Small inline chart: each score on the 0–10 scale, with the target dashed.
+function goalSparkline(g) {
+  const s = goalScores(g); if (!s.length) return '';
+  const W = 150, H = 40, P = 4;
+  const x = i => s.length===1 ? W/2 : P + i*(W-2*P)/(s.length-1);
+  const y = v => H - P - (v/10)*(H-2*P);
+  const ty = y(Number(g.target));
+  return `<svg class="goal-spark" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Scores over time: ${s.map(p=>p.score).join(', ')}; target ${Number(g.target)}">
+    <line x1="${P}" x2="${W-P}" y1="${ty}" y2="${ty}" stroke="#16a34a" stroke-dasharray="3 3" stroke-width="1"/>
+    <polyline fill="none" stroke="#1a3a2a" stroke-width="2" points="${s.map((p,i)=>x(i)+','+y(p.score)).join(' ')}"/>
+    ${s.map((p,i)=>`<circle cx="${x(i)}" cy="${y(p.score)}" r="3" fill="${i===0?'#9ca3af':'#1a3a2a'}"><title>${sanitize(fmt(p.date)||'')}: ${p.score}/10</title></circle>`).join('')}
+  </svg>`;
+}
+
+// Start → latest → target on one 0–10 bar.
+function goalProgressBar(g) {
+  const b = Number(g.baseline), t = Number(g.target), l = goalLatest(g);
+  const pct = v => (v/10*100).toFixed(1)+'%';
+  const lo = Math.min(b, l), hi = Math.max(b, l);
+  const col = l > b ? '#16a34a' : l < b ? '#dc2626' : '#6b7280';
+  return `<div style="position:relative;height:10px;background:var(--bg);border-radius:5px;margin:8px 0 4px">
+      <div style="position:absolute;left:${pct(lo)};width:${pct(hi-lo)};height:10px;background:${col};border-radius:5px;opacity:.75"></div>
+      <div title="Start ${b}" style="position:absolute;left:calc(${pct(b)} - 5px);top:-2px;width:10px;height:14px;border-radius:3px;background:#9ca3af"></div>
+      <div title="Latest ${l}" style="position:absolute;left:calc(${pct(l)} - 6px);top:-3px;width:12px;height:16px;border-radius:3px;background:${col}"></div>
+      <div title="Target ${t}" style="position:absolute;left:calc(${pct(t)} - 1px);top:-5px;width:2px;height:20px;background:#16a34a"></div>
+    </div>
+    <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted)"><span>0</span><span>10</span></div>`;
+}
+
 function renderGoalsTab(c) {
   const goals = c.goalPlan || [];
+  const open = goals.filter(goalIsOpen);
+  const measurable = goals.filter(goalIsMeasurable);
+  const improved = measurable.filter(g=>goalChange(g)>0).length;
+  const overdue = open.filter(goalReviewOverdue).length;
   return `
+  ${renderEpisodePlanCard(c)}
   <div class="card">
     <div class="card-header">
-      <div class="card-title">🎯 Goal &amp; Milestone Tracker</div>
+      <div class="card-title">🎯 Goals &amp; Progress</div>
       <button class="btn btn-primary btn-sm" onclick="openGoalModal('${c.id}')">➕ Add Goal</button>
     </div>
-    <p style="font-size:12px;color:var(--muted);margin-bottom:14px">Track individualized client action plans and milestone progress over time.</p>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:12px">Each goal has a domain, a starting score, a target and a review date. Scores use one scale, rated with the client: <strong>${GOAL_SCALE_HINT}</strong>.</p>
+    ${goals.length ? `<div class="goal-summary" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;font-size:12px">
+      <span class="tag" style="background:#f3f4f6;color:#374151">${goals.length} goal${goals.length!==1?'s':''}</span>
+      <span class="tag" style="background:#dbeafe;color:#1e40af">${measurable.length} measured</span>
+      <span class="tag" style="background:#d1fae5;color:#065f46">${improved} improved</span>
+      ${overdue?`<span class="tag" style="background:#fee2e2;color:#991b1b">${overdue} review${overdue!==1?'s':''} overdue</span>`:''}
+    </div>` : ''}
     ${goals.length===0
       ?`<div class="empty-state"><div class="icon">🎯</div><p>No goals recorded yet</p><button class="btn btn-primary btn-sm" style="margin-top:12px" onclick="openGoalModal('${c.id}')">Add First Goal</button></div>`
       :goals.map((g,gi)=>{
         const done=g.milestones?.filter(m=>m.done).length||0;
         const total=g.milestones?.length||0;
-        const pct=total?Math.round(done/total*100):0;
-        const statusCol=pct===100?'#16a34a':pct>50?'#d97706':'#6b7280';
-        return `<div style="border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:12px;border-left:4px solid ${statusCol}">
-          <div style="display:flex;align-items:flex-start;gap:10px">
-            <div style="flex:1">
-              <div style="font-size:14px;font-weight:700">${g.title}</div>
-              <div style="font-size:12px;color:var(--muted);margin-top:2px">${g.category||''} &bull; Target: ${fmt(g.targetDate)||'—'} &bull; Added: ${fmt(g.created)}</div>
-              ${g.description?`<div style="font-size:12px;margin-top:6px">${g.description}</div>`:''}
-              <div style="margin-top:10px">
-                <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-bottom:4px"><span>Progress</span><span>${pct}% (${done}/${total} milestones)</span></div>
-                <div style="height:8px;background:var(--bg);border-radius:4px;overflow:hidden"><div style="height:8px;background:${statusCol};border-radius:4px;width:${pct}%;transition:width 0.3s"></div></div>
-              </div>
-              ${total>0?`<div style="margin-top:10px;display:grid;gap:5px">
+        const meas = goalIsMeasurable(g);
+        const l = meas ? goalLatest(g) : null, ch = meas ? goalChange(g) : null;
+        const col = !meas ? '#d97706' : g.outcome ? '#6b7280' : ch>0 ? '#16a34a' : ch<0 ? '#dc2626' : '#2563eb';
+        return `<div class="goal-card" data-goal="${sanitize(g.id||'')}" style="border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:12px;border-left:4px solid ${col}">
+          <div style="display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap">
+            <div style="flex:1;min-width:220px">
+              <div style="font-size:14px;font-weight:700">${sanitize(g.title||'')}</div>
+              <div style="font-size:12px;color:var(--muted);margin-top:2px">${sanitize(g.category||'—')} &bull; Added ${fmt(g.created)||'—'}${g.targetDate?` &bull; Target date ${fmt(g.targetDate)}`:''}</div>
+              ${g.description?`<div style="font-size:12px;margin-top:6px">${sanitize(g.description)}</div>`:''}
+              ${meas ? `
+                <div class="goal-scores" style="font-size:13px;margin-top:10px"><strong>Start ${Number(g.baseline)}</strong> → <strong>Latest ${l}</strong> <span style="color:var(--muted)">· Target ${Number(g.target)}</span>
+                  <span style="font-weight:700;color:${col}">${ch>0?'▲ +'+ch:ch<0?'▼ '+ch:'no change yet'}</span></div>
+                ${goalProgressBar(g)}
+                <div style="font-size:11px;margin-top:6px;color:${goalReviewOverdue(g)?'#991b1b':'var(--muted)'}">
+                  ${g.outcome ? `Outcome: <strong>${sanitize(g.outcome)}</strong>${g.outcomeDate?' ('+fmt(g.outcomeDate)+')':''}`
+                    : g.reviewDate ? `${goalReviewOverdue(g)?'⚠️ Review overdue — was due':'Next review'} ${fmt(g.reviewDate)}` : 'No review date set'}
+                  · ${(g.reviews||[]).length} review${(g.reviews||[]).length!==1?'s':''}</div>`
+              : `<div class="goal-unmeasured" style="margin-top:10px;font-size:12px;background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:6px;padding:6px 8px">Not measurable yet — add a starting score and a target (✏️ Edit) so progress can be tracked.</div>`}
+              ${total>0?`<div style="margin-top:10px;font-size:11px;color:var(--muted)">Steps: ${done}/${total} done</div><div style="margin-top:4px;display:grid;gap:5px">
                 ${g.milestones.map((m,mi)=>`<div style="display:flex;align-items:center;gap:8px;padding:5px 8px;background:${m.done?'#d1fae5':'var(--bg)'};border-radius:5px">
                   <input type="checkbox" ${m.done?'checked':''} onchange="toggleMilestone('${c.id}',${gi},${mi})" style="width:16px;height:16px;cursor:pointer">
-                  <span style="flex:1;font-size:12px;${m.done?'text-decoration:line-through;color:var(--muted)':''}">${m.text}</span>
+                  <span style="flex:1;font-size:12px;${m.done?'text-decoration:line-through;color:var(--muted)':''}">${sanitize(m.text||'')}</span>
                   ${m.done?`<span style="font-size:10px;color:#16a34a">✓ ${fmt(m.doneDate)}</span>`:''}
                 </div>`).join('')}
               </div>`:''}
             </div>
-            <div style="display:flex;gap:6px;flex-shrink:0">
-              <button class="btn btn-sm btn-outline" onclick="openGoalModal('${c.id}',${gi})">✏️</button>
-              <button class="btn btn-sm btn-danger" onclick="deleteGoal('${c.id}',${gi})">✕</button>
+            <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;flex-shrink:0">
+              ${meas?goalSparkline(g):''}
+              <div style="display:flex;gap:6px">
+                ${meas && goalIsOpen(g)?`<button class="btn btn-sm btn-primary" onclick="openGoalReviewModal('${c.id}',${gi})">📊 Record score</button>`:''}
+                <button class="btn btn-sm btn-outline" onclick="openGoalModal('${c.id}',${gi})" title="Edit goal">✏️</button>
+                <button class="btn btn-sm btn-danger" onclick="deleteGoal('${c.id}',${gi})" title="Delete goal">✕</button>
+              </div>
             </div>
           </div>
         </div>`;
@@ -13242,39 +13327,878 @@ function renderGoalsTab(c) {
   </div>`;
 }
 
+const _scoreOpts = (cur, ph) => selOpts([0,1,2,3,4,5,6,7,8,9,10].map(n=>({v:String(n), l:String(n)})), _isScore(cur)?String(Number(cur)):'', ph);
+
 function openGoalModal(clientId, goalIdx) {
   const c=clients.find(cl=>cl.id===clientId); if(!c) return;
   if(!c.goalPlan) c.goalPlan=[];
   const g = goalIdx!==undefined ? c.goalPlan[goalIdx] : null;
   const milestones = g?.milestones||[];
+  const scored = g && (g.reviews||[]).length > 0;
   const html=`
-  <div class="form-group"><label>Goal Title *</label><input id="gm-title" value="${sanitize(g?.title||'')}"></div>
+  <div class="form-group"><label>Goal (in the client's words where possible) *</label><input id="gm-title" value="${sanitize(g?.title||'')}" placeholder="e.g. Feel settled in my own place"></div>
   <div class="grid-2">
-    <div class="form-group"><label>Category</label>
-      <select id="gm-cat">${['Employment','Housing','Health','Education','Social','Cultural','Legal','Financial','SEWB','AOD','Other'].map(c=>`<option ${g?.category===c?'selected':''}>${c}</option>`).join('')}</select></div>
-    <div class="form-group"><label>Target Date</label><input type="date" id="gm-date" value="${sanitize(g?.targetDate||'')}"></div>
+    <div class="form-group"><label>Domain *</label>
+      <select id="gm-cat">${selOpts(GOAL_DOMAINS, g?.category||'', '— Choose a domain —')}</select></div>
+    <div class="form-group"><label>Target date</label><input type="date" id="gm-date" value="${sanitize(g?.targetDate||'')}"></div>
   </div>
-  <div class="form-group"><label>Description / Detail</label><textarea id="gm-desc" style="min-height:70px">${sanitize(g?.description||'')}</textarea></div>
-  <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin:12px 0 8px">Milestones / Steps</div>
+  <div style="background:var(--bg);border-radius:8px;padding:12px;margin-bottom:12px">
+    <div style="font-size:12px;font-weight:700;margin-bottom:6px">📏 Measure (0–10, rated with the client)</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:8px">${GOAL_SCALE_HINT}</div>
+    <div class="grid-3">
+      <div class="form-group"><label>Starting score *</label><select id="gm-baseline" ${scored?'disabled title="Locked once the goal has been re-scored, so progress stays honest"':''}>${_scoreOpts(g?.baseline,'— score —')}</select></div>
+      <div class="form-group"><label>Target score *</label><select id="gm-target">${_scoreOpts(g?.target,'— score —')}</select></div>
+      <div class="form-group"><label>Review date *</label><input type="date" id="gm-review" value="${sanitize(g?.reviewDate||addDaysStr(today(), GOAL_REVIEW_DAYS))}"></div>
+    </div>
+  </div>
+  <div class="form-group"><label>Description / detail</label><textarea id="gm-desc" style="min-height:60px">${sanitize(g?.description||'')}</textarea></div>
+  <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin:12px 0 8px">Steps (optional)</div>
   <div id="milestone-list">
-    ${milestones.map((m,i)=>`<div style="display:flex;gap:8px;margin-bottom:6px"><input class="gm-milestone" value="${sanitize(m.text)}" style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px"><button onclick="this.parentElement.remove()" style="background:#fee2e2;border:none;border-radius:4px;padding:4px 8px;cursor:pointer;color:#dc2626">✕</button></div>`).join('')}
+    ${milestones.map(m=>`<div style="display:flex;gap:8px;margin-bottom:6px"><input class="gm-milestone" value="${sanitize(m.text)}" style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px"><button onclick="this.parentElement.remove()" style="background:#fee2e2;border:none;border-radius:4px;padding:4px 8px;cursor:pointer;color:#dc2626">✕</button></div>`).join('')}
   </div>
-  <button class="btn btn-sm btn-outline" style="margin-top:4px" onclick="addMilestoneField()">➕ Add Milestone</button>`;
+  <button class="btn btn-sm btn-outline" style="margin-top:4px" onclick="addMilestoneField()">➕ Add Step</button>`;
 
   showModal(g?'✏️ Edit Goal':'🎯 New Goal', html, ()=>{
-    const title=document.getElementById('gm-title')?.value?.trim();
-    if(!title){alert('Goal title required');return false;}
+    const v = id => document.getElementById(id)?.value ?? '';
+    const title=v('gm-title').trim(), cat=v('gm-cat'), base=scored?g.baseline:v('gm-baseline'), tgt=v('gm-target'), rev=v('gm-review');
+    if(!title){alert('Goal is required');return false;}
+    if(!cat){alert('Choose a domain');return false;}
+    if(!_isScore(base)||!_isScore(tgt)){alert('Add a starting score and a target score (0–10) so the goal can be measured.');return false;}
+    if(!rev){alert('Set a review date');return false;}
     const ms=[...document.querySelectorAll('.gm-milestone')].map(el=>el.value.trim()).filter(Boolean);
-    const newGoal={
-      id:uid(), title, category:document.getElementById('gm-cat')?.value,
-      targetDate:document.getElementById('gm-date')?.value,
-      description:document.getElementById('gm-desc')?.value,
-      created:today(),
-      milestones: g ? ms.map((t,i)=>({text:t,done:g.milestones[i]?.done||false,doneDate:g.milestones[i]?.doneDate||''})) : ms.map(t=>({text:t,done:false,doneDate:''})),
-    };
-    if(goalIdx!==undefined) c.goalPlan[goalIdx]=newGoal; else c.goalPlan.push(newGoal);
-    saveAll(); showToast('Goal saved'); return true;
+    const prevMs = g?.milestones||[];
+    const goal = Object.assign({}, g||{}, {
+      id: g?.id || uid(), title, category:cat,
+      targetDate:v('gm-date'), description:v('gm-desc'),
+      baseline:Number(base), target:Number(tgt), reviewDate:rev, scale:'0-10',
+      baselineDate: g?.baselineDate || today(),
+      created: g?.created || today(),
+      reviews: g?.reviews || [],
+      milestones: ms.map(t=>{ const old=prevMs.find(m=>m.text===t); return {text:t, done:old?.done||false, doneDate:old?.doneDate||''}; }),
+    });
+    if(goalIdx!==undefined) c.goalPlan[goalIdx]=goal; else c.goalPlan.push(goal);
+    audit(g?'Goal updated':'Goal added', `${c.fullName} — ${cat}: start ${goal.baseline}, target ${goal.target}`, c.id);
+    saveAll(); showToast('Goal saved'); _reopenProfileTab(clientId, 'goals'); return true;
   });
+}
+
+function openGoalReviewModal(clientId, goalIdx) {
+  const c=clients.find(cl=>cl.id===clientId); const g=c?.goalPlan?.[goalIdx]; if(!g) return;
+  const html = `
+    <p style="font-size:13px;margin-bottom:10px"><strong>${sanitize(g.title)}</strong><br><span style="color:var(--muted)">Start ${Number(g.baseline)} · Latest ${goalLatest(g)} · Target ${Number(g.target)}</span></p>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:10px">Ask the client where they are now on the same scale. ${GOAL_SCALE_HINT}.</p>
+    <div class="grid-3">
+      <div class="form-group"><label>Review date *</label><input type="date" id="gr-date" value="${today()}"></div>
+      <div class="form-group"><label>Score now *</label><select id="gr-score">${_scoreOpts('', '— score —')}</select></div>
+      <div class="form-group"><label>Next review *</label><input type="date" id="gr-next" value="${addDaysStr(today(), GOAL_REVIEW_DAYS)}"></div>
+    </div>
+    <div class="form-group"><label>What's changed? (optional — stays on this file only)</label><textarea id="gr-note" style="min-height:60px"></textarea></div>`;
+  showModal('📊 Goal Review', html, ()=>{
+    const v = id => document.getElementById(id)?.value || '';
+    if(!_isScore(v('gr-score'))){ alert('Choose a score from 0 to 10'); return false; }
+    if(!v('gr-date')||!v('gr-next')){ alert('Review date and next review are required'); return false; }
+    const prev = goalLatest(g);
+    g.reviews = g.reviews || [];
+    g.reviews.push({ id:uid(), date:v('gr-date'), score:Number(v('gr-score')), note:v('gr-note'), by:currentUser?.name||'' });
+    g.reviewDate = v('gr-next');
+    audit('Goal reviewed', `${c.fullName} — ${g.category||'goal'}: ${prev} → ${Number(v('gr-score'))} (target ${Number(g.target)})`, c.id);
+    saveAll(); showToast('Score recorded'); _reopenProfileTab(clientId, 'goals'); return true;
+  }, '560px');
+}
+
+// After a modal saved from inside a client file: the modal closes once its save
+// returns, so the file (and the tab the worker was on) is reopened just after.
+function _reopenProfileTab(clientId, tab) { setTimeout(() => { openClientProfile(clientId); _openProfileTab(tab, clientId); }, 0); }
+// Open a profile tab by name.
+function _openProfileTab(tab, clientId) {
+  const el = [...document.querySelectorAll('#profile-tabs .tab')].find(t=>(t.getAttribute('onclick')||'').includes(`'${tab}'`));
+  switchProfileTab(tab, clientId, el||null);
+}
+
+// ---- Board report: goal outcomes, de-identified ----
+// No names, goal wording or review notes — only counts and scores, grouped by
+// domain. Groups with fewer than 5 clients are suppressed so a small cohort
+// can't be singled out.
+const SMALL_CELL = 5;
+function buildOutcomesReport(from, to) {
+  const inRange = d => d && d >= from && d <= to;
+  const rows = {};
+  let clientsMeasured = new Set(), goalsMeasured = 0, improved = 0, reached = 0, totalChange = 0;
+  (clients||[]).forEach(c => (c.goalPlan||[]).forEach(g => {
+    if (!goalIsMeasurable(g)) return;
+    const s = goalScores(g).filter(p => p.kind==='baseline' || inRange(p.date));
+    if (s.length < 2) return;                         // needs at least one review in the period
+    const ch = s[s.length-1].score - s[0].score;
+    const d = g.category || 'Other';
+    const r = rows[d] = rows[d] || { clients:new Set(), goals:0, improved:0, reached:0, change:0, base:0, latest:0 };
+    r.clients.add(c.id); r.goals++; r.change += ch; r.base += s[0].score; r.latest += s[s.length-1].score;
+    if (ch > 0) r.improved++;
+    if (s[s.length-1].score >= Number(g.target)) r.reached++;
+    clientsMeasured.add(c.id); goalsMeasured++; totalChange += ch; if (ch>0) improved++; if (s[s.length-1].score >= Number(g.target)) reached++;
+  }));
+  const pct = (a,b) => b ? Math.round(a/b*100)+'%' : '—';
+  const avg = (a,b) => b ? (a/b).toFixed(1) : '—';
+  return `
+  ${reportHeader('Client Outcomes — Goal Progress (de-identified)', `Reviews ${fmt(from)} – ${fmt(to)} · Generated ${fmt(today())}`)}
+  <p style="font-size:12px;color:#6b7280">Goals scored 0–10 with the client at the start and at each review. A goal is included when it has a starting score and at least one review in the period. No names, goal wording or notes are shown. Domains with fewer than ${SMALL_CELL} clients are combined into "Other (small groups)".</p>
+  <div class="stat-row">
+    <div class="stat-box"><div class="sv">${clientsMeasured.size<SMALL_CELL&&clientsMeasured.size?'&lt;'+SMALL_CELL:clientsMeasured.size}</div><div class="sl">Clients with measured progress</div></div>
+    <div class="stat-box"><div class="sv">${goalsMeasured}</div><div class="sl">Goals reviewed</div></div>
+    <div class="stat-box"><div class="sv" style="color:#16a34a">${pct(improved,goalsMeasured)}</div><div class="sl">Improved</div></div>
+    <div class="stat-box"><div class="sv">${pct(reached,goalsMeasured)}</div><div class="sl">Reached target</div></div>
+    <div class="stat-box"><div class="sv">${goalsMeasured?(totalChange/goalsMeasured>0?'+':'')+(totalChange/goalsMeasured).toFixed(1):'—'}</div><div class="sl">Average change (points)</div></div>
+  </div>
+  <h2>By domain</h2>
+  ${(()=>{ const big = Object.entries(rows).filter(([,r])=>r.clients.size>=SMALL_CELL).sort((a,b)=>b[1].goals-a[1].goals);
+    const small = Object.entries(rows).filter(([,r])=>r.clients.size<SMALL_CELL);
+    const merged = small.reduce((m,[,r])=>{ r.clients.forEach(x=>m.clients.add(x)); ['goals','improved','reached','change','base','latest'].forEach(k=>m[k]+=r[k]); return m; }, {clients:new Set(),goals:0,improved:0,reached:0,change:0,base:0,latest:0});
+    const line = (name,r) => r.clients.size<SMALL_CELL
+      ? `<tr><td>${sanitize(name)}</td><td>&lt;${SMALL_CELL}</td><td colspan="5" style="color:#6b7280">Too few clients to report without identifying anyone</td></tr>`
+      : `<tr><td>${sanitize(name)}</td><td>${r.clients.size}</td><td>${r.goals}</td><td>${avg(r.base,r.goals)}</td><td>${avg(r.latest,r.goals)}</td><td>${pct(r.improved,r.goals)}</td><td>${pct(r.reached,r.goals)}</td></tr>`;
+    return `<table><tr><th>Domain</th><th>Clients</th><th>Goals</th><th>Avg start</th><th>Avg latest</th><th>Improved</th><th>Reached target</th></tr>
+      ${big.map(([d,r])=>line(d,r)).join('')}${merged.goals?line('Other (small groups)',merged):''}
+      ${!goalsMeasured?'<tr><td colspan="7">No goals with a review in this period yet.</td></tr>':''}</table>`; })()}`;
+}
+
+// ============================================================
+// EPISODE PLAN
+// ============================================================
+// An episode starts at intake (or reopening) and may have a planned end date.
+// Reaching that date prompts the end-of-episode review.
+function episodeStart(c) { return c.episodeStart || (c.created || '').slice(0, 10) || today(); }
+function episodeEndReached(c) { return (c.status || 'active') !== 'closed' && !!c.plannedEndDate && c.plannedEndDate <= today(); }
+function renderEpisodePlanCard(c) {
+  const closed = (c.status || 'active') === 'closed';
+  return `<div class="card episode-plan" style="margin-bottom:12px">
+    <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
+      <div style="flex:1;min-width:200px"><div style="font-size:13px;font-weight:700">🗓️ Current episode</div>
+        <div style="font-size:12px;color:var(--muted)">Started ${fmt(episodeStart(c)) || '—'}${closed ? ' · closed ' + (fmt(c.closedDate) || '') : ''}</div></div>
+      ${closed ? '' : `<div class="form-group" style="margin:0"><label style="font-size:11px">Planned end date</label>
+        <input type="date" id="ep-end" value="${sanitize(c.plannedEndDate || '')}" onchange="saveEpisodePlan('${c.id}', this.value)"></div>`}
+    </div>
+    ${episodeEndReached(c) ? `<div class="alert alert-warning episode-due" style="margin:10px 0 0;font-size:12px">This episode reached its planned end on ${fmt(c.plannedEndDate)}. <button class="btn btn-sm btn-primary" onclick="openEpisodeReviewModal('${c.id}')">Start end-of-episode review</button> or move the date if support is continuing.</div>` : ''}
+  </div>`;
+}
+function saveEpisodePlan(clientId, date) {
+  const c = clients.find(x => x.id === clientId); if (!c) return;
+  c.plannedEndDate = date || '';
+  if (!c.episodeStart) c.episodeStart = episodeStart(c);
+  audit('Episode end date set', `${c.fullName} — ${date ? fmt(date) : 'cleared'}`, c.id);
+  saveAll(); showToast(date ? 'Planned end date saved' : 'Planned end date cleared');
+}
+
+// ============================================================
+// CLIENT FEEDBACK — short form, sent by email or text
+// ============================================================
+// Sent at set points of each episode — after intake, mid-episode and at exit —
+// or whenever the worker chooses. The message carries the four questions in
+// plain language so the client can simply reply; the worker records the reply
+// on the file. Nothing in the message identifies the client beyond their first
+// name, and no link carries any client identifier.
+const QF_QUESTIONS = [
+  { k:'welcome',   q:'Do you feel welcome and respected when you come to us?', a:['Yes, always','Mostly','Not really'] },
+  { k:'helping',   q:'Is your worker helping with the things that matter to you?', a:['Yes, a lot','A bit','Not really'] },
+  { k:'better',    q:'Are things better for you since you started with us?', a:['A lot better','A bit better','About the same','Worse'] },
+  { k:'recommend', q:'Would you tell family or community to come to us?', a:['Yes','Maybe','No'] },
+];
+const QF_POINTS = { intake:'After intake', mid:'Mid-episode', exit:'At exit', other:'Other' };
+const QF_MID_DAYS = 42;   // half of a 12-week episode, when no planned end is set
+function feedbackRequestsThisEpisode(c) { const s = episodeStart(c); return (c.feedbackRequests || []).filter(r => (r.sentAt || '').slice(0, 10) >= s); }
+function feedbackDue(c) {
+  if ((c.status || 'active') === 'closed') return [];
+  const sent = new Set(feedbackRequestsThisEpisode(c).map(r => r.point));
+  const got = new Set((c.quickFeedback || []).filter(f => (f.date || '') >= episodeStart(c)).map(f => f.point));
+  const due = [];
+  const intakeDone = !!(c.intakeSavedAt || c.ifIntakeWorker);
+  if (intakeDone && !sent.has('intake') && !got.has('intake')) due.push('intake');
+  const start = episodeStart(c);
+  const mid = c.plannedEndDate ? addDaysStr(start, Math.floor((new Date(c.plannedEndDate) - new Date(start)) / 86400000 / 2)) : addDaysStr(start, QF_MID_DAYS);
+  if (mid <= today() && !sent.has('mid') && !got.has('mid')) due.push('mid');
+  return due;
+}
+function feedbackMessage(c, point) {
+  const first = String(c.preferredName || c.fullName || '').trim().split(/\s+/)[0] || 'there';
+  const me = (currentUser?.name || '').split(' ')[0] || 'your worker';
+  return `Hi ${first}, it's ${me} from Worn Gundidj. We'd like to know how we're going for you. You can just reply to this message — it's fine to skip any question, and you don't have to answer at all.\n\n`
+    + QF_QUESTIONS.map((q, i) => `${i + 1}. ${q.q} (${q.a.join(' / ')})`).join('\n')
+    + `\n5. Anything else you want to tell us?\n\nThank you — what you tell us helps us do better for you and for community.`;
+}
+function openFeedbackSendModal(clientId, point) {
+  const c = clients.find(x => x.id === clientId); if (!c) return;
+  const mob = String(c.phone || '').replace(/[^\d+]/g, '');
+  const html = `
+    <div class="form-group"><label>Feedback point</label><select id="qf-point">${selOpts(Object.entries(QF_POINTS).map(([v, l]) => ({ v, l })), point || 'other')}</select></div>
+    <div class="form-group"><label>Message (plain language — edit if needed)</label><textarea id="qf-msg" style="min-height:220px;font-size:13px">${sanitize(feedbackMessage(c, point))}</textarea></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-primary" ${c.email ? '' : 'disabled title="No email address on file"'} onclick="sendFeedbackRequest('${c.id}','email')">✉️ Email ${c.email ? '' : '(no email on file)'}</button>
+      <button class="btn btn-primary" ${mob ? '' : 'disabled title="No mobile number on file"'} onclick="sendFeedbackRequest('${c.id}','sms')">💬 Text message ${mob ? '' : '(no mobile on file)'}</button>
+      <button class="btn btn-outline" onclick="sendFeedbackRequest('${c.id}','copy')">📋 Copy message</button>
+      <button class="btn btn-outline" onclick="sendFeedbackRequest('${c.id}','in person')">🗣️ Asked in person / by phone</button>
+    </div>
+    <p style="font-size:11px;color:var(--muted);margin-top:10px">Email and text open on this device ready to send, from your own mailbox or phone. When the client replies, record their answers in <strong>⭐ Feedback → Quick feedback</strong>.</p>`;
+  showModal('⭐ Ask for feedback', html, null, '620px', true);
+}
+function sendFeedbackRequest(clientId, channel) {
+  const c = clients.find(x => x.id === clientId); if (!c) return;
+  const msg = document.getElementById('qf-msg')?.value || feedbackMessage(c);
+  const point = document.getElementById('qf-point')?.value || 'other';
+  if (channel === 'email') window.location.href = `mailto:${encodeURIComponent(c.email)}?subject=${encodeURIComponent('How are we going? — Worn Gundidj')}&body=${encodeURIComponent(msg)}`;
+  else if (channel === 'sms') window.location.href = `sms:${String(c.phone || '').replace(/[^\d+]/g, '')}?&body=${encodeURIComponent(msg)}`;
+  else if (channel === 'copy') { try { navigator.clipboard.writeText(msg); } catch (_) {} }
+  c.feedbackRequests = c.feedbackRequests || [];
+  c.feedbackRequests.push({ id: uid(), point, channel, sentAt: now(), sentBy: currentUser?.name || '' });
+  audit('Feedback requested', `${c.fullName} — ${QF_POINTS[point] || point} by ${channel}`, c.id);
+  saveAll(); closeModal(); showToast(channel === 'copy' ? 'Message copied — request recorded' : 'Feedback request recorded');
+}
+function renderQuickFeedbackCard(c) {
+  const list = (c.quickFeedback || []).slice().sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  const reqs = (c.feedbackRequests || []).slice().sort((a, b) => String(b.sentAt).localeCompare(String(a.sentAt)));
+  const due = feedbackDue(c);
+  return `<div class="card quick-feedback" style="border-left:4px solid #f59e0b">
+    <div class="card-header"><div class="card-title">⭐ Quick feedback (4 questions)</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn btn-sm btn-primary" onclick="openFeedbackSendModal('${c.id}','${due[0] || 'other'}')">✉️ Send request</button>
+        <button class="btn btn-sm btn-outline" onclick="openQuickFeedbackModal('${c.id}')">✍️ Record answers</button></div></div>
+    ${due.length ? `<div class="alert alert-warning" style="font-size:12px">Feedback due: ${due.map(d => QF_POINTS[d]).join(', ')}</div>` : ''}
+    <div style="font-size:12px;color:var(--muted)">${reqs.length} request${reqs.length !== 1 ? 's' : ''} sent${reqs[0] ? ` · last ${fmt(reqs[0].sentAt)} by ${sanitize(reqs[0].channel)}` : ''} · ${list.length} response${list.length !== 1 ? 's' : ''}</div>
+    ${list.slice(0, 5).map(f => `<div style="padding:8px 0;border-bottom:1px solid var(--border);font-size:12px"><strong>${fmt(f.date)}</strong> · ${sanitize(QF_POINTS[f.point] || f.point)} · ${sanitize(f.channel || '')}<br>
+      ${QF_QUESTIONS.map(q => `${sanitize(q.q.split('?')[0])}: <strong>${sanitize(f.answers?.[q.k] || '—')}</strong>`).join(' · ')}
+      ${f.comment ? `<div style="margin-top:4px;color:var(--muted)">“${sanitize(f.comment)}”</div>` : ''}</div>`).join('')}
+    <p style="font-size:11px;color:var(--muted);margin-top:8px">The longer SEWB feedback form is below.</p>
+  </div>`;
+}
+function openQuickFeedbackModal(clientId) {
+  const c = clients.find(x => x.id === clientId); if (!c) return;
+  const open = (c.feedbackRequests || []).filter(r => !r.respondedAt).sort((a, b) => String(b.sentAt).localeCompare(String(a.sentAt)));
+  const html = `
+    <div class="grid-3">
+      <div class="form-group"><label>Date</label><input type="date" id="qfr-date" value="${today()}"></div>
+      <div class="form-group"><label>Feedback point</label><select id="qfr-point">${selOpts(Object.entries(QF_POINTS).map(([v, l]) => ({ v, l })), open[0]?.point || 'other')}</select></div>
+      <div class="form-group"><label>How it came back</label><select id="qfr-channel">${selOpts(['Email reply','Text reply','Phone','In person'], open[0]?.channel === 'email' ? 'Email reply' : open[0]?.channel === 'sms' ? 'Text reply' : 'In person')}</select></div>
+    </div>
+    ${QF_QUESTIONS.map(q => `<div class="form-group"><label>${sanitize(q.q)}</label><div style="display:flex;gap:12px;flex-wrap:wrap">
+      ${[...q.a, 'No answer'].map(a => `<label style="display:flex;gap:4px;align-items:center;font-size:13px;font-weight:400"><input type="radio" name="qfr-${q.k}" value="${sanitize(a)}" ${a === 'No answer' ? 'checked' : ''}> ${sanitize(a)}</label>`).join('')}</div></div>`).join('')}
+    <div class="form-group"><label>Anything else they told us (optional)</label><textarea id="qfr-comment" style="min-height:60px"></textarea></div>`;
+  showModal('✍️ Record quick feedback', html, () => {
+    const v = id => document.getElementById(id)?.value || '';
+    const answers = {}; QF_QUESTIONS.forEach(q => { const a = document.querySelector(`input[name="qfr-${q.k}"]:checked`)?.value; if (a && a !== 'No answer') answers[q.k] = a; });
+    if (!Object.keys(answers).length && !v('qfr-comment').trim()) { alert('Record at least one answer, or cancel.'); return false; }
+    const point = v('qfr-point'), req = open.find(r => r.point === point) || null;
+    c.quickFeedback = c.quickFeedback || [];
+    c.quickFeedback.push({ id: uid(), date: v('qfr-date'), point, channel: v('qfr-channel'), answers, comment: v('qfr-comment'), recordedBy: currentUser?.name || '', requestId: req?.id || '' });
+    if (req) req.respondedAt = now();
+    audit('Feedback recorded', `${c.fullName} — ${QF_POINTS[point] || point}`, c.id);
+    saveAll(); showToast('Feedback recorded'); _reopenProfileTab(c.id, 'feedback'); return true;
+  }, '620px');
+}
+// Anonymised service-level roll-up: counts only. No names, no comments.
+function buildFeedbackSummaryReport(from, to) {
+  const inR = d => (d || '').slice(0, 10) >= from && (d || '').slice(0, 10) <= to;
+  const reqs = clients.flatMap(c => (c.feedbackRequests || []).filter(r => inR(r.sentAt)));
+  const resp = clients.flatMap(c => (c.quickFeedback || []).filter(f => inR(f.date)));
+  const pct = (a, b) => b ? Math.round(a / b * 100) + '%' : '—';
+  const by = (arr, k) => arr.reduce((m, x) => (m[x[k]] = (m[x[k]] || 0) + 1, m), {});
+  const rp = by(reqs, 'point'), sp = by(resp, 'point'), ch = by(reqs, 'channel');
+  return `
+  ${reportHeader('Client Feedback — Service Summary (anonymised)', `${fmt(from)} – ${fmt(to)} · Generated ${fmt(today())}`)}
+  <p style="font-size:12px;color:#6b7280">Counts only. Client names and written comments are never included. Answers with fewer than ${SMALL_CELL} responses in total are not broken down.</p>
+  <div class="stat-row">
+    <div class="stat-box"><div class="sv">${reqs.length}</div><div class="sl">Requests sent</div></div>
+    <div class="stat-box"><div class="sv">${resp.length}</div><div class="sl">Responses</div></div>
+    <div class="stat-box"><div class="sv">${pct(resp.filter(f => f.requestId).length, reqs.length)}</div><div class="sl">Response rate</div></div>
+    <div class="stat-box"><div class="sv">${resp.filter(f => f.comment).length}</div><div class="sl">Gave a comment</div></div>
+  </div>
+  <h2>By feedback point</h2>
+  <table><tr><th>Point</th><th>Requests</th><th>Responses</th></tr>
+  ${Object.entries(QF_POINTS).map(([k, l]) => `<tr><td>${l}</td><td>${rp[k] || 0}</td><td>${sp[k] || 0}</td></tr>`).join('')}</table>
+  <h2>How requests were sent</h2>
+  <table><tr><th>Channel</th><th>Requests</th></tr>${Object.entries(ch).map(([k, n]) => `<tr><td>${sanitize(k)}</td><td>${n}</td></tr>`).join('') || '<tr><td colspan="2">None in this period</td></tr>'}</table>
+  <h2>Answers</h2>
+  ${resp.length < SMALL_CELL ? `<p>Fewer than ${SMALL_CELL} responses in this period — not broken down, so no one can be identified.</p>` :
+    QF_QUESTIONS.map(q => { const ans = resp.map(f => f.answers?.[q.k]).filter(Boolean);
+      return `<h3 style="font-size:13px">${sanitize(q.q)}</h3><table><tr><th>Answer</th><th>Count</th><th>%</th></tr>
+      ${q.a.map(a => { const n = ans.filter(x => x === a).length; return `<tr><td>${sanitize(a)}</td><td>${n}</td><td>${pct(n, ans.length)}</td></tr>`; }).join('')}
+      <tr><td style="color:#6b7280">No answer</td><td>${resp.length - ans.length}</td><td></td></tr></table>`; }).join('')}`;
+}
+
+// ============================================================
+// HOME RISK ASSESSMENT
+// ============================================================
+// Every client file carries one. It expires (3 months by default) and is
+// re-triggered when the address on file changes. Booking a home visit without
+// a current one warns the worker; an assessment that says "No home visits"
+// blocks the booking.
+const HRA_REVIEW_DAYS = 91;
+const HRA_HAZARDS = ['Uneven or unsafe access','Poor lighting','Steps or stairs','Clutter / hoarding','Smoking inside','Sharps or drug paraphernalia','Structural damage','Infectious illness in the home','Other'];
+const HRA_YNU = ['Yes','No','Unknown'];
+const HRA_VISIT = ['Standard — one worker','Two workers required','Meet away from the home','No home visits'];
+const HRA_REQUIRED = [['date','Assessment date'],['dogs','Dogs / animals'],['weapons','Weapons on premises'],['occupants','Other occupants'],['access','Access, parking & exits'],['phone','Phone coverage'],['rating','Overall risk rating'],['visit','Home visit arrangement']];
+const _addr = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+function homeRiskStatus(c) {
+  const h = c.homeRisk;
+  if (!h || !h.date) return { state:'missing', ok:false, label:'Not done', msg:'No home risk assessment on file' };
+  const missing = HRA_REQUIRED.filter(([k]) => !String(h[k] || '').trim()).map(([, l]) => l);
+  if (missing.length) return { state:'incomplete', ok:false, label:'Incomplete', msg:'Home risk assessment incomplete: ' + missing.join(', '), missing };
+  if (_addr(h.address) !== _addr(c.address)) return { state:'address', ok:false, label:'Address changed', msg:'Address has changed since the home risk assessment — reassess' };
+  const due = h.reviewDate || addDaysStr(h.date, HRA_REVIEW_DAYS);
+  if (due < today()) return { state:'expired', ok:false, label:'Expired', msg:`Home risk assessment expired ${fmt(due)} — reassess` };
+  return { state:'current', ok:true, label:'Current', msg:`Current until ${fmt(due)}`, due };
+}
+function renderHomeRiskTab(c) {
+  const h = c.homeRisk || {}, st = homeRiskStatus(c);
+  const col = st.ok ? '#16a34a' : st.state === 'missing' ? '#dc2626' : '#d97706';
+  const ynu = (k, label) => `<div class="form-group"><label>${label} *</label><div style="display:flex;gap:12px">${HRA_YNU.map(o => `<label style="display:flex;gap:4px;align-items:center;font-weight:400;font-size:13px"><input type="radio" name="hra-${k}" value="${o}" ${h[k] === o ? 'checked' : ''}> ${o}</label>`).join('')}</div>
+    <input id="hra-${k}Detail" value="${sanitize(h[k + 'Detail'] || '')}" placeholder="Details — e.g. restrained when we visit?" style="margin-top:6px"></div>`;
+  return `
+  <div class="card" style="border-left:4px solid ${col}">
+    <div class="card-header"><div class="card-title">🏠 Home Risk Assessment</div>
+      <span class="tag hra-status" style="background:${st.ok ? '#d1fae5' : '#fee2e2'};color:${st.ok ? '#065f46' : '#991b1b'}">${st.label}</span></div>
+    <div class="alert ${st.ok ? 'alert-info' : 'alert-warning'}" style="font-size:12px">${sanitize(st.msg)}${st.ok ? '' : '. Home visits will show a warning until this is current.'}</div>
+    <div class="grid-3">
+      <div class="form-group"><label>Assessment date *</label><input type="date" id="hra-date" value="${sanitize(h.date || today())}" onchange="document.getElementById('hra-review').value=addDaysStr(this.value, HRA_REVIEW_DAYS)"></div>
+      <div class="form-group"><label>Review by *</label><input type="date" id="hra-review" value="${sanitize(h.reviewDate || addDaysStr(h.date || today(), HRA_REVIEW_DAYS))}"></div>
+      <div class="form-group"><label>Assessed by</label><input id="hra-by" value="${sanitize(h.by || currentUser?.name || '')}"></div>
+    </div>
+    <div class="form-group"><label>Address assessed</label><input value="${sanitize(c.address || '')}" disabled placeholder="No address on file — add it on the Intake or Edit screen"></div>
+    <div class="form-group"><label>Hazards (tick all that apply)</label><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px">
+      ${HRA_HAZARDS.map(z => `<label style="display:flex;gap:6px;align-items:center;font-weight:400;font-size:13px"><input type="checkbox" class="hra-hazard" value="${sanitize(z)}" ${(h.hazards || []).includes(z) ? 'checked' : ''}> ${sanitize(z)}</label>`).join('')}</div>
+      <textarea id="hra-hazardDetail" style="min-height:50px;margin-top:6px" placeholder="Hazard details">${sanitize(h.hazardDetail || '')}</textarea></div>
+    <div class="grid-3">${ynu('dogs', 'Dogs / animals')}${ynu('weapons', 'Weapons on premises')}${ynu('occupants', 'Other occupants')}</div>
+    <div class="grid-2">
+      <div class="form-group"><label>Access, parking &amp; exits *</label><textarea id="hra-access" style="min-height:60px" placeholder="Where to park, how to get in, second way out">${sanitize(h.access || '')}</textarea></div>
+      <div class="form-group"><label>Phone coverage *</label><select id="hra-phone">${selOpts(['Good','Patchy','None'], h.phone || '', '— choose —')}</select>
+        <label style="margin-top:10px">Overall risk rating *</label><select id="hra-rating">${selOpts(['Low','Medium','High'], h.rating || '', '— choose —')}</select></div>
+    </div>
+    <div class="form-group"><label>Home visit arrangement *</label><select id="hra-visit">${selOpts(HRA_VISIT, h.visit || '', '— choose —')}</select></div>
+    <div class="form-group"><label>Other notes</label><textarea id="hra-notes" style="min-height:50px">${sanitize(h.notes || '')}</textarea></div>
+    <button class="btn btn-primary" onclick="saveHomeRisk('${c.id}')">💾 Save Home Risk Assessment</button>
+    ${(c.homeRiskHistory || []).length ? `<div style="font-size:11px;color:var(--muted);margin-top:10px">${c.homeRiskHistory.length} earlier assessment${c.homeRiskHistory.length !== 1 ? 's' : ''} kept on file (latest ${fmt(c.homeRiskHistory[c.homeRiskHistory.length - 1].date)}).</div>` : ''}
+  </div>`;
+}
+function saveHomeRisk(clientId) {
+  const c = clients.find(x => x.id === clientId); if (!c) return;
+  const v = id => document.getElementById(id)?.value || '';
+  const r = k => document.querySelector(`input[name="hra-${k}"]:checked`)?.value || '';
+  const h = { date: v('hra-date'), reviewDate: v('hra-review'), by: v('hra-by'), address: c.address || '',
+    hazards: [...document.querySelectorAll('.hra-hazard:checked')].map(x => x.value), hazardDetail: v('hra-hazardDetail'),
+    dogs: r('dogs'), dogsDetail: v('hra-dogsDetail'), weapons: r('weapons'), weaponsDetail: v('hra-weaponsDetail'),
+    occupants: r('occupants'), occupantsDetail: v('hra-occupantsDetail'),
+    access: v('hra-access').trim(), phone: v('hra-phone'), rating: v('hra-rating'), visit: v('hra-visit'), notes: v('hra-notes'), savedAt: now() };
+  if (c.homeRisk?.date && (c.homeRisk.date !== h.date || _addr(c.homeRisk.address) !== _addr(h.address))) {
+    c.homeRiskHistory = c.homeRiskHistory || []; c.homeRiskHistory.push(c.homeRisk);
+  }
+  c.homeRisk = h;
+  const st = homeRiskStatus(c);
+  audit('Home risk assessment saved', `${c.fullName} — ${st.label}${h.rating ? ', ' + h.rating + ' risk' : ''}${h.visit ? ', ' + h.visit : ''}`, c.id);
+  saveAll(); showToast(st.ok ? 'Home risk assessment saved ✓' : '⚠️ Saved, but still incomplete: ' + (st.missing || []).join(', '));
+  switchProfileTab('homerisk', c.id, [...document.querySelectorAll('#profile-tabs .tab')].find(t => (t.getAttribute('onclick') || '').includes("'homerisk'")) || null);
+}
+// Called before a home visit is booked. Returns false to stop the booking.
+function homeVisitGate(clientId, isHomeVisit) {
+  if (!isHomeVisit || !clientId) return true;
+  const c = clients.find(x => x.id === clientId); if (!c) return true;
+  const st = homeRiskStatus(c);
+  if (c.homeRisk?.visit === 'No home visits' && st.state !== 'missing') {
+    alert(`🚫 ${c.fullName}'s home risk assessment says: No home visits.\n\nBook the session somewhere else, or update the assessment first.`);
+    audit('Home visit blocked', `${c.fullName} — assessment says no home visits`, c.id);
+    return false;
+  }
+  if (st.ok) return true;
+  if (!confirm(`⚠️ ${c.fullName}: ${st.msg}.\n\nComplete the Home Risk Assessment before visiting. Book this home visit anyway?`)) return false;
+  audit('Home visit booked without current risk assessment', `${c.fullName} — ${st.label}`, c.id);
+  return true;
+}
+function _isHomeVisitEvent(type, title, location) {
+  return type === 'homevisit' || /home visit/i.test(title || '') || /client'?s home|participant\)? property/i.test(location || '');
+}
+
+// ============================================================
+// FILE COMPLETENESS
+// ============================================================
+// One list of what a client file must hold. Shown on the file and rolled up on
+// the dashboard ("3 clients missing goals").
+// AOD_VADC_FIELDS are the AOD fields this system holds that the Victorian
+// Alcohol and Drug Collection needs — confirm against your VADC pre-flight
+// list and add any others here.
+const AOD_VADC_FIELDS = [['aodPrimary','Principal drug of concern'],['aodTreatment','Treatment type'],['referralSource','Referral source']];
+const COMPLETENESS_GROUPS = { intake:'Intake not completed', demo:'Core details missing', consent:'Consent not recorded', goals:'No goals', goalsMeasure:'Goals not measurable', goalReview:'Goal review overdue', risk:'Safety plan missing (medium/high risk)', homerisk:'Home risk assessment missing or out of date', vadc:'AOD / VADC fields missing' };
+function fileCompleteness(c) {
+  const out = [], add = (group, label, tab) => out.push({ group, label, tab });
+  if (!(c.intakeSavedAt || c.ifIntakeWorker)) add('intake', 'Intake form not completed', 'intake');
+  const demo = [!c.dob && 'date of birth', !c.gender && 'gender', !c.atsi && 'Aboriginal / Torres Strait Islander status', !(c.phone || c.address) && 'phone or address'].filter(Boolean);
+  if (demo.length) add('demo', 'Missing: ' + demo.join(', '), 'intake');
+  if (!c.ifConsentSigned) add('consent', 'Signed consent not recorded', 'intake');
+  const goals = c.goalPlan || [];
+  if (!goals.length) add('goals', 'No goals recorded', 'goals');
+  else if (!goals.some(goalIsMeasurable)) add('goalsMeasure', 'Goals have no starting score / target', 'goals');
+  if (goals.some(goalReviewOverdue)) add('goalReview', 'Goal review overdue', 'goals');
+  if (['medium','high'].includes(c.riskLevel) && !(c.sfWarning || c.sfCoping || c.sfPros || c.sfDate)) add('risk', `Safety plan not completed (${c.riskLevel} risk)`, 'safety');
+  const hr = homeRiskStatus(c); if (!hr.ok) add('homerisk', hr.msg, 'homerisk');
+  if (c.aod) { const miss = AOD_VADC_FIELDS.filter(([k]) => !String(c[k] || '').trim()).map(([, l]) => l); if (miss.length) add('vadc', 'AOD / VADC: ' + miss.join(', '), miss[0] === 'Referral source' && miss.length === 1 ? 'overview' : 'aod'); }
+  return out;
+}
+function renderCompletenessBanner(c) {
+  if ((c.status || 'active') === 'closed') return '';
+  const items = fileCompleteness(c), due = feedbackDue(c), end = episodeEndReached(c);
+  const actions = `${end ? `<button class="btn btn-sm btn-primary" style="font-size:11px" onclick="openEpisodeReviewModal('${c.id}')">End-of-episode review due</button>` : ''}
+      ${due.map(d => `<button class="btn btn-sm" style="background:#fff;color:#b45309;border:1px solid #f59e0b55;font-size:11px" onclick="openFeedbackSendModal('${c.id}','${d}')">⭐ Feedback due: ${QF_POINTS[d]}</button>`).join('')}`;
+  if (!items.length) return `<div class="file-complete" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px;color:#065f46;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;padding:6px 10px;margin-bottom:12px">✓ File complete ${actions}</div>`;
+  const chip = (txt, tab) => `<button class="btn btn-sm" style="background:#fff;color:#92400e;border:1px solid #92400e33;font-size:11px" onclick="_openProfileTab('${tab}','${c.id}')">${sanitize(txt)}</button>`;
+  return `<div class="file-incomplete" style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px 10px;margin-bottom:12px">
+    <div style="font-size:12px;font-weight:700;color:#92400e;margin-bottom:6px">⚠️ ${items.length} item${items.length !== 1 ? 's' : ''} missing on this file</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">${actions}${items.map(i => chip(i.label, i.tab)).join('')}</div></div>`;
+}
+// Dashboard roll-up. A worker sees their own caseload (where they are key
+// worker); managers, or a worker with no key-worker clients, see everyone open
+// that they can access.
+function completenessScope() {
+  const act = visibleClients(clients).filter(c => (c.status || 'active') !== 'closed');
+  const me = (currentUser?.name || '').trim().toLowerCase();
+  const mine = act.filter(c => String(c.keyWorker || '').trim().toLowerCase() === me);
+  const mgr = ['sysmanager','admin','supervisor'].includes(currentUser?.role);
+  return (!mgr && mine.length) ? { list: mine, label: 'your clients (key worker)' } : { list: act, label: 'all open clients' };
+}
+function renderCompletenessDashboard() {
+  const { list, label } = completenessScope();
+  if (!list.length) return '';
+  const groups = {}; const feedback = []; const ending = [];
+  list.forEach(c => { fileCompleteness(c).forEach(i => { (groups[i.group] = groups[i.group] || new Set()).add(c.id); });
+    if (feedbackDue(c).length) feedback.push(c.id); if (episodeEndReached(c)) ending.push(c.id); });
+  const rows = Object.keys(COMPLETENESS_GROUPS).filter(k => groups[k]).map(k => [COMPLETENESS_GROUPS[k], [...groups[k]], k]);
+  if (ending.length) rows.unshift(['End-of-episode review due', ending, 'ending']);
+  if (feedback.length) rows.push(['Feedback due', feedback, 'feedback']);
+  const complete = list.filter(c => !fileCompleteness(c).length).length;
+  return `<div class="card completeness-dash" style="margin-bottom:16px;border-left:4px solid #f59e0b">
+    <div class="card-header"><div class="card-title">📋 File completeness</div><span style="font-size:12px;color:var(--muted)">${complete} of ${list.length} complete · ${sanitize(label)}</span></div>
+    ${rows.length ? rows.map(([txt, ids, k]) => `<div class="cd-row" data-group="${k}" style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border);cursor:pointer" onclick="openCompletenessList('${k}')">
+      <span style="font-weight:700;min-width:28px;text-align:right">${ids.length}</span><span style="font-size:13px;flex:1">client${ids.length !== 1 ? 's' : ''}: ${sanitize(txt.toLowerCase())}</span><span style="font-size:11px;color:var(--muted)">View →</span></div>`).join('')
+      : '<p style="font-size:13px;color:#065f46">✓ Every file is complete.</p>'}
+  </div>`;
+}
+function openCompletenessList(group) {
+  const { list } = completenessScope();
+  const hits = list.filter(c => group === 'feedback' ? feedbackDue(c).length : group === 'ending' ? episodeEndReached(c) : fileCompleteness(c).some(i => i.group === group));
+  const title = group === 'feedback' ? 'Feedback due' : group === 'ending' ? 'End-of-episode review due' : COMPLETENESS_GROUPS[group];
+  showModal('📋 ' + title, `<div>${hits.map(c => `<div style="display:flex;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)">
+    <span style="flex:1;font-size:13px;font-weight:600">${sanitize(c.fullName)}</span>
+    <span style="font-size:11px;color:var(--muted)">${sanitize((fileCompleteness(c).find(i => i.group === group) || {}).label || '')}</span>
+    <button class="btn btn-sm btn-outline" onclick="openClientProfile('${c.id}')">Open file</button></div>`).join('') || '<p>None</p>'}</div>`, null, '620px', true);
+}
+
+// ============================================================
+// END-OF-EPISODE REVIEW
+// ============================================================
+// Closing a file IS the end of an episode. It can't be closed until the review
+// is done — goals re-scored, exit reason, referrals made, exit feedback — or it
+// is closed with a recorded reason for skipping the review.
+const EXIT_REASONS = ['Goals achieved','Program completed','Referred to another service','Moved away','Client request','Disengaged','Deceased','Other'];
+const EXIT_REFERRALS = ['Housing','AOD service','Mental health','GP / health','Legal / justice','Family / children\'s services','Cultural / community','Employment / training','NDIS','Other'];
+const SKIP_REASONS = ['Client disengaged — could not be contacted','Client deceased','Transferred to another service before review','Duplicate or opened in error','Other'];
+function openEpisodeReviewModal(id) {
+  const c = clients.find(cl => cl.id === id); if (!c) return;
+  const open = (c.goalPlan || []).map((g, i) => ({ g, i })).filter(x => goalIsOpen(x.g));
+  const html = `
+    <p style="font-size:13px;color:var(--muted);margin-bottom:12px">Closing <strong>${sanitize(c.fullName)}</strong>'s file ends this episode of care (started ${fmt(episodeStart(c))}). Complete the review below — it's how the outcome is recorded. You can reopen the file later.</p>
+    <div id="er-full">
+      <div class="card" style="margin-bottom:10px"><div class="card-title" style="font-size:13px;margin-bottom:8px">1. Goal outcomes</div>
+        ${open.length ? open.map(({ g, i }) => `<div style="border-bottom:1px solid var(--border);padding:8px 0">
+          <div style="font-size:13px;font-weight:600">${sanitize(g.title)}</div>
+          <div style="font-size:11px;color:var(--muted)">${goalIsMeasurable(g) ? `Start ${Number(g.baseline)} · Latest ${goalLatest(g)} · Target ${Number(g.target)}` : 'Not measured'}</div>
+          <div class="grid-2" style="margin-top:6px">
+            ${goalIsMeasurable(g) ? `<div class="form-group" style="margin:0"><label style="font-size:11px">Final score (0–10) *</label><select class="er-score" data-i="${i}">${_scoreOpts('', '— score —')}</select></div>` : '<div></div>'}
+            <div class="form-group" style="margin:0"><label style="font-size:11px">Outcome *</label><select class="er-outcome" data-i="${i}">${selOpts(GOAL_OUTCOMES, '', '— outcome —')}</select></div>
+          </div></div>`).join('') : '<p style="font-size:12px;color:var(--muted)">No open goals on this file.</p>'}
+      </div>
+      <div class="card" style="margin-bottom:10px"><div class="card-title" style="font-size:13px;margin-bottom:8px">2. Exit reason</div>
+        <div class="form-group"><label>Reason *</label><select id="er-reason">${selOpts(EXIT_REASONS, '', '— Select reason —')}</select></div>
+        <div class="form-group"><label>Closure notes</label><textarea id="er-notes" rows="2"></textarea></div></div>
+      <div class="card" style="margin-bottom:10px"><div class="card-title" style="font-size:13px;margin-bottom:8px">3. Referrals made at exit</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:6px">
+          ${EXIT_REFERRALS.map(r => `<label style="display:flex;gap:6px;align-items:center;font-weight:400;font-size:13px"><input type="checkbox" class="er-ref" value="${sanitize(r)}"> ${sanitize(r)}</label>`).join('')}
+          <label style="display:flex;gap:6px;align-items:center;font-weight:600;font-size:13px"><input type="checkbox" id="er-noref"> No referrals needed</label></div>
+        <input id="er-refdetail" placeholder="Where to (service names)" style="margin-top:8px"></div>
+      <div class="card" style="margin-bottom:10px"><div class="card-title" style="font-size:13px;margin-bottom:8px">4. Exit feedback</div>
+        <select id="er-feedback">${selOpts([{v:'send',l:'Send the exit feedback request now (email / text)'},{v:'given',l:'Feedback already given this episode'},{v:'declined',l:'Client declined'},{v:'uncontactable',l:'Unable to contact client'}], '', '— choose —')}</select></div>
+    </div>
+    <label style="display:flex;gap:8px;align-items:center;font-size:13px;margin-top:6px"><input type="checkbox" id="er-skip" onchange="document.getElementById('er-full').style.opacity=this.checked?.4:1;document.getElementById('er-skipbox').style.display=this.checked?'':'none'"> Close <strong>without</strong> the review</label>
+    <div id="er-skipbox" style="display:none;margin-top:8px">
+      <div class="grid-2"><div class="form-group"><label>Why is the review being skipped? *</label><select id="er-skipreason">${selOpts(SKIP_REASONS, '', '— choose —')}</select></div>
+      <div class="form-group"><label>Exit reason *</label><select id="er-reason2">${selOpts(EXIT_REASONS, '', '— Select reason —')}</select></div></div>
+      <input id="er-skipnote" placeholder="Details (required for Other)"></div>
+    <p id="er-error" style="color:#dc2626;font-size:13px;min-height:18px;margin-top:8px"></p>`;
+  showModal('🔒 End-of-Episode Review — ' + c.fullName, html, () => saveEpisodeReview(id), '720px');
+}
+function saveEpisodeReview(id) {
+  const c = clients.find(cl => cl.id === id); if (!c) return false;
+  const v = x => document.getElementById(x)?.value || '';
+  const err = m => { const e = document.getElementById('er-error'); if (e) e.textContent = m; return false; };
+  const skip = !!document.getElementById('er-skip')?.checked;
+  const by = currentUser?.name || '', date = today();
+  let review;
+  if (skip) {
+    if (!v('er-skipreason')) return err('Choose why the review is being skipped.');
+    if (!v('er-reason2')) return err('Choose an exit reason.');
+    if (v('er-skipreason') === 'Other' && !v('er-skipnote').trim()) return err('Add details for "Other".');
+    review = { id: uid(), date, by, skipped: true, skipReason: v('er-skipreason') + (v('er-skipnote').trim() ? ' — ' + v('er-skipnote').trim() : ''), exitReason: v('er-reason2') };
+  } else {
+    const goals = [];
+    for (const sel of document.querySelectorAll('.er-outcome')) {
+      const i = Number(sel.dataset.i), g = c.goalPlan[i];
+      const sc = document.querySelector(`.er-score[data-i="${i}"]`);
+      if (sc && !_isScore(sc.value)) return err(`Give a final score for "${g.title}".`);
+      if (!sel.value) return err(`Choose an outcome for "${g.title}".`);
+      goals.push({ i, g, score: sc ? Number(sc.value) : null, outcome: sel.value });
+    }
+    if (!v('er-reason')) return err('Choose an exit reason.');
+    const refs = [...document.querySelectorAll('.er-ref:checked')].map(x => x.value);
+    const noRef = !!document.getElementById('er-noref')?.checked;
+    if (!refs.length && !noRef) return err('Record the referrals made, or tick "No referrals needed".');
+    if (!v('er-feedback')) return err('Choose what happened with exit feedback.');
+    goals.forEach(({ g, score, outcome }) => {
+      if (score !== null) { g.reviews = g.reviews || []; g.reviews.push({ id: uid(), date, score, note: 'End-of-episode review', by, final: true }); }
+      g.outcome = outcome; g.outcomeDate = date;
+    });
+    review = { id: uid(), date, by, skipped: false, exitReason: v('er-reason'), notes: v('er-notes'),
+      goals: goals.map(({ g, score, outcome }) => ({ goalId: g.id, domain: g.category, baseline: goalIsMeasurable(g) ? Number(g.baseline) : null, final: score, target: goalIsMeasurable(g) ? Number(g.target) : null, outcome })),
+      referrals: noRef ? [] : refs, referralDetail: v('er-refdetail'), feedback: v('er-feedback') };
+  }
+  review.episodeStart = episodeStart(c);
+  c.episodeReviews = c.episodeReviews || []; c.episodeReviews.push(review);
+  c.status = 'closed'; c.closedDate = date; c.closureReason = review.exitReason; c.closureNotes = review.notes || '';
+  audit('Closed client', `${c.fullName} — ${review.exitReason}`, id);
+  audit(review.skipped ? 'End-of-episode review skipped' : 'End-of-episode review completed',
+    `${c.fullName}${review.skipped ? ' — ' + review.skipReason : ` — ${review.goals.length} goal outcome${review.goals.length !== 1 ? 's' : ''}, ${review.referrals.length} referral${review.referrals.length !== 1 ? 's' : ''}`}`, id);
+  saveAll();
+  showToast(c.fullName + ' has been closed');
+  if (!review.skipped && review.feedback === 'send') setTimeout(() => openFeedbackSendModal(id, 'exit'), 50);
+  else showPage('clients');
+  return true;
+}
+
+// ============================================================
+// COREPLUS APPOINTMENT IMPORT
+// ============================================================
+// Logs time from a CorePlus appointment export (CSV, or the .xlsx as
+// downloaded). Rules:
+//   • Matches EXISTING client files only — open and closed. Never creates one.
+//   • Every duration is converted to MINUTES, the unit this system stores
+//     ("1 hour, 30 minutes" → 90). If the file also has a Minutes column and the
+//     two disagree, the row is held back rather than guessed.
+//   • Only attended appointments are logged.
+//   • The program comes from the Appointment Type only (an explicit label).
+//     Client Group describes the person, not the contact, so it is never used —
+//     the same rule as the episode-of-care counts.
+//   • Each appointment gets an import key, so importing the same export (or an
+//     overlapping one) again never logs time twice.
+const CP_COLS = {
+  name:['clientnamesubject','clientname','client','subject'], status:['appointmentstatus','status'],
+  date:['appointmentdate','date','startdate','appointmentstart','start'], length:['appointmentlength','length','duration'],
+  minutes:['minutes','mins','durationminutes','durationmins'], hours:['hours','durationhours'],
+  type:['appointmenttype','type','service'], notes:['appointmentnotes','notes'], location:['location'],
+  group:['clientgroup','group'], worker:['bookedfor','practitioner','clinician','worker'],
+  id:['clientid','coreplusid','coreplusclientid','clientnumber','clientno'], mobile:['mobilenumber','mobile'], email:['emailaddress','email'],
+};
+const CP_ATTENDED = /^(attended|completed|arrived|checked ?out|seen)$/i;
+
+// ---- reading files ----
+function _parseDelimited(text) {
+  const src = String(text||'').replace(/^﻿/, '');
+  const first = src.split(/\r?\n/)[0] || '';
+  const d = (first.match(/\t/g)||[]).length > (first.match(/,/g)||[]).length ? '\t' : ',';
+  const rows = []; let row = [], f = '', q = false;
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i];
+    if (q) { if (ch === '"') { if (src[i+1] === '"') { f += '"'; i++; } else q = false; } else f += ch; continue; }
+    if (ch === '"' && f === '') q = true;
+    else if (ch === d) { row.push(f); f = ''; }
+    else if (ch === '\n' || ch === '\r') { if (ch==='\r' && src[i+1]==='\n') i++; row.push(f); rows.push(row); row = []; f = ''; }
+    else f += ch;
+  }
+  if (f !== '' || row.length) { row.push(f); rows.push(row); }
+  return rows.filter(r => r.some(c => String(c).trim() !== ''));
+}
+// Minimal .xlsx reader (first worksheet). An .xlsx is a zip of XML files; the
+// browser's DecompressionStream inflates them, so no library is loaded.
+async function _readXlsxRows(buf) {
+  const u8 = new Uint8Array(buf), dv = new DataView(buf), td = new TextDecoder();
+  let eocd = -1;
+  for (let i = u8.length - 22; i >= Math.max(0, u8.length - 65557); i--) if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  if (eocd < 0) throw new Error('This file is not a valid .xlsx workbook');
+  const count = dv.getUint16(eocd + 10, true); let p = dv.getUint32(eocd + 16, true);
+  const entries = {};
+  for (let k = 0; k < count && dv.getUint32(p, true) === 0x02014b50; k++) {
+    const method = dv.getUint16(p + 10, true), csize = dv.getUint32(p + 20, true);
+    const nlen = dv.getUint16(p + 28, true), xlen = dv.getUint16(p + 30, true), clen = dv.getUint16(p + 32, true), off = dv.getUint32(p + 42, true);
+    entries[td.decode(u8.subarray(p + 46, p + 46 + nlen))] = { method, csize, off };
+    p += 46 + nlen + xlen + clen;
+  }
+  const read = async name => {
+    const e = entries[name]; if (!e) return null;
+    const start = e.off + 30 + dv.getUint16(e.off + 26, true) + dv.getUint16(e.off + 28, true);
+    const data = u8.subarray(start, start + e.csize);
+    if (e.method === 0) return td.decode(data);
+    if (e.method !== 8 || typeof DecompressionStream === 'undefined') throw new Error('This browser cannot open .xlsx files — save the export as CSV and try again');
+    const out = await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer();
+    return td.decode(out);
+  };
+  const xml = s => new DOMParser().parseFromString(s, 'application/xml');
+  let sheetPath = 'xl/worksheets/sheet1.xml';
+  try {
+    const wb = xml(await read('xl/workbook.xml')), rels = xml(await read('xl/_rels/workbook.xml.rels'));
+    const rid = wb.getElementsByTagName('sheet')[0]?.getAttribute('r:id');
+    const t = [...rels.getElementsByTagName('Relationship')].find(r => r.getAttribute('Id') === rid)?.getAttribute('Target');
+    if (t) sheetPath = t.startsWith('/') ? t.slice(1) : 'xl/' + t.replace(/^\.\//, '');
+  } catch (_) {}
+  const ssXml = await read('xl/sharedStrings.xml');
+  const shared = ssXml ? [...xml(ssXml).getElementsByTagName('si')].map(si => [...si.getElementsByTagName('t')].map(t => t.textContent).join('')) : [];
+  const sheet = await read(sheetPath); if (!sheet) throw new Error('No worksheet found in this workbook');
+  const colIdx = ref => { const L = (ref.match(/^[A-Z]+/) || ['A'])[0]; let n = 0; for (const ch of L) n = n * 26 + ch.charCodeAt(0) - 64; return n - 1; };
+  return [...xml(sheet).getElementsByTagName('row')].map(r => {
+    const out = [];
+    [...r.getElementsByTagName('c')].forEach(c => {
+      const t = c.getAttribute('t'), v = c.getElementsByTagName('v')[0]?.textContent;
+      let val = '';
+      if (t === 's') val = shared[Number(v)] ?? '';
+      else if (t === 'inlineStr') val = [...c.getElementsByTagName('t')].map(x => x.textContent).join('');
+      else if (t === 'b') val = v === '1' ? 'TRUE' : 'FALSE';
+      else if (v !== undefined) val = Number(v);
+      out[colIdx(c.getAttribute('r') || 'A')] = val;
+    });
+    for (let i = 0; i < out.length; i++) if (out[i] === undefined) out[i] = '';
+    return out;
+  }).filter(r => r.some(c => String(c).trim() !== ''));
+}
+
+// ---- interpreting values ----
+// Duration text → minutes. null when it can't be read with certainty.
+function corePlusMinutes(text) {
+  const s = String(text ?? '').toLowerCase().trim(); if (!s) return null;
+  const hm = s.match(/^(\d{1,2}):(\d{2})$/); if (hm) return Number(hm[1]) * 60 + Number(hm[2]);
+  let total = 0, hit = false;
+  const h = s.match(/(\d+(?:\.\d+)?)\s*(?:h|hr|hrs|hour|hours)\b/); if (h) { total += parseFloat(h[1]) * 60; hit = true; }
+  const m = s.match(/(\d+)\s*(?:m|min|mins|minute|minutes)\b/); if (m) { total += parseInt(m[1], 10); hit = true; }
+  return hit ? Math.round(total) : null;
+}
+// Date (+time) → local {date:'YYYY-MM-DD', time:'HH:MM'}. Day-first, as
+// CorePlus exports in Australia. Excel serial numbers come from .xlsx cells.
+// Never uses toISOString (see README: that shifts AU dates back a day).
+function corePlusDate(v) {
+  const pad = n => String(n).padStart(2, '0');
+  const ok = (y, mo, d, hh=0, mi=0) => {
+    const dt = new Date(y, mo - 1, d);
+    if (dt.getFullYear() !== y || dt.getMonth() !== mo - 1 || dt.getDate() !== d || hh > 23 || mi > 59) return null;
+    return { date: `${y}-${pad(mo)}-${pad(d)}`, time: `${pad(hh)}:${pad(mi)}` };
+  };
+  if (typeof v === 'number' && v > 20000 && v < 80000) {
+    const ms = Math.round((v - 25569) * 86400000);               // serial → wall-clock, read as UTC
+    const d = new Date(ms);
+    return ok(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate(), d.getUTCHours(), d.getUTCMinutes());
+  }
+  const s = String(v ?? '').trim(); if (!s) return null;
+  const tm = (() => { const t = s.match(/(\d{1,2}):(\d{2})(?::\d{2})?\s*(am|pm)?/i); if (!t) return [0, 0];
+    let hh = Number(t[1]); const ap = (t[3] || '').toLowerCase(); if (ap === 'pm' && hh < 12) hh += 12; if (ap === 'am' && hh === 12) hh = 0; return [hh, Number(t[2])]; })();
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/); if (m) return ok(+m[1], +m[2], +m[3], ...tm);
+  m = s.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})/);
+  if (m) { const y = m[3].length === 2 ? 2000 + Number(m[3]) : Number(m[3]); return ok(y, +m[2], +m[1], ...tm); }
+  m = s.match(/^(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{4})/);
+  if (m) { const mo = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'].indexOf(m[2].slice(0,3).toLowerCase()) + 1; if (mo) return ok(+m[3], mo, +m[1], ...tm); }
+  return null;
+}
+function corePlusProgram(type) {
+  const t = String(type || '').toLowerCase().replace(/[^a-z]/g, '');
+  if (!t) return '';
+  if (t.startsWith('sewb') || t.includes('socialandemotional')) return 'sewb';
+  if (t === 'aod' || t.startsWith('aod') || t.includes('alcohol') || t.includes('drug')) return 'aod';
+  if (t.includes('justice')) return 'justice';
+  if (t.includes('cultural')) return 'cultural';
+  if (t === 'ndis' || t.startsWith('ndis') || t.includes('disability')) return 'disability';
+  if (t.includes('workfoundation')) return 'workfoundations';
+  if (t.includes('homeownership') || t === 'fpho') return 'fpho';
+  return '';
+}
+const CP_PROGRAM_LABEL = { sewb:'SEWB', aod:'AOD', justice:'Justice', cultural:'Cultural', disability:'NDIS / Disability', workfoundations:'Work Foundations', fpho:'Home Ownership', '':'Not program-specific' };
+
+// ---- the plan ----
+function corePlusTable(rows) {
+  const norm = h => String(h ?? '').toLowerCase().replace(/[^a-z]/g, '');
+  const hi = rows.findIndex(r => r.some(c => CP_COLS.name.includes(norm(c))));
+  if (hi < 0) return { error: 'No "Client Name" column found. Export the appointment list from CorePlus with its heading row.' };
+  const head = rows[hi].map(norm);
+  const col = {}; Object.entries(CP_COLS).forEach(([k, names]) => { const i = head.findIndex(h => names.includes(h)); if (i >= 0) col[k] = i; });
+  if (col.date === undefined) return { error: 'No "Appointment Date" column found.' };
+  if (col.length === undefined && col.minutes === undefined && col.hours === undefined) return { error: 'No appointment length / minutes column found.' };
+  const get = (r, k) => col[k] === undefined ? '' : r[col[k]];
+  return { rows: rows.slice(hi + 1).map((r, i) => ({ line: hi + i + 2,
+    name: String(get(r,'name') ?? '').replace(/\s+/g,' ').trim(), status: String(get(r,'status') ?? '').trim(),
+    dateRaw: get(r,'date'), lengthRaw: get(r,'length'), minutesRaw: get(r,'minutes'), hoursRaw: get(r,'hours'),
+    type: String(get(r,'type') ?? '').trim(), notes: String(get(r,'notes') ?? '').trim(), location: String(get(r,'location') ?? '').trim(),
+    group: String(get(r,'group') ?? '').trim(), worker: String(get(r,'worker') ?? '').trim(), cpId: String(get(r,'id') ?? '').trim(),
+    mobile: get(r,'mobile'), email: String(get(r,'email') ?? '').trim() })).filter(r => r.name || r.dateRaw),
+    hasStatus: col.status !== undefined };
+}
+function _cpKey(r) {
+  const who = r.cpId ? 'id:' + r.cpId : 'n:' + _importNameParts(r.name).core;
+  return ['cp', who, r.date, r.time, r.minutes, String(r.worker || '').toLowerCase().replace(/[^a-z]/g, '')].join('|');
+}
+function _cpMatch(r, manual) {
+  const lc = r.name.toLowerCase();
+  if (manual[lc] === '__skip') return { skip: true };
+  if (manual[lc]) { const c = clients.find(x => x.id === manual[lc]); if (c) return { c, how: 'chosen' }; }
+  const all = (clients || []).filter(c => c && c.fullName);
+  if (r.cpId) { const h = all.filter(c => String(c.corePlusId || '') === r.cpId); if (h.length === 1) return { c: h[0], how: 'CorePlus ID' }; }
+  let h = all.filter(c => (c.corePlusNames || []).includes(lc)); if (h.length === 1) return { c: h[0], how: 'remembered' };
+  const n = _importNameParts(r.name);
+  h = all.filter(c => _importSameName(n, _importNameParts(c.fullName)));
+  if (h.length === 1) return { c: h[0], how: 'name' };
+  if (h.length > 1) return { ambiguous: h.length };
+  h = all.filter(c => _importPrefName(n, _importNameParts(c.fullName)));
+  if (h.length === 1) return { c: h[0], how: 'preferred name' };
+  if (h.length > 1) return { ambiguous: h.length };
+  return {};
+}
+function buildCorePlusPlan(table, manual) {
+  const existing = new Set((timeLogs || []).map(t => t.importKey).filter(Boolean));
+  (clients || []).forEach(c => (c.corePlusIgnoredKeys || []).forEach(k => existing.add(k)));
+  const seen = new Set(), ready = [], skipped = [], unmatched = new Map(), ambiguous = new Map(), conversions = new Map();
+  const skip = (r, reason) => skipped.push({ line: r.line, name: r.name, date: r.date || String(r.dateRaw || ''), reason });
+  table.rows.forEach(r0 => {
+    const r = Object.assign({}, r0);
+    if (!r.name) return skip(r, 'No client name');
+    if (table.hasStatus && !CP_ATTENDED.test(r.status)) return skip(r, `Status "${r.status || 'blank'}" — only attended appointments are logged`);
+    const d = corePlusDate(r.dateRaw); if (!d) return skip(r, 'Date could not be read');
+    r.date = d.date; r.time = d.time;
+    if (r.date > today()) return skip(r, 'Appointment is in the future');
+    const fromText = corePlusMinutes(r.lengthRaw);
+    const fromMin = String(r.minutesRaw ?? '').trim() !== '' && !isNaN(Number(r.minutesRaw)) ? Math.round(Number(r.minutesRaw)) : null;
+    const fromHrs = String(r.hoursRaw ?? '').trim() !== '' && !isNaN(Number(r.hoursRaw)) ? Math.round(Number(r.hoursRaw) * 60) : null;
+    const vals = [fromText, fromMin, fromHrs].filter(v => v !== null);
+    if (!vals.length) return skip(r, `Length "${r.lengthRaw || 'blank'}" could not be read`);
+    if (new Set(vals).size > 1) return skip(r, `Length disagrees: "${r.lengthRaw}" vs ${fromMin ?? fromHrs} minutes column — check in CorePlus`);
+    r.minutes = vals[0];
+    if (!(r.minutes > 0) || r.minutes > 24 * 60) return skip(r, `Length ${r.minutes} minutes is not a valid appointment length`);
+    if (fromText !== null) conversions.set(String(r.lengthRaw).trim(), fromText);
+    r.program = corePlusProgram(r.type);
+    r.key = _cpKey(r);
+    if (existing.has(r.key)) return skip(r, 'Already imported');
+    if (seen.has(r.key)) return skip(r, 'Duplicate row in this file');
+    seen.add(r.key);
+    const m = _cpMatch(r, manual);
+    if (m.skip) return skip(r, 'You chose not to import this name');
+    if (m.ambiguous) { const a = ambiguous.get(r.name) || { name: r.name, count: m.ambiguous, rows: 0 }; a.rows++; ambiguous.set(r.name, a); return; }
+    if (!m.c) { const u = unmatched.get(r.name) || { name: r.name, rows: 0, minutes: 0 }; u.rows++; u.minutes += r.minutes; unmatched.set(r.name, u); return; }
+    r.client = m.c; r.how = m.how; ready.push(r);
+  });
+  const byClient = new Map();
+  ready.forEach(r => { const g = byClient.get(r.client.id) || { client: r.client, how: new Set(), rows: [], minutes: 0, programs: {} };
+    g.how.add(r.how); g.rows.push(r); g.minutes += r.minutes; g.programs[r.program] = (g.programs[r.program] || 0) + 1; byClient.set(r.client.id, g); });
+  return { total: table.rows.length, ready, groups: [...byClient.values()], skipped, unmatched: [...unmatched.values()], ambiguous: [...ambiguous.values()],
+           conversions: [...conversions.entries()].sort((a, b) => a[1] - b[1]), minutes: ready.reduce((a, r) => a + r.minutes, 0) };
+}
+function applyCorePlusPlan(plan, opts = {}) {
+  const stamp = now(), by = currentUser?.name || '';
+  plan.ready.forEach(r => {
+    timeLogs.push({ id: uid(), clientId: r.client.id, date: r.date, minutes: r.minutes,
+      activity: /intake/i.test(r.type) ? 'Intake' : /propert|home/i.test(r.location) ? 'Home Visit' : 'Client Session',
+      type: '', program: r.program, worker: r.worker, notes: r.notes,
+      source: 'CorePlus', importKey: r.key, importedAt: stamp, importedBy: by });
+  });
+  plan.groups.forEach(g => {
+    const c = g.client, lc = g.rows.map(r => r.name.toLowerCase());
+    c.corePlusNames = [...new Set([...(c.corePlusNames || []), ...lc])];   // re-imports match the same way
+    const id = g.rows.find(r => r.cpId)?.cpId; if (id && !c.corePlusId) c.corePlusId = id;
+    if (opts.fillContacts) {
+      const mob = g.rows.map(r => _importAuPhone(r.mobile)).find(Boolean), em = g.rows.map(r => r.email).find(e => /@/.test(e));
+      if (mob && !c.phone) c.phone = mob;
+      if (em && !c.email) c.email = em;
+    }
+    audit('Time imported from CorePlus', `${c.fullName} — ${g.rows.length} appointment${g.rows.length !== 1 ? 's' : ''}, ${g.minutes} min`, c.id);
+  });
+  audit('CorePlus import', `${plan.ready.length} appointments (${plan.minutes} min) logged for ${plan.groups.length} client files; ${plan.skipped.length} skipped, ${plan.unmatched.length} names not matched`);
+  saveAll();
+  return { logged: plan.ready.length, files: plan.groups.length, minutes: plan.minutes };
+}
+
+// ---- screen (Reports page) ----
+let _cp = { table: null, manual: {}, plan: null, fileName: '' };
+const _hm = m => `${Math.floor(m / 60)}h ${m % 60}m`;
+function corePlusCardHTML() {
+  return `
+  <div class="card no-print" style="margin-bottom:20px" id="coreplus-card">
+    <div class="card-header"><div class="card-title">⏱️ CorePlus Appointment Import</div>
+      <button class="btn btn-sm btn-outline" onclick="const b=document.getElementById('coreplus-body');b.style.display=b.style.display==='none'?'':'none'">Show / Hide</button></div>
+    <div id="coreplus-body" style="display:none">
+      <p style="font-size:13px;color:var(--muted);margin-bottom:12px">Upload the CorePlus appointment export (.xlsx or .csv) or paste it. Each attended appointment is logged as time on the matching <strong>existing</strong> client file — open or closed. No new files are created. Lengths are converted to <strong>minutes</strong>, the unit this system uses. Importing the same export again never logs an appointment twice. Nothing changes until you press Log.</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+        <input type="file" id="cp-file" accept=".csv,.xlsx,.txt" onchange="corePlusLoadFile(this)">
+        <label style="display:flex;gap:6px;align-items:center;font-size:12px"><input type="checkbox" id="cp-contacts"> Also fill a <strong>blank</strong> mobile / email on the client file (never overwrites)</label>
+      </div>
+      <details style="margin-bottom:10px"><summary style="font-size:12px;cursor:pointer">…or paste the export</summary>
+        <textarea id="cp-paste" style="min-height:120px;font-family:monospace;font-size:12px;margin-top:6px" placeholder="Paste rows copied from Excel, with the heading row"></textarea>
+        <button class="btn btn-sm btn-outline" style="margin-top:6px" onclick="corePlusLoadText(document.getElementById('cp-paste').value,'pasted data')">🔍 Preview pasted data</button>
+      </details>
+      <div id="cp-preview"></div>
+    </div>
+  </div>`;
+}
+async function corePlusLoadFile(input) {
+  const f = input.files && input.files[0]; if (!f) return;
+  const out = document.getElementById('cp-preview');
+  try {
+    let rows;
+    if (/\.xlsx$/i.test(f.name)) rows = await _readXlsxRows(await f.arrayBuffer());
+    else rows = _parseDelimited(await f.text());
+    _corePlusSetRows(rows, f.name);
+  } catch (e) { if (out) out.innerHTML = `<div class="alert alert-warning">⚠️ ${sanitize(e.message || 'Could not read that file')}</div>`; }
+}
+function corePlusLoadText(text, label) { _corePlusSetRows(_parseDelimited(text), label); }
+function _corePlusSetRows(rows, label) {
+  const t = corePlusTable(rows), out = document.getElementById('cp-preview');
+  if (t.error) { _cp = { table: null, manual: {}, plan: null }; if (out) out.innerHTML = `<div class="alert alert-warning">⚠️ ${sanitize(t.error)}</div>`; return; }
+  _cp = { table: t, manual: {}, plan: null, fileName: label || '' };
+  corePlusRenderPreview();
+}
+function corePlusChoose(name, clientId) { _cp.manual[String(name).toLowerCase()] = clientId; corePlusRenderPreview(); }
+function corePlusRenderPreview() {
+  const out = document.getElementById('cp-preview'); if (!out || !_cp.table) return;
+  const p = _cp.plan = buildCorePlusPlan(_cp.table, _cp.manual);
+  const reasons = {}; p.skipped.forEach(s => { const k = s.reason.replace(/".*?"/, '"…"').replace(/: ".*$/, ''); reasons[k] = (reasons[k] || 0) + 1; });
+  const fileOpts = (clients || []).filter(c => c.fullName).slice().sort((a, b) => ((a.status === 'closed') - (b.status === 'closed')) || a.fullName.localeCompare(b.fullName))
+    .map(c => `<option value="${sanitize(c.id)}">${sanitize(c.fullName)}${c.status === 'closed' ? ' (closed)' : ''}</option>`).join('');
+  const nameAttr = s => sanitize(JSON.stringify(s)).replace(/'/g, '&#39;');
+  out.innerHTML = `
+    <div class="cp-summary" style="background:var(--bg);border-radius:8px;padding:12px;font-size:13px;margin:8px 0 12px">
+      <strong>${sanitize(_cp.fileName)}</strong>: ${p.total} rows ·
+      <strong style="color:var(--success)">${p.ready.length} appointment${p.ready.length !== 1 ? 's' : ''} ready to log</strong> for ${p.groups.length} client file${p.groups.length !== 1 ? 's' : ''}
+      (<strong>${p.minutes} minutes</strong> = ${_hm(p.minutes)}) · ${p.skipped.length} skipped · ${p.unmatched.length} name${p.unmatched.length !== 1 ? 's' : ''} not matched
+    </div>
+    ${p.conversions.length ? `<details style="margin-bottom:10px"><summary style="font-size:12px;cursor:pointer">Length → minutes conversions used (${p.conversions.length})</summary>
+      <table style="font-size:12px;margin-top:6px"><tr><th style="text-align:left">CorePlus length</th><th style="text-align:left">Logged as</th></tr>
+      ${p.conversions.map(([t, m]) => `<tr><td>${sanitize(t)}</td><td>${m} minutes</td></tr>`).join('')}</table></details>` : ''}
+    ${p.unmatched.length ? `<div class="cp-unmatched" style="border:1px solid #fde68a;background:#fffbeb;border-radius:8px;padding:10px;margin-bottom:12px">
+      <div style="font-size:13px;font-weight:700;margin-bottom:6px">Names with no matching client file — choose the file, or leave them out</div>
+      ${p.unmatched.map(u => `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:4px 0">
+        <span style="flex:1;min-width:180px;font-size:13px">${sanitize(u.name)} <span style="color:var(--muted);font-size:11px">${u.rows} appt · ${u.minutes} min</span></span>
+        <select onchange='corePlusChoose(${nameAttr(u.name)}, this.value)' style="max-width:280px"><option value="">— choose client file —</option><option value="__skip">Don't import</option>${fileOpts}</select></div>`).join('')}
+    </div>` : ''}
+    ${p.ambiguous.length ? `<div class="alert alert-warning" style="font-size:12px">⚠️ More than one client file matches: ${p.ambiguous.map(a => `<strong>${sanitize(a.name)}</strong> (${a.count} files)`).join(', ')}. Not imported — tidy the duplicate files, then preview again.</div>` : ''}
+    ${p.groups.length ? `<div class="table-wrap"><table class="cp-ready" style="font-size:12px"><thead><tr><th>Client file</th><th>Matched by</th><th>Appointments</th><th>Minutes</th><th>Programs</th></tr></thead><tbody>
+      ${p.groups.map(g => `<tr><td>${sanitize(g.client.fullName)} ${g.client.status === 'closed' ? '<span class="tag tag-closed">closed</span>' : ''}</td><td>${[...g.how].map(sanitize).join(', ')}</td><td>${g.rows.length}</td><td>${g.minutes} <span style="color:var(--muted)">(${_hm(g.minutes)})</span></td>
+        <td>${Object.entries(g.programs).map(([k, n]) => `<span class="tag" style="background:${k ? '#d1fae5' : '#f3f4f6'};color:${k ? '#065f46' : '#6b7280'}">${CP_PROGRAM_LABEL[k] || sanitize(k)} ${n}</span>`).join(' ')}</td></tr>`).join('')}
+    </tbody></table></div>
+    <p style="font-size:11px;color:var(--muted);margin:6px 0 10px">Program comes from the Appointment Type. Types that don't name a program (e.g. "Client Intake") are logged as <em>Not program-specific</em> and do not count toward episode-of-care targets.</p>` : ''}
+    ${p.skipped.length ? `<details style="margin-bottom:10px"><summary style="font-size:12px;cursor:pointer">Skipped (${p.skipped.length}): ${Object.entries(reasons).map(([k, n]) => sanitize(k) + ' ' + n).join(' · ')}</summary>
+      <table style="font-size:12px;margin-top:6px"><tr><th>Row</th><th>Name</th><th>Date</th><th>Why</th></tr>
+      ${p.skipped.map(s => `<tr><td>${s.line}</td><td>${sanitize(s.name)}</td><td>${sanitize(s.date)}</td><td>${sanitize(s.reason)}</td></tr>`).join('')}</table></details>` : ''}
+    <button class="btn btn-primary" id="cp-apply" ${p.ready.length ? '' : 'disabled'} onclick="corePlusApply()">⏱️ Log ${p.ready.length} appointment${p.ready.length !== 1 ? 's' : ''} (${p.minutes} min)</button>
+    <span id="cp-result" style="font-size:13px;font-weight:600;color:var(--success);margin-left:10px"></span>`;
+}
+function corePlusApply() {
+  const p = _cp.plan; if (!p || !p.ready.length) return;
+  if (!confirm(`Log ${p.ready.length} appointments (${p.minutes} minutes) on ${p.groups.length} client files?`)) return;
+  const r = applyCorePlusPlan(p, { fillContacts: !!document.getElementById('cp-contacts')?.checked });
+  showToast(`✓ ${r.logged} appointments logged (${r.minutes} min)`);
+  corePlusRenderPreview();
+  const el = document.getElementById('cp-result'); if (el) el.textContent = `✓ Logged ${r.logged} appointments (${r.minutes} min) on ${r.files} files`;
 }
 
 function addMilestoneField() {
