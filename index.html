@@ -1035,7 +1035,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v76';
+const APP_VERSION = 'v77';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -14297,17 +14297,28 @@ function _cpMatch(r, manual) {
   if (r.cpId) { const h = all.filter(c => String(c.corePlusId || '') === r.cpId); if (h.length === 1) return { c: h[0], how: 'CorePlus ID' }; }
   let h = all.filter(c => (c.corePlusNames || []).includes(lc)); if (h.length === 1) return { c: h[0], how: 'remembered' };
   const n = _importNameParts(r.name);
-  h = all.filter(c => _importSameName(n, _importNameParts(c.fullName)));
-  if (h.length === 1) return { c: h[0], how: 'name' };
-  if (h.length > 1) return { ambiguous: h.length };
-  h = all.filter(c => _importPrefName(n, _importNameParts(c.fullName)));
-  if (h.length === 1) return { c: h[0], how: 'preferred name' };
-  if (h.length > 1) return { ambiguous: h.length };
-  return {};
+  // Same person, more than one file (usually an old closed file and a current
+  // one). Time belongs on the current file, so when exactly one is open it is
+  // used. Otherwise the importer asks — it never silently drops the time.
+  const pick = (hits, how) => {
+    if (hits.length === 1) return { c: hits[0], how };
+    if (hits.length > 1) {
+      const open = hits.filter(c => (c.status || 'active') !== 'closed');
+      if (open.length === 1) return { c: open[0], how: `${how} — open file (${hits.length - 1} closed duplicate${hits.length > 2 ? 's' : ''} not used)`, dup: hits.length };
+      return { ambiguous: hits.length, ids: hits.map(c => c.id) };
+    }
+    return null;
+  };
+  return pick(all.filter(c => _importSameName(n, _importNameParts(c.fullName))), 'name')
+      || pick(all.filter(c => _importPrefName(n, _importNameParts(c.fullName))), 'preferred name')
+      || {};
 }
 function buildCorePlusPlan(table, manual) {
   const existing = new Set((timeLogs || []).map(t => t.importKey).filter(Boolean));
-  (clients || []).forEach(c => (c.corePlusIgnoredKeys || []).forEach(k => existing.add(k)));
+  const logged = new Map((timeLogs || []).filter(t => t.importKey).map(t => [t.importKey, t]));
+  const ignored = new Set(); (clients || []).forEach(c => (c.corePlusIgnoredKeys || []).forEach(k => { existing.add(k); ignored.add(k); }));
+  const recon = new Map();   // per CorePlus name: what the export holds vs. what the CMS holds
+  const R = name => { let x = recon.get(name); if (!x) { x = { name, exportN: 0, exportMin: 0, inCmsN: 0, inCmsMin: 0, files: new Set(), readyN: 0, readyMin: 0, removedN: 0, notLogged: {} }; recon.set(name, x); } return x; };
   const seen = new Set(), ready = [], skipped = [], unmatched = new Map(), ambiguous = new Map(), conversions = new Map();
   const skip = (r, reason) => skipped.push({ line: r.line, name: r.name, date: r.date || String(r.dateRaw || ''), reason });
   table.rows.forEach(r0 => {
@@ -14325,22 +14336,28 @@ function buildCorePlusPlan(table, manual) {
     if (new Set(vals).size > 1) return skip(r, `Length disagrees: "${r.lengthRaw}" vs ${fromMin ?? fromHrs} minutes column — check in CorePlus`);
     r.minutes = vals[0];
     if (!(r.minutes > 0) || r.minutes > 24 * 60) return skip(r, `Length ${r.minutes} minutes is not a valid appointment length`);
+    const rc = R(r.name); rc.exportN++; rc.exportMin += r.minutes;
     if (fromText !== null) conversions.set(String(r.lengthRaw).trim(), fromText);
     r.program = corePlusProgram(r.type);
     r.key = _cpKey(r);
-    if (existing.has(r.key)) return skip(r, 'Already imported');
+    if (existing.has(r.key)) {
+      const t = logged.get(r.key);
+      if (t) { rc.inCmsN++; rc.inCmsMin += t.minutes || 0; rc.files.add(t.clientId); } else if (ignored.has(r.key)) rc.removedN++;
+      return skip(r, ignored.has(r.key) && !t ? 'Removed from the CMS earlier — not re-imported' : 'Already imported');
+    }
     if (seen.has(r.key)) return skip(r, 'Duplicate row in this file');
     seen.add(r.key);
     const m = _cpMatch(r, manual);
-    if (m.skip) return skip(r, 'You chose not to import this name');
-    if (m.ambiguous) { const a = ambiguous.get(r.name) || { name: r.name, count: m.ambiguous, rows: 0 }; a.rows++; ambiguous.set(r.name, a); return; }
-    if (!m.c) { const u = unmatched.get(r.name) || { name: r.name, rows: 0, minutes: 0 }; u.rows++; u.minutes += r.minutes; unmatched.set(r.name, u); return; }
-    r.client = m.c; r.how = m.how; ready.push(r);
+    if (m.skip) { rc.notLogged['you chose not to import'] = (rc.notLogged['you chose not to import'] || 0) + r.minutes; return skip(r, 'You chose not to import this name'); }
+    if (m.ambiguous) { const a = ambiguous.get(r.name) || { name: r.name, count: m.ambiguous, ids: m.ids || [], rows: 0, minutes: 0 }; a.rows++; a.minutes += r.minutes; ambiguous.set(r.name, a); rc.notLogged['more than one file — choose one'] = (rc.notLogged['more than one file — choose one'] || 0) + r.minutes; return; }
+    if (!m.c) { const u = unmatched.get(r.name) || { name: r.name, rows: 0, minutes: 0 }; u.rows++; u.minutes += r.minutes; unmatched.set(r.name, u); rc.notLogged['no matching file — choose one'] = (rc.notLogged['no matching file — choose one'] || 0) + r.minutes; return; }
+    r.client = m.c; r.how = m.how; ready.push(r); rc.readyN++; rc.readyMin += r.minutes;
   });
   const byClient = new Map();
   ready.forEach(r => { const g = byClient.get(r.client.id) || { client: r.client, how: new Set(), rows: [], minutes: 0, programs: {} };
     g.how.add(r.how); g.rows.push(r); g.minutes += r.minutes; g.programs[r.program] = (g.programs[r.program] || 0) + 1; byClient.set(r.client.id, g); });
   return { total: table.rows.length, ready, groups: [...byClient.values()], skipped, unmatched: [...unmatched.values()], ambiguous: [...ambiguous.values()],
+           recon: [...recon.values()].sort((a, b) => a.name.localeCompare(b.name)),
            conversions: [...conversions.entries()].sort((a, b) => a[1] - b[1]), minutes: ready.reduce((a, r) => a + r.minutes, 0) };
 }
 function applyCorePlusPlan(plan, opts = {}) {
@@ -14429,7 +14446,21 @@ function corePlusRenderPreview() {
         <span style="flex:1;min-width:180px;font-size:13px">${sanitize(u.name)} <span style="color:var(--muted);font-size:11px">${u.rows} appt · ${u.minutes} min</span></span>
         <select onchange='corePlusChoose(${nameAttr(u.name)}, this.value)' style="max-width:280px"><option value="">— choose client file —</option><option value="__skip">Don't import</option>${fileOpts}</select></div>`).join('')}
     </div>` : ''}
-    ${p.ambiguous.length ? `<div class="alert alert-warning" style="font-size:12px">⚠️ More than one client file matches: ${p.ambiguous.map(a => `<strong>${sanitize(a.name)}</strong> (${a.count} files)`).join(', ')}. Not imported — tidy the duplicate files, then preview again.</div>` : ''}
+    ${p.ambiguous.length ? `<div class="cp-ambiguous" style="border:1px solid #fca5a5;background:#fef2f2;border-radius:8px;padding:10px;margin-bottom:12px">
+      <div style="font-size:13px;font-weight:700;margin-bottom:6px;color:#991b1b">More than one client file matches — choose which file gets this time</div>
+      ${p.ambiguous.map(a => `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:4px 0">
+        <span style="flex:1;min-width:180px;font-size:13px">${sanitize(a.name)} <span style="color:var(--muted);font-size:11px">${a.rows} appt · ${a.minutes} min · ${a.count} files</span></span>
+        <select onchange='corePlusChoose(${nameAttr(a.name)}, this.value)' style="max-width:320px"><option value="">— choose client file —</option><option value="__skip">Don't import</option>
+          ${a.ids.map(id => { const c = clients.find(x => x.id === id); return c ? `<option value="${sanitize(id)}">${sanitize(c.fullName)} — ${c.status === 'closed' ? 'closed' + (c.closedDate ? ' ' + fmt(c.closedDate) : '') : 'open'}${c.created ? ', opened ' + fmt(c.created) : ''}</option>` : ''; }).join('')}</select></div>`).join('')}
+    </div>` : ''}
+    ${p.recon.length ? `<details class="cp-recon" style="margin-bottom:12px" ${p.recon.some(x => x.exportMin > x.inCmsMin + x.readyMin) ? 'open' : ''}><summary style="font-size:13px;font-weight:700;cursor:pointer">Check this export against the CMS — ${p.recon.filter(x => x.exportMin > x.inCmsMin + x.readyMin).length} name(s) with time not logged</summary>
+      <div class="table-wrap"><table style="font-size:12px;margin-top:6px"><thead><tr><th>Name in CorePlus</th><th>In export</th><th>Already in CMS</th><th>Will log now</th><th>Not logged</th></tr></thead><tbody>
+      ${p.recon.map(x => { const gap = x.exportMin - x.inCmsMin - x.readyMin; const files = [...x.files].map(id => clients.find(c => c.id === id)).filter(Boolean);
+        return `<tr class="cp-recon-row" data-name="${sanitize(x.name)}" style="${gap > 0 ? 'background:#fef2f2' : ''}"><td>${sanitize(x.name)}</td><td>${x.exportN} · ${x.exportMin} min</td>
+          <td>${x.inCmsN ? `${x.inCmsN} · ${x.inCmsMin} min${files.length ? ' on ' + files.map(c => sanitize(c.fullName) + (c.status === 'closed' ? ' (closed)' : '')).join(', ') : ''}` : '—'}</td>
+          <td>${x.readyN ? `${x.readyN} · ${x.readyMin} min` : '—'}</td>
+          <td>${gap > 0 ? `<strong style="color:#991b1b">${gap} min</strong> — ${Object.keys(x.notLogged).map(sanitize).join('; ') || (x.removedN ? 'removed from the CMS earlier' : 'see Skipped')}` : '✓'}</td></tr>`; }).join('')}
+      </tbody></table></div></details>` : ''}
     ${p.groups.length ? `<div class="table-wrap"><table class="cp-ready" style="font-size:12px"><thead><tr><th>Client file</th><th>Matched by</th><th>Appointments</th><th>Minutes</th><th>Programs</th></tr></thead><tbody>
       ${p.groups.map(g => `<tr><td>${sanitize(g.client.fullName)} ${g.client.status === 'closed' ? '<span class="tag tag-closed">closed</span>' : ''}</td><td>${[...g.how].map(sanitize).join(', ')}</td><td>${g.rows.length}</td><td>${g.minutes} <span style="color:var(--muted)">(${_hm(g.minutes)})</span></td>
         <td>${Object.entries(g.programs).map(([k, n]) => `<span class="tag" style="background:${k ? '#d1fae5' : '#f3f4f6'};color:${k ? '#065f46' : '#6b7280'}">${CP_PROGRAM_LABEL[k] || sanitize(k)} ${n}</span>`).join(' ')}</td></tr>`).join('')}
