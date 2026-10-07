@@ -1,4 +1,4 @@
-const CACHE_NAME = 'wg-cms-v74';
+const CACHE_NAME = 'wg-cms-v75';
 
 self.addEventListener('install', e => {
   // Take control immediately — don't wait for old SW to finish
