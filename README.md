@@ -136,6 +136,38 @@ Add any new client-creation path through it. Being SEWB is not the same as
 earning a SEWB episode of care: episodes still need explicitly SEWB-typed
 contacts, and AOD and Justice keep their own funding reports.
 
+**Goals and outcomes.** A goal is a structured record: domain, starting score,
+target and review date, re-scored at each review on one 0–10 scale rated with
+the client (0 = not at all where I want to be, 10 = exactly where I want to be).
+The starting score locks once a goal has been re-scored. The board Outcomes
+report is de-identified and suppresses any group of fewer than 5 clients
+(`SMALL_CELL`); keep that rule in any new outcome report.
+
+**Closing a file is the end of an episode.** `closeClient()` opens the
+end-of-episode review: final goal scores and outcomes, exit reason, referrals
+made and exit feedback. It can be skipped only with a recorded reason.
+Reopening a file starts a new episode (`episodeStart`).
+
+**File completeness** is defined once, in `fileCompleteness()`. The AOD fields
+checked for VADC are in `AOD_VADC_FIELDS` — keep that list in step with the
+VADC pre-flight validation.
+
+**Home Risk Assessment.** Every file has one (`homeRiskStatus()`). It expires
+after 3 months, or sooner if the review date says so, and is re-triggered when
+the address changes. Booking a home visit without a current assessment warns
+and is audited; an assessment that says "No home visits" blocks the booking.
+
+**CorePlus import** (Reports page) logs attended appointments as time, in
+minutes, on existing files only — open or closed. The program comes from the
+Appointment Type, never the Client Group. Every entry carries an `importKey`,
+so re-importing an export never double-logs, and a deleted imported entry is
+remembered so it doesn't come back.
+
+**Client feedback.** Four plain-language questions, due after intake and at
+mid-episode, and asked at exit through the review. The worker sends them from
+their own email or phone and records the reply on the file. Messages carry the
+client's first name only and no links.
+
 ## Data and privacy
 
 - Client records never leave Australia. Firestore is pinned to Sydney and cannot
@@ -163,6 +195,9 @@ Tracked so they are not quietly forgotten:
 - Server-side role enforcement is not deployed (`functions/` + `.strict` rules).
 - Firebase App Check is registered but not enforced.
 - MFA is available but not required for privileged accounts.
+- Feedback requests are not sent automatically, and there is no public form
+  for clients to answer online — both need a server-side component (email/SMS
+  provider and a locked-down response endpoint).
 - No independent penetration test has been carried out.
 - A few minor settings (noticeboards, admin notes, reminders, organisation
   details) are still stored per-device and do not sync.
