@@ -1035,7 +1035,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v73';
+const APP_VERSION = 'v74';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -4165,6 +4165,158 @@ function renderCultural() {
   };
 })();
 
+// ============================================================
+// REPORT FILTERS — period, worker, client
+// ============================================================
+// One filter bar at the top of the Reports page drives every program, activity
+// and workload report: a period (week, month, quarter, financial year, calendar
+// year, all time or custom dates), a worker and a client. Funding acquittal
+// reports always cover every worker and client, so they ignore the worker and
+// client filters — an episode of care is built from everyone's contacts.
+let _rptFilter = null;          // { type, period, from, to, worker, clientId }
+let _rptFilterLabel = '';       // shown under the title of a filtered report
+const _ymd = (y, m, d) => `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+const _MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function reportPeriods(type) {
+  const t = new Date(), y = t.getFullYear(), m = t.getMonth(), out = [];
+  if (type === 'week') {
+    const mon = new Date(y, m, t.getDate() - ((t.getDay() + 6) % 7));
+    for (let i = 0; i < 26; i++) {
+      const a = new Date(mon.getFullYear(), mon.getMonth(), mon.getDate() - 7 * i), b = new Date(a.getFullYear(), a.getMonth(), a.getDate() + 6);
+      out.push({ from: isoDate(a), to: isoDate(b), label: `${i === 0 ? 'This week' : i === 1 ? 'Last week' : 'Week'} — ${a.getDate()} ${_MON[a.getMonth()]} to ${b.getDate()} ${_MON[b.getMonth()]} ${b.getFullYear()}` });
+    }
+  } else if (type === 'month') {
+    for (let i = 0; i < 24; i++) { const a = new Date(y, m - i, 1), b = new Date(a.getFullYear(), a.getMonth() + 1, 0);
+      out.push({ from: isoDate(a), to: isoDate(b), label: `${_MON[a.getMonth()]} ${a.getFullYear()}${i === 0 ? ' (this month)' : ''}` }); }
+  } else if (type === 'quarter') {
+    const q0 = Math.floor(m / 3);
+    for (let i = 0; i < 12; i++) { const a = new Date(y, (q0 - i) * 3, 1), b = new Date(a.getFullYear(), a.getMonth() + 3, 0);
+      const fyq = [3, 4, 1, 2][Math.floor(a.getMonth() / 3)];
+      out.push({ from: isoDate(a), to: isoDate(b), label: `${_MON[a.getMonth()]}–${_MON[b.getMonth()]} ${a.getFullYear()} (FY Q${fyq})${i === 0 ? ' — this quarter' : ''}` }); }
+  } else if (type === 'fy') {
+    const s0 = m >= 6 ? y : y - 1;
+    for (let i = 0; i < 6; i++) { const s = s0 - i; out.push({ from: _ymd(s, 7, 1), to: _ymd(s + 1, 6, 30), label: `FY ${s}–${String(s + 1).slice(2)}${i === 0 ? ' (this financial year)' : ''}` }); }
+  } else if (type === 'year') {
+    for (let i = 0; i < 6; i++) out.push({ from: _ymd(y - i, 1, 1), to: _ymd(y - i, 12, 31), label: `${y - i}${i === 0 ? ' (this year)' : ''}` });
+  }
+  return out;
+}
+// The same person can appear as "Jade Atkinson", "jade atkinson" or
+// "jade.atkinson" (an email prefix). Reports group them as one worker.
+function canonicalWorker(name) {
+  const raw = String(name || '').trim(); if (!raw) return '';
+  const k = raw.toLowerCase().replace(/[^a-z]/g, '');
+  const p = (userProfiles || []).find(u => u && ((u.name || '').toLowerCase().replace(/[^a-z]/g, '') === k
+          || (u.email || '').split('@')[0].toLowerCase().replace(/[^a-z]/g, '') === k));
+  return p && p.name ? p.name : raw;
+}
+function reportWorkers() {
+  const set = new Set();
+  (userProfiles || []).forEach(u => u?.name && set.add(canonicalWorker(u.name)));
+  (timeLogs || []).forEach(t => t.worker && set.add(canonicalWorker(t.worker)));
+  (notes || []).forEach(n => n.worker && set.add(canonicalWorker(n.worker)));
+  return [...set].filter(Boolean).sort((a, b) => a.localeCompare(b));
+}
+// Default: the last 90 days, as the Reports page has always opened with.
+function reportFilter() {
+  if (!_rptFilter) _rptFilter = { type: 'custom', period: '', from: addDaysStr(today(), -90), to: today(), worker: '', clientId: '' };
+  return _rptFilter;
+}
+function reportFilterLabel(f, withPeople = true) {
+  const c = f.clientId ? clients.find(x => x.id === f.clientId) : null;
+  return [`${fmt(f.from)} – ${fmt(f.to)}`, withPeople && f.worker ? 'Worker: ' + f.worker : '', withPeople && c ? 'Client: ' + c.fullName : ''].filter(Boolean).join(' · ');
+}
+function reportFilterBarHTML() {
+  const f = reportFilter();
+  const periods = reportPeriods(f.type);
+  const sorted = [...clients].filter(c => c.fullName).sort((a, b) => a.fullName.localeCompare(b.fullName));
+  const opt = (v, l, cur) => `<option value="${sanitize(v)}"${v === cur ? ' selected' : ''}>${sanitize(l)}</option>`;
+  return `
+  <div class="card no-print report-filter" style="margin-bottom:20px;border-left:4px solid var(--primary)">
+    <div class="card-header"><div class="card-title">🔎 Report filters</div><span id="rpt-filter-summary" style="font-size:12px;color:var(--muted)">${sanitize(reportFilterLabel(f))}</span></div>
+    <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
+      <div class="form-group" style="margin:0"><label>Report by</label>
+        <select id="rpt-type" onchange="rptSetType(this.value)">
+          ${[['week','Week'],['month','Month'],['quarter','Quarter'],['fy','Financial year'],['year','Calendar year'],['all','All time'],['custom','Custom dates']].map(([v,l]) => opt(v, l, f.type)).join('')}
+        </select></div>
+      ${periods.length ? `<div class="form-group" style="margin:0"><label>Period</label>
+        <select id="rpt-period" onchange="rptSetPeriod(this.value)">${periods.map(p => opt(p.from + '|' + p.to, p.label, f.period)).join('')}</select></div>` : ''}
+      <div class="form-group" style="margin:0"><label>From</label><input type="date" id="rpt-from" value="${sanitize(f.from)}" onchange="rptCustomDates()"></div>
+      <div class="form-group" style="margin:0"><label>To</label><input type="date" id="rpt-to" value="${sanitize(f.to)}" onchange="rptCustomDates()"></div>
+      <div class="form-group" style="margin:0"><label>Worker</label>
+        <select id="rpt-worker" onchange="rptSet('worker', this.value)">${opt('', 'All workers', f.worker)}${reportWorkers().map(w => opt(w, w, f.worker)).join('')}</select></div>
+      <div class="form-group" style="margin:0;min-width:220px"><label>Client</label>
+        <select id="rpt-clientf" onchange="rptSet('clientId', this.value)">${opt('', 'All clients', f.clientId)}
+          <optgroup label="Open">${sorted.filter(c => c.status !== 'closed').map(c => opt(c.id, c.fullName, f.clientId)).join('')}</optgroup>
+          <optgroup label="Closed">${sorted.filter(c => c.status === 'closed').map(c => opt(c.id, c.fullName + ' (closed)', f.clientId)).join('')}</optgroup></select></div>
+      ${(f.worker || f.clientId) ? `<button class="btn btn-outline btn-sm" onclick="rptSet('worker','');rptSet('clientId','')">✕ Clear worker / client</button>` : ''}
+    </div>
+    <p style="font-size:11px;color:var(--muted);margin-top:8px">Applies to the program, activity, workload, outcomes and feedback reports below. Funding (episode-of-care) reports use the dates but always count every worker and client, because an episode is built from everyone's contacts.</p>
+  </div>`;
+}
+function _rptRefresh() { if (currentPage === 'reports') showPage('reports'); }
+function rptSetType(type) {
+  const f = reportFilter(); f.type = type;
+  if (type === 'all') { f.from = '2000-01-01'; f.to = today(); f.period = ''; }
+  else if (type !== 'custom') { const p = reportPeriods(type)[0]; f.from = p.from; f.to = p.to; f.period = p.from + '|' + p.to; }
+  _rptRefresh();
+}
+function rptSetPeriod(v) { const f = reportFilter(); const [a, b] = v.split('|'); f.from = a; f.to = b; f.period = v; _rptRefresh(); }
+function rptCustomDates() {
+  const f = reportFilter(); f.type = 'custom'; f.period = '';
+  f.from = document.getElementById('rpt-from')?.value || f.from;
+  f.to = document.getElementById('rpt-to')?.value || f.to;
+  if (f.from > f.to) [f.from, f.to] = [f.to, f.from];
+  _rptRefresh();
+}
+function rptSet(k, v) { const f = reportFilter(); f[k] = v; _rptRefresh(); }
+// Kept for the old quick-range buttons.
+function setDateRange(range) { rptSetType(range === 'all' ? 'all' : range === 'year' ? 'year' : range); }
+
+// Build a report against only the selected worker's / client's records. The
+// shared lists are narrowed for the duration of the (synchronous) build and
+// always restored, even if the build throws. Report builders never save.
+function withReportFilters(build, opts = {}) {
+  const f = reportFilter();
+  const keep = { clients, notes, timeLogs };
+  try {
+    if (!opts.datesOnly && (f.worker || f.clientId)) {
+      const inR = d => { const x = String(d || '').slice(0, 10); return x >= f.from && x <= f.to; };
+      let cs = clients, ns = notes, tl = timeLogs;
+      if (f.clientId) { cs = cs.filter(c => c.id === f.clientId); ns = ns.filter(n => n.clientId === f.clientId); tl = tl.filter(t => t.clientId === f.clientId); }
+      if (f.worker) {
+        ns = ns.filter(n => canonicalWorker(n.worker) === f.worker);
+        tl = tl.filter(t => canonicalWorker(t.worker) === f.worker);
+        const ids = new Set([...ns.filter(n => inR(n.created)).map(n => n.clientId), ...tl.filter(t => inR(t.date)).map(t => t.clientId),
+                             ...cs.filter(c => canonicalWorker(c.keyWorker) === f.worker).map(c => c.id)]);
+        cs = cs.filter(c => ids.has(c.id));
+      }
+      clients = cs; notes = ns; timeLogs = tl;
+    }
+    _rptFilterLabel = reportFilterLabel(f, !opts.datesOnly);
+    return build(f.from, f.to);
+  } finally { clients = keep.clients; notes = keep.notes; timeLogs = keep.timeLogs; _rptFilterLabel = ''; }
+}
+
+// ---- Activity categories ----
+// Activity is sometimes free text (a calendar event's title became the
+// activity, e.g. "Attended Court for <name>"). Aggregate reports group every
+// entry into a fixed category so free text — and any name in it — never
+// appears there. The client's own Time tab still shows what was written.
+const ACTIVITY_CATEGORIES = ['Client Session','Face-to-face','Phone call','Home Visit','Outreach','Court attendance','Intake','Group Program','Case Coordination','Advocacy','Travel','Admin / Documentation','Crisis Response','Other'];
+function activityCategory(a) {
+  const s = String(a || '').trim(), l = s.toLowerCase();
+  if (!s) return 'Other';
+  const exact = ACTIVITY_CATEGORIES.find(c => c.toLowerCase() === l); if (exact) return exact;
+  const rules = [[/court/, 'Court attendance'], [/intake/, 'Intake'], [/crisis/, 'Crisis Response'], [/home.?visit|participant.?property/, 'Home Visit'],
+    [/outreach/, 'Outreach'], [/phone|call|text|sms/, 'Phone call'], [/face/, 'Face-to-face'], [/group/, 'Group Program'],
+    [/travel|transport|driv|drove|pick.?up|drop.?off/, 'Travel'], [/admin|document|paperwork|report writing/, 'Admin / Documentation'], [/advoca/, 'Advocacy'],
+    [/coordinat|case conf|meeting|referral/, 'Case Coordination'], [/session|appointment|sewb|aod|counsel|support|visit/, 'Client Session']];
+  const hit = rules.find(([re]) => re.test(l));
+  return hit ? hit[1] : 'Other';
+}
+const _EVT_ACTIVITY = { appointment:'Client Session', court:'Court attendance', followup:'Client Session', group:'Group Program', homevisit:'Home Visit', aod:'Client Session', cultural:'Client Session', admin:'Admin / Documentation' };
+
 function renderReportsPage() {
   const activeClients = clients.filter(c=>c.status==='active');
   return `
@@ -4182,6 +4334,8 @@ function renderReportsPage() {
       .no-print { display:none!important; }
     }
   </style>
+
+  ${reportFilterBarHTML()}
 
   <!-- SECTION: CLIENT REPORTS -->
   <div class="card no-print" style="margin-bottom:20px">
@@ -4477,18 +4631,7 @@ function renderReportsPage() {
     </div>
   </div>
 
-  <!-- DATE FILTER -->
-  <div class="card no-print">
-    <div class="card-header"><div class="card-title">📅 Report Date Range (applies to notes &amp; time reports)</div></div>
-    <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
-      <div class="form-group" style="margin:0"><label>From</label><input type="date" id="rpt-from" value="${sanitize(isoDate(new Date(Date.now()-90*24*3600*1000)))}"></div>
-      <div class="form-group" style="margin:0"><label>To</label><input type="date" id="rpt-to" value="${sanitize(today())}"></div>
-      <button class="btn btn-outline" style="margin-top:18px" onclick="setDateRange('month')">This Month</button>
-      <button class="btn btn-outline" style="margin-top:18px" onclick="setDateRange('quarter')">This Quarter</button>
-      <button class="btn btn-outline" style="margin-top:18px" onclick="setDateRange('year')">This Year</button>
-      <button class="btn btn-outline" style="margin-top:18px" onclick="setDateRange('all')">All Time</button>
-    </div>
-  </div>`;
+</div>`;
 }
 
 // Quick report from inside a client profile tab
@@ -4501,17 +4644,6 @@ function openQuickReport(type, clientId) {
   else if(type==='disability') openReport(buildDisabilityClientReport(c));
   else if(type==='workfoundations') openReport(buildWorkFoundationsClientReport(c));
   else if(type==='full') openReport(buildFullClientReport(c,'2000-01-01',today()));
-}
-
-function setDateRange(range) {
-  const now = new Date();
-  let from;
-  if(range==='month') from = new Date(now.getFullYear(), now.getMonth(), 1);
-  else if(range==='quarter') from = new Date(now.getFullYear(), Math.floor(now.getMonth()/3)*3, 1);
-  else if(range==='year') from = new Date(now.getFullYear(), 0, 1);
-  else from = new Date('2000-01-01');
-  document.getElementById('rpt-from').value = isoDate(from);
-  document.getElementById('rpt-to').value = today();
 }
 
 function updateClientReportButtons() {
@@ -4612,6 +4744,7 @@ function reportHeader(title, subtitle, clientName) {
       <div>
         <div class="report-title">${sanitize(title)}</div>
         <div class="report-sub">${sanitize(subtitle)}</div>
+        ${_rptFilterLabel && /·/.test(_rptFilterLabel) ? `<div class="report-sub report-filter-label">Filtered: ${sanitize(_rptFilterLabel.split(' · ').slice(1).join(' · '))}</div>` : ''}
         ${clientName ? `<div class="report-client">Client: ${sanitize(clientName)}</div>` : ''}
       </div>
     </div>
@@ -5752,23 +5885,23 @@ function buildTimeReport(c, from, to) {
 }
 
 // ===== PROGRAM-LEVEL REPORTS =====
-function generateProgramReport(type) {
-  const from = document.getElementById('rpt-from')?.value||'2000-01-01';
-  const to = document.getElementById('rpt-to')?.value||today();
-  if(type==='sewb') openReport(buildSEWBProgramReport(from, to));
-  else if(type==='sewb-combined') openReport(buildSEWBCombinedReport(from, to));
-  else if(type==='aod') openReport(buildAODProgramReport(from, to));
-  else if(type==='justice') openReport(buildJusticeProgramReport(from, to));
-  else if(type==='cultural') openReport(buildCulturalProgramReport(from, to));
-  else if(type==='disability') openReport(buildDisabilityProgramReport(from, to));
-  else if(type==='workfoundations') openReport(buildWorkFoundationsProgramReport(from, to));
-  else if(type==='allprograms') openReport(buildAllProgramsReport(from, to));
-  else if(type==='caseload') openReport(buildCaseloadReport(from, to));
-  else if(type==='activity') openReport(buildActivityReport(from, to));
-  else if(type==='risk') openReport(buildRiskRegister());
-  else if(type==='goals') openReport(buildGoalsReport());
-  else if(type==='outcomes') openReport(buildOutcomesReport(from, to));
-  else if(type==='feedback') openReport(buildFeedbackSummaryReport(from, to));
+function generateProgramReport(type) { openReport(withReportFilters((from, to) => _buildProgramReport(type, from, to))); }
+function _buildProgramReport(type, from, to) {
+  if(type==='sewb') return (buildSEWBProgramReport(from, to));
+  else if(type==='sewb-combined') return (buildSEWBCombinedReport(from, to));
+  else if(type==='aod') return (buildAODProgramReport(from, to));
+  else if(type==='justice') return (buildJusticeProgramReport(from, to));
+  else if(type==='cultural') return (buildCulturalProgramReport(from, to));
+  else if(type==='disability') return (buildDisabilityProgramReport(from, to));
+  else if(type==='workfoundations') return (buildWorkFoundationsProgramReport(from, to));
+  else if(type==='allprograms') return (buildAllProgramsReport(from, to));
+  else if(type==='caseload') return (buildCaseloadReport(from, to));
+  else if(type==='activity') return (buildActivityReport(from, to));
+  else if(type==='risk') return (buildRiskRegister());
+  else if(type==='goals') return (buildGoalsReport());
+  else if(type==='outcomes') return (buildOutcomesReport(from, to));
+  else if(type==='feedback') return (buildFeedbackSummaryReport(from, to));
+  return ''
 }
 
 // ===== EPISODE OF CARE — OFFICIAL FUNDING REPORTS =====
@@ -5965,9 +6098,7 @@ function saveFundingKPITargetFromInput(){
 // ===== WORKLOAD & CAPACITY ANALYTICS =====
 const WORKLOAD_HIGH = 25; // active-client caseload considered "high load"
 function generateWorkloadReport(){
-  const from = document.getElementById('rpt-from')?.value || '2000-01-01';
-  const to   = document.getElementById('rpt-to')?.value || today();
-  openReport(buildWorkloadReport(from, to));
+  openReport(withReportFilters(buildWorkloadReport));
 }
 function buildWorkloadReport(from, to){
   const inRange = d => d && d>=from && d<=to+'T23:59:59';
@@ -6197,9 +6328,7 @@ function buildAllProgramsReport(from, to) {
 }
 
 function genFunderReport(funder) {
-  const from = document.getElementById('rpt-from')?.value||isoDate(new Date(new Date().getFullYear(),0,1));
-  const to = document.getElementById('rpt-to')?.value||today();
-  openReport(buildFunderReport(funder, from, to));
+  openReport(withReportFilters((from, to) => buildFunderReport(funder, from, to), { datesOnly: true }));
 }
 
 function buildGoalsReport() {
@@ -6474,8 +6603,8 @@ function buildActivityReport(from, to) {
   const total = filtered.reduce((a,t)=>a+(t.minutes||0),0);
   const byWorker = {}; const byActivity = {}; const byClient = {};
   filtered.forEach(t=>{
-    const w=t.worker||'Unknown'; byWorker[w]=(byWorker[w]||0)+(t.minutes||0);
-    const a=t.activity||'Other'; byActivity[a]=(byActivity[a]||0)+(t.minutes||0);
+    const w=canonicalWorker(t.worker)||'Unknown'; byWorker[w]=(byWorker[w]||0)+(t.minutes||0);
+    const a=activityCategory(t.activity); byActivity[a]=(byActivity[a]||0)+(t.minutes||0);
     byClient[t.clientId]=(byClient[t.clientId]||0)+(t.minutes||0);
   });
   return `
@@ -6491,12 +6620,12 @@ function buildActivityReport(from, to) {
     <div><h2>By Worker</h2>
     <table><tr><th>Worker</th><th>Total Time</th><th>Sessions</th></tr>
     ${Object.entries(byWorker).sort((a,b)=>b[1]-a[1]).map(([w,m])=>{
-      const count=filtered.filter(t=>(t.worker||'Unknown')===w).length;
-      return `<tr><td>${w}</td><td>${Math.floor(m/60)}h ${m%60}m</td><td>${count}</td></tr>`;
+      const count=filtered.filter(t=>(canonicalWorker(t.worker)||'Unknown')===w).length;
+      return `<tr><td>${sanitize(w)}</td><td>${Math.floor(m/60)}h ${m%60}m</td><td>${count}</td></tr>`;
     }).join('')}</table></div>
     <div><h2>By Activity</h2>
     <table><tr><th>Activity</th><th>Total Time</th></tr>
-    ${Object.entries(byActivity).sort((a,b)=>b[1]-a[1]).map(([a,m])=>`<tr><td>${a}</td><td>${Math.floor(m/60)}h ${m%60}m</td></tr>`).join('')}</table></div>
+    ${Object.entries(byActivity).sort((a,b)=>b[1]-a[1]).map(([a,m])=>`<tr><td>${sanitize(a)}</td><td>${Math.floor(m/60)}h ${m%60}m</td></tr>`).join('')}</table></div>
   </div>
   <h2>By Client</h2>
   <table><tr><th>Client</th><th>Total Time</th><th>Sessions</th></tr>
@@ -6511,7 +6640,7 @@ function buildActivityReport(from, to) {
   <table><tr><th>Date</th><th>Client</th><th>Activity</th><th>Mode</th><th>Duration</th><th>Worker</th></tr>
   ${filtered.map(t=>{
     const c=clients.find(cl=>cl.id===t.clientId);
-    return `<tr><td>${fmt(t.date)}</td><td>${sanitize(c?.fullName||'Unknown')}</td><td>${sanitize(t.activity||'—')}</td><td>${sanitize(t.type||'—')}</td><td>${sanitize(t.minutes)} min</td><td>${sanitize(t.worker||'—')}</td></tr>`;
+    return `<tr><td>${fmt(t.date)}</td><td>${sanitize(c?.fullName||'Unknown')}</td><td>${sanitize(activityCategory(t.activity))}</td><td>${sanitize(t.type||'—')}</td><td>${sanitize(t.minutes)} min</td><td>${sanitize(canonicalWorker(t.worker)||'—')}</td></tr>`;
   }).join('')}
   </table>`;
 }
@@ -7234,7 +7363,7 @@ function logTimeFromEvent(id) {
   const e = calEvents.find(ev=>ev.id===id); if(!e) return;
   const dur = e.startTime&&e.endTime ? timeToMins(e.endTime)-timeToMins(e.startTime) : 60;
   if(e.clientId) {
-    timeLogs.push({ id:uid(), clientId:e.clientId, date:e.date, minutes:Math.max(dur,0), activity:e.title, type:'Face-to-face', worker:e.worker, notes:e.notes });
+    timeLogs.push({ id:uid(), clientId:e.clientId, date:e.date, minutes:Math.max(dur,0), activity:_EVT_ACTIVITY[e.type]||'Client Session', type:'Face-to-face', worker:e.worker, notes:[e.title, e.notes].filter(Boolean).join(' — ') });
     saveAll(); showToast('Time logged from event ✓');
   } else {
     openTimeModal(null);
@@ -14342,7 +14471,7 @@ function buildFunderReport(funder, from, to) {
   </table>
   <h2>Service Activity Summary</h2>
   <table><tr><th>Activity Type</th><th>Sessions</th><th>Hours</th></tr>
-  ${Object.entries(timeLogs.filter(t=>t.date>=from&&t.date<=to).reduce((acc,t)=>{const k=t.activity||'Other';if(!acc[k])acc[k]={count:0,mins:0};acc[k].count++;acc[k].mins+=t.minutes||0;return acc;},{})).map(([k,v])=>`<tr><td>${k}</td><td>${sanitize(v.count)}</td><td>${Math.floor(v.mins/60)}h ${sanitize(v.mins%60)}m</td></tr>`).join('')||'<tr><td colspan="3">No time entries in this period</td></tr>'}
+  ${Object.entries(timeLogs.filter(t=>t.date>=from&&t.date<=to).reduce((acc,t)=>{const k=activityCategory(t.activity);if(!acc[k])acc[k]={count:0,mins:0};acc[k].count++;acc[k].mins+=t.minutes||0;return acc;},{})).map(([k,v])=>`<tr><td>${sanitize(k)}</td><td>${sanitize(v.count)}</td><td>${Math.floor(v.mins/60)}h ${sanitize(v.mins%60)}m</td></tr>`).join('')||'<tr><td colspan="3">No time entries in this period</td></tr>'}
   </table>
   <div style="margin-top:20px;padding:14px;background:#f0f7f3;border-radius:6px;font-size:12px">
     <strong>Report prepared by:</strong> ${DB.load('workerName',currentUser?.name||'—')} &nbsp;|&nbsp;
