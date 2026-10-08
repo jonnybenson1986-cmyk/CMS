@@ -169,6 +169,15 @@ blank), or the CorePlus import. Each entry records its `source`. Reports →
 Review & remove time entries lets a manager remove wrong entries; removal is a
 tracked delete and is audited.
 
+**SEWB Participant Handbook.** `handbook/SEWB-Participant-Handbook.pdf` is a
+public document served with the app. When an intake is saved with a mobile
+number and "Safe to leave calls/texts?" is Yes, the worker is offered a
+ready-written text with a link to it (a text can't carry the PDF itself). It
+is sent from the worker's own phone — the CMS has no SMS gateway — and each
+send is recorded on the file and audited, with the number masked. To update
+the handbook, replace the PDF at the same path; links already sent keep
+working. The service worker never caches it.
+
 **Client feedback.** Four plain-language questions, due after intake and at
 mid-episode, and asked at exit through the review. The worker sends them from
 their own email or phone and records the reply on the file. Messages carry the
@@ -201,6 +210,9 @@ Tracked so they are not quietly forgotten:
 - Server-side role enforcement is not deployed (`functions/` + `.strict` rules).
 - Firebase App Check is registered but not enforced.
 - MFA is available but not required for privileged accounts.
+- Texts (feedback requests, the handbook) are sent from the worker's own
+  phone, not automatically — automatic SMS needs an SMS provider and a
+  server-side function.
 - Feedback requests are not sent automatically, and there is no public form
   for clients to answer online — both need a server-side component (email/SMS
   provider and a locked-down response endpoint).

@@ -1035,7 +1035,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v77';
+const APP_VERSION = 'v78';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -1839,8 +1839,10 @@ function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
       <div style="display:flex;gap:8px">
         <button class="btn btn-primary btn-sm" onclick="saveIntake('${c.id}')">💾 Save Intake</button>
         <button class="btn btn-outline btn-sm" onclick="printIntake('${c.id}')">🖨️ Print / Export</button>
+        <button class="btn btn-outline btn-sm" onclick="openHandbookSendModal('${c.id}')">📘 Send handbook</button>
       </div>
     </div>
+    <div class="handbook-status" style="font-size:12px;margin:-8px 0 14px;color:${handbookStatus(c).ok ? '#065f46' : 'var(--muted)'}">${sanitize(handbookStatus(c).text)}</div>
 
     <!-- CLIENT DETAILS -->
     <div class="card">
@@ -3019,6 +3021,99 @@ function saveIntake(id, quiet=false) {
 
   audit('Saved intake form', clients.find(cl=>cl.id===id)?.fullName||'', id);
   saveAll(); if(!quiet) showToast('Intake form saved ✓');
+  if(!quiet) handbookAfterIntake(c);   // offer the handbook text once there's a mobile and consent to texts
+  const hs = document.querySelector('.handbook-status');
+  if (hs) { const st = handbookStatus(c); hs.textContent = st.text; hs.style.color = st.ok ? '#065f46' : 'var(--muted)'; }
+}
+
+// ============================================================
+// SEWB PARTICIPANT HANDBOOK — sent by text at intake
+// ============================================================
+// The handbook is a public document hosted with the app
+// (handbook/SEWB-Participant-Handbook.pdf). A PDF can't travel inside a text
+// message, so the client is texted a short message with a link to it.
+// When an intake is saved with a mobile number — and the client has said it's
+// safe to leave texts — the worker is offered the ready-written text. It is
+// sent from the worker's own phone (or Phone Link / Messages on a computer):
+// the CMS has no SMS gateway. Each send is recorded on the file and audited.
+// To update the handbook, replace the PDF at the same path — links already
+// sent keep working.
+const HANDBOOK = { title: 'SEWB Participant Handbook', path: 'handbook/SEWB-Participant-Handbook.pdf', sizeMB: 14 };
+const ORG_PHONE = '(03) 5561 5315';
+// Hand an sms:/mailto: link to the device's own messaging or email app.
+function openExternalLink(url) { window.location.href = url; }
+function handbookUrl() { return new URL(HANDBOOK.path, location.origin + '/').href; }
+// Australian mobile → 04xxxxxxxx, or '' if the number can't take a text.
+function auMobile(v) {
+  let d = String(v || '').replace(/\D/g, '');
+  if (d.length === 11 && d.startsWith('614')) d = '0' + d.slice(2);
+  if (d.length === 9 && d.startsWith('4')) d = '0' + d;
+  return /^04\d{8}$/.test(d) ? d : '';
+}
+const _maskPhone = m => m ? m.slice(0, 4) + ' ••• ' + m.slice(-3) : '';
+function handbookMessage(c) {
+  const first = String(c.preferredName || c.fullName || '').trim().split(/\s+/)[0] || 'there';
+  return `Hi ${first}, welcome to Worn Gundidj SEWB. Here is your Participant Handbook — it explains your rights, how we work with you and who to contact: ${handbookUrl()} Any questions, call us on ${ORG_PHONE}.`;
+}
+// Where things stand for this client, in one place (used on the Intake tab).
+function handbookStatus(c) {
+  const mob = auMobile(c.phone), sent = c.handbookSent || [], last = sent[sent.length - 1];
+  const toNow = mob ? sent.filter(h => h.toFull === mob).pop() : null;
+  const how = h => `${fmt(h.at)} by ${h.channel === 'sms' ? 'text' : h.channel} to ${h.to}${h.by ? ' (' + h.by + ')' : ''}`;
+  if (toNow) return { ok: true, text: '📘 Handbook sent ' + how(toNow) };
+  const before = last ? ` · last sent ${how(last)}` : '';
+  if (!c.phone) return { ok: !!last, text: '📘 Handbook: add a mobile number to text it' + before };
+  if (!mob) return { ok: !!last, text: '📘 Handbook: the phone number on file is not a mobile — it can\'t be texted' + (c.email ? ' (you can email it)' : '') + before };
+  if (c.ifSafeContact !== 'Yes') return { ok: false, text: '📘 Handbook not texted — "Safe to leave calls/texts?" is not Yes' + before };
+  return { ok: false, ready: true, text: '📘 Handbook not yet sent to this number' + before };
+}
+// Called after an explicit intake save (never from autosave).
+function handbookAfterIntake(c) {
+  const st = handbookStatus(c), mob = auMobile(c.phone);
+  if (!st.ready) return false;
+  if ((c.handbookSent || []).some(h => h.toFull === mob)) return false;        // already sent to this number
+  if (c.handbookPrompted === mob) return false;                               // "not now" for this number
+  setTimeout(() => openHandbookSendModal(c.id, true), 250);
+  return true;
+}
+function openHandbookSendModal(clientId, fromIntake) {
+  const c = clients.find(x => x.id === clientId); if (!c) return;
+  const mob = auMobile(c.phone), safe = c.ifSafeContact === 'Yes';
+  const html = `
+    <p style="font-size:13px;margin-bottom:10px">${fromIntake ? 'Intake saved with a mobile number. ' : ''}Send <strong>${sanitize(c.fullName)}</strong> the <strong>${HANDBOOK.title}</strong>?</p>
+    ${!safe ? `<div class="alert alert-warning" style="font-size:12px">"Safe to leave calls/texts?" on the intake is <strong>${sanitize(c.ifSafeContact || 'not answered')}</strong>. Only text the client if they've agreed to texts.</div>` : ''}
+    <div class="form-group"><label>Text to</label><input id="hb-to" value="${sanitize(mob || '')}" placeholder="Mobile number"></div>
+    <div class="form-group"><label>Message</label><textarea id="hb-msg" style="min-height:120px;font-size:13px">${sanitize(handbookMessage(c))}</textarea>
+      <div style="font-size:11px;color:var(--muted);margin-top:3px">A text can't carry the PDF itself, so it carries a link. The handbook is about ${HANDBOOK.sizeMB} MB — suggest opening it on Wi-Fi.</div></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-primary" id="hb-sms" ${safe && mob ? '' : 'disabled'} onclick="sendHandbook('${c.id}','sms',${fromIntake ? 'true' : 'false'})">💬 Send text</button>
+      <button class="btn btn-outline" ${safe ? '' : 'disabled'} onclick="sendHandbook('${c.id}','copy',${fromIntake ? 'true' : 'false'})">📋 Copy message</button>
+      ${c.email ? `<button class="btn btn-outline" onclick="sendHandbook('${c.id}','email',${fromIntake ? 'true' : 'false'})">✉️ Email instead</button>` : ''}
+      <button class="btn btn-outline" onclick="handbookNotNow('${c.id}',${fromIntake ? 'true' : 'false'})">Not now</button>
+      <a class="btn btn-outline" href="${sanitize(handbookUrl())}" target="_blank" rel="noopener">👁️ Open handbook</a>
+    </div>
+    <p style="font-size:11px;color:var(--muted);margin-top:10px">"Send text" opens your phone's messages with this text ready — press Send there. On a computer it opens Phone Link (Windows) or Messages (Mac) if set up; otherwise use Copy message.</p>`;
+  showModal('📘 Send the SEWB Participant Handbook', html, null, '600px', true);
+}
+function sendHandbook(clientId, channel, fromIntake) {
+  const c = clients.find(x => x.id === clientId); if (!c) return;
+  const msg = document.getElementById('hb-msg')?.value || handbookMessage(c);
+  const to = channel === 'email' ? c.email : auMobile(document.getElementById('hb-to')?.value || c.phone);
+  if (channel !== 'email' && channel !== 'copy' && !to) { alert('Enter a mobile number (04…)'); return; }
+  if (channel === 'sms') openExternalLink(`sms:${to}?&body=${encodeURIComponent(msg)}`);
+  else if (channel === 'email') openExternalLink(`mailto:${encodeURIComponent(c.email)}?subject=${encodeURIComponent('Your Worn Gundidj SEWB Participant Handbook')}&body=${encodeURIComponent(msg)}`);
+  else { try { navigator.clipboard.writeText(msg); } catch (_) {} }
+  c.handbookSent = c.handbookSent || [];
+  c.handbookSent.push({ id: uid(), at: now(), by: currentUser?.name || '', channel, to: channel === 'email' ? c.email : _maskPhone(to), toFull: channel === 'email' ? '' : to, doc: HANDBOOK.title });
+  audit('Handbook sent', `${c.fullName} — ${HANDBOOK.title} by ${channel === 'sms' ? 'text' : channel}${channel === 'email' ? '' : ' to ' + _maskPhone(to)}`, c.id);
+  saveAll();
+  showToast(channel === 'copy' ? 'Message copied — paste it into a text. Recorded on the file.' : 'Handbook send recorded on the file');
+  closeModal(); if (fromIntake || currentClientId === clientId) _reopenProfileTab(clientId, 'intake');
+}
+function handbookNotNow(clientId, fromIntake) {
+  const c = clients.find(x => x.id === clientId); if (!c) return;
+  c.handbookPrompted = auMobile(c.phone);      // don't ask again for this number; the Intake tab button still works
+  saveAll(); closeModal(); if (fromIntake) _reopenProfileTab(clientId, 'intake');
 }
 
 function printIntake(id) {
@@ -13791,8 +13886,8 @@ function sendFeedbackRequest(clientId, channel) {
   const c = clients.find(x => x.id === clientId); if (!c) return;
   const msg = document.getElementById('qf-msg')?.value || feedbackMessage(c);
   const point = document.getElementById('qf-point')?.value || 'other';
-  if (channel === 'email') window.location.href = `mailto:${encodeURIComponent(c.email)}?subject=${encodeURIComponent('How are we going? — Worn Gundidj')}&body=${encodeURIComponent(msg)}`;
-  else if (channel === 'sms') window.location.href = `sms:${String(c.phone || '').replace(/[^\d+]/g, '')}?&body=${encodeURIComponent(msg)}`;
+  if (channel === 'email') openExternalLink(`mailto:${encodeURIComponent(c.email)}?subject=${encodeURIComponent('How are we going? — Worn Gundidj')}&body=${encodeURIComponent(msg)}`);
+  else if (channel === 'sms') openExternalLink(`sms:${String(c.phone || '').replace(/[^\d+]/g, '')}?&body=${encodeURIComponent(msg)}`);
   else if (channel === 'copy') { try { navigator.clipboard.writeText(msg); } catch (_) {} }
   c.feedbackRequests = c.feedbackRequests || [];
   c.feedbackRequests.push({ id: uid(), point, channel, sentAt: now(), sentBy: currentUser?.name || '' });
