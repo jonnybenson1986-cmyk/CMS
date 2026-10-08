@@ -1,4 +1,4 @@
-const CACHE_NAME = 'wg-cms-v77';
+const CACHE_NAME = 'wg-cms-v78';
 
 self.addEventListener('install', e => {
   // Take control immediately — don't wait for old SW to finish
@@ -34,6 +34,10 @@ self.addEventListener('fetch', e => {
     );
     return;
   }
+
+  // The participant handbook (a large PDF for clients) — straight from the
+  // network, never stored in staff devices' offline cache.
+  if (url.pathname.startsWith('/handbook/')) return;
 
   // service-worker.js itself — always network
   if (url.pathname.endsWith('service-worker.js')) {
