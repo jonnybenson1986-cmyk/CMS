@@ -1035,7 +1035,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v77';
+const APP_VERSION = 'v79';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -11283,7 +11283,7 @@ function saveStaffEdit(userId) {   // sync: the modal only stays open (to show a
     errEl.textContent='Updating password…';
     // Password reset via Firebase requires Admin SDK; instruct user to use Firebase console
     errEl.style.color='#d97706';
-    errEl.textContent='⚠️ To reset a password, go to Firebase Console → Authentication → Users → Reset password. Profile saved.';
+    errEl.textContent='⚠️ Passwords can\'t be set here. Ask them to use "Forgot password?" on the sign-in page (or use Firebase Console → Authentication → Users → Reset password). Profile saved.';
     saveUserProfiles();
     /* saveUserProfiles() publishes the shared staff directory (managers only) */
     return false; // keep modal open so user can see the message
@@ -12263,10 +12263,23 @@ function showLoginScreen() {
           <input type="password" id="login-pass" placeholder="••••••••"
             style="width:100%;padding:11px 14px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;box-sizing:border-box"
             onkeydown="if(event.key==='Enter')doLogin()">
+          <div style="text-align:right;margin-top:6px"><a href="#" id="forgot-link" onclick="event.preventDefault();toggleForgotPassword(true)" style="font-size:12px;color:#2d6a4f;font-weight:600">Forgot password?</a></div>
         </div>
-        <button class="btn btn-primary" id="login-btn" style="width:100%;padding:13px;font-size:15px;border-radius:8px" onclick="doLogin()">Sign In →</button>
-        <p id="login-error" style="color:#dc2626;font-size:13px;text-align:center;margin-top:12px;min-height:18px"></p>
-        <p style="font-size:12px;color:#9ca3af;text-align:center;margin-top:12px">Contact your system manager to create or reset your account</p>
+        <div id="login-main">
+          <button class="btn btn-primary" id="login-btn" style="width:100%;padding:13px;font-size:15px;border-radius:8px" onclick="doLogin()">Sign In →</button>
+          <p id="login-error" style="color:#dc2626;font-size:13px;text-align:center;margin-top:12px;min-height:18px"></p>
+        </div>
+        <div id="forgot-panel" style="display:none;background:#f0f7f3;border:1px solid #cfe6d8;border-radius:10px;padding:14px;margin-top:4px">
+          <div style="font-size:14px;font-weight:700;color:#1a3a2a;margin-bottom:6px">Reset your password</div>
+          <p style="font-size:12px;color:#4b5563;margin-bottom:10px">Enter the email you sign in with. We'll email you a secure link to choose a new password.</p>
+          <input type="email" id="forgot-email" placeholder="you@worngundidj.org.au" autocomplete="username"
+            style="width:100%;padding:10px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;box-sizing:border-box;margin-bottom:10px"
+            onkeydown="if(event.key==='Enter')sendPasswordReset()">
+          <button class="btn btn-primary" id="forgot-btn" style="width:100%;padding:11px;font-size:14px;border-radius:8px" onclick="sendPasswordReset()">Email me a reset link</button>
+          <p id="forgot-status" role="status" style="font-size:12px;margin-top:10px;min-height:16px;color:#374151"></p>
+          <div style="text-align:center;margin-top:4px"><a href="#" onclick="event.preventDefault();toggleForgotPassword(false)" style="font-size:12px;color:#6b7280">← Back to sign in</a></div>
+        </div>
+        <p style="font-size:12px;color:#9ca3af;text-align:center;margin-top:12px">New staff account? Contact your system manager.</p>
       ` : `
         <p style="color:#dc2626;font-size:13px;text-align:center">Sign-in is unavailable — please reload the page.</p>
       `}
@@ -12491,6 +12504,60 @@ async function _mfaChallengeFlow(resolver, email){
       }
     }, 60);
   });
+}
+
+// ===== FORGOTTEN PASSWORD =====
+// Firebase emails the person a one-time link to their own account; they choose
+// a new password on Firebase's secure page and come back to sign in. Nobody
+// else sees or sets the password. The reply never says whether an account
+// exists for the email typed, so the form can't be used to discover who has
+// an account. Two-step sign-in (if on) is still asked for afterwards.
+const RESET_COOLDOWN_MS = 60 * 1000;
+function toggleForgotPassword(show) {
+  const panel = document.getElementById('forgot-panel'), main = document.getElementById('login-main');
+  if (!panel) return;
+  panel.style.display = show ? '' : 'none';
+  if (main) main.style.display = show ? 'none' : '';
+  const pass = document.getElementById('login-pass')?.closest('.form-group'); if (pass) pass.style.display = show ? 'none' : '';
+  if (show) {
+    const e = document.getElementById('login-email')?.value?.trim() || '';
+    const fe = document.getElementById('forgot-email'); if (fe && !fe.value) fe.value = e;
+    document.getElementById('forgot-status').textContent = '';
+    setTimeout(() => fe?.focus(), 50);
+  } else setTimeout(() => document.getElementById('login-pass')?.focus(), 50);
+}
+async function sendPasswordReset() {
+  const email = (document.getElementById('forgot-email')?.value || '').trim().toLowerCase();
+  const st = document.getElementById('forgot-status'), btn = document.getElementById('forgot-btn');
+  const say = (msg, col) => { if (st) { st.textContent = msg; st.style.color = col || '#374151'; } };
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { say('Please enter your full email address.', '#dc2626'); return; }
+  let last = 0; try { last = Number(sessionStorage.getItem('pwreset:' + email) || 0); } catch (_) {}
+  if (Date.now() - last < RESET_COOLDOWN_MS) { say('A reset link was just sent — check your inbox and junk folder before asking for another.', '#92400e'); return; }
+  btn.disabled = true; btn.textContent = 'Sending…'; say('');
+  try {
+    let waited = 0;                                   // Firebase may still be loading on a fresh page
+    while ((!window.firebase || !firebase.auth) && waited < 15000) { await FSYNC.init(); if (window.firebase && firebase.auth) break; await new Promise(r => setTimeout(r, 1500)); waited += 1500; }
+    if (!window.firebase || !firebase.auth) { say('Still connecting to the secure server — check your internet connection and try again.', '#dc2626'); return; }
+    const cfg = FSYNC.getCfg(); if (!firebase.apps.length) firebase.initializeApp(cfg);
+    try {
+      // After resetting, Firebase's page offers a "Continue" button back to the CMS.
+      await firebase.auth().sendPasswordResetEmail(email, { url: location.origin + '/' });
+    } catch (e) {
+      // The CMS address isn't on Firebase's authorised list → send without the Continue button.
+      if (/continue-uri|unauthorized-domain/.test(e.code || '')) await firebase.auth().sendPasswordResetEmail(email);
+      else throw e;
+    }
+    try { sessionStorage.setItem('pwreset:' + email, String(Date.now())); } catch (_) {}
+    say(`If there's a staff account for ${email}, a reset link is on its way. Check your inbox — and your junk folder. Use the link soon; it expires.`, '#065f46');
+  } catch (e) {
+    if (e.code === 'auth/user-not-found') {      // same reply as success — don't reveal who has an account
+      try { sessionStorage.setItem('pwreset:' + email, String(Date.now())); } catch (_) {}
+      say(`If there's a staff account for ${email}, a reset link is on its way. Check your inbox — and your junk folder. Use the link soon; it expires.`, '#065f46');
+    } else if (e.code === 'auth/invalid-email') say('That email address doesn\'t look right — please check it.', '#dc2626');
+    else if (e.code === 'auth/too-many-requests') say('Too many requests from this device — please wait a few minutes and try again.', '#dc2626');
+    else if (e.code === 'auth/network-request-failed') say('No internet connection — please try again when you\'re back online.', '#dc2626');
+    else { console.warn('Password reset failed:', e); say('The reset email couldn\'t be sent. Please try again, or ask your System Manager.', '#dc2626'); }
+  } finally { btn.disabled = false; btn.textContent = 'Email me a reset link'; }
 }
 
 async function doLogin() {

@@ -83,6 +83,16 @@ Restore the previous rules immediately.
 
 **3 — Cloud Functions.** Not currently deployed. Follow `SECURITY-DEPLOY.md`.
 
+## Forgotten passwords
+
+The sign-in page has a **Forgot password?** link. Firebase emails the person a
+one-time link to set a new password on its own secure page; nobody else sees
+the password. The reply is the same whether or not an account exists, so the
+form can't be used to find out who has one. Customise the email in Firebase
+Console → Authentication → Templates → Password reset (sender name, reply-to,
+wording). Add the CMS web address under Authentication → Settings → Authorised
+domains so the email's "Continue" button returns to the CMS.
+
 ## Roles
 
 | Role | Key | Can |
