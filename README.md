@@ -146,6 +146,17 @@ Add any new client-creation path through it. Being SEWB is not the same as
 earning a SEWB episode of care: episodes still need explicitly SEWB-typed
 contacts, and AOD and Justice keep their own funding reports.
 
+**Client profile.** A client's file opens on an Overview (last contact, notes,
+time, goals, what needs attention, contact details, upcoming appointments).
+Every other section is in one **Section** dropdown, grouped, with counts —
+not a scrolling tab strip. Add note and Log time are one click; Edit, Assign
+workers, Restrict access and Close sit in an **Actions** menu. **Add to
+program** enrols a client in another program from the file: programs defined
+once in `PROFILE_PROGRAMS`; AOD, Justice and Cultural also enrol them in SEWB
+(the umbrella), NDIS and Home Ownership stand alone. It only adds a flag —
+existing records are untouched — and is audited and kept in the file's
+`programHistory`. Removing a program is still done in Edit, deliberately.
+
 **Goals and outcomes.** A goal is a structured record: domain, starting score,
 target and review date, re-scored at each review on one 0–10 scale rated with
 the client (0 = not at all where I want to be, 10 = exactly where I want to be).
