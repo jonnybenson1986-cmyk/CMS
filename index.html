@@ -1035,7 +1035,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v79';
+const APP_VERSION = 'v80';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -1839,8 +1839,10 @@ function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
       <div style="display:flex;gap:8px">
         <button class="btn btn-primary btn-sm" onclick="saveIntake('${c.id}')">💾 Save Intake</button>
         <button class="btn btn-outline btn-sm" onclick="printIntake('${c.id}')">🖨️ Print / Export</button>
+        <button class="btn btn-outline btn-sm" onclick="openHandbookSendModal('${c.id}','profile:intake')">📘 Send handbook</button>
       </div>
     </div>
+    <div class="handbook-status" style="font-size:12px;margin:-8px 0 14px;color:${handbookStatus(c).ok ? '#065f46' : 'var(--muted)'}">${sanitize(handbookStatus(c).text)}</div>
 
     <!-- CLIENT DETAILS -->
     <div class="card">
@@ -2244,6 +2246,7 @@ function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
   if(tab === 'files') {
     const attachments = c.attachments || [];
     return `
+    ${handbookFileCardHTML(c)}
     <div class="card">
       <div class="card-header">
         <div class="card-title">📎 Client Files &amp; Attachments</div>
@@ -3019,6 +3022,177 @@ function saveIntake(id, quiet=false) {
 
   audit('Saved intake form', clients.find(cl=>cl.id===id)?.fullName||'', id);
   saveAll(); if(!quiet) showToast('Intake form saved ✓');
+  if(!quiet) handbookAfterIntake(c);   // offer the handbook text once there's a mobile and consent to texts
+  const hs = document.querySelector('.handbook-status');
+  if (hs) { const st = handbookStatus(c); hs.textContent = st.text; hs.style.color = st.ok ? '#065f46' : 'var(--muted)'; }
+}
+
+// ============================================================
+// SEWB PARTICIPANT HANDBOOK — sent by text at intake
+// ============================================================
+// The handbook is a public document hosted with the app
+// (handbook/SEWB-Participant-Handbook.pdf). A PDF can't travel inside a text
+// message, so the client is texted a short message with a link to it.
+// When an intake is saved with a mobile number — and the client has said it's
+// safe to leave texts — the worker is offered the ready-written text. It is
+// sent from the worker's own phone (or Phone Link / Messages on a computer):
+// the CMS has no SMS gateway. Each send is recorded on the file and audited.
+// To update the handbook, replace the PDF at the same path — links already
+// sent keep working.
+const HANDBOOK = { title: 'SEWB Participant Handbook', path: 'handbook/SEWB-Participant-Handbook.pdf', sizeMB: 14 };
+const ORG_PHONE = '(03) 5561 5315';
+// Hand an sms:/mailto: link to the device's own messaging or email app.
+function openExternalLink(url) { window.location.href = url; }
+function handbookUrl() { return new URL(HANDBOOK.path, location.origin + '/').href; }
+// Australian mobile → 04xxxxxxxx, or '' if the number can't take a text.
+function auMobile(v) {
+  let d = String(v || '').replace(/\D/g, '');
+  if (d.length === 11 && d.startsWith('614')) d = '0' + d.slice(2);
+  if (d.length === 9 && d.startsWith('4')) d = '0' + d;
+  return /^04\d{8}$/.test(d) ? d : '';
+}
+const _maskPhone = m => m ? m.slice(0, 4) + ' ••• ' + m.slice(-3) : '';
+function handbookMessage(c) {
+  const first = String(c.preferredName || c.fullName || '').trim().split(/\s+/)[0] || 'there';
+  return `Hi ${first}, welcome to Worn Gundidj SEWB. Here is your Participant Handbook — it explains your rights, how we work with you and who to contact: ${handbookUrl()} Any questions, call us on ${ORG_PHONE}.`;
+}
+// Where things stand for this client, in one place (used on the Intake tab).
+function handbookStatus(c) {
+  const mob = auMobile(c.phone), sent = c.handbookSent || [], last = sent[sent.length - 1];
+  const toNow = mob ? sent.filter(h => h.toFull === mob).pop() : null;
+  const how = h => h.channel === 'in person' ? `${fmt(h.at)} — given in person${h.by ? ' (' + h.by + ')' : ''}` : `${fmt(h.at)} by ${h.channel === 'sms' ? 'text' : h.channel} to ${h.to}${h.by ? ' (' + h.by + ')' : ''}`;
+  if (toNow) return { ok: true, text: '📘 Handbook sent ' + how(toNow) };
+  if (last && (last.channel === 'in person' || last.channel === 'email')) return { ok: true, text: '📘 Handbook ' + (last.channel === 'in person' ? 'given ' : 'sent ') + how(last).replace(' — given in person', ' in person') };
+  const before = last ? ` · last sent ${how(last)}` : '';
+  if (!c.phone) return { ok: !!last, text: '📘 Handbook: add a mobile number to text it' + before };
+  if (!mob) return { ok: !!last, text: '📘 Handbook: the phone number on file is not a mobile — it can\'t be texted' + (c.email ? ' (you can email it)' : '') + before };
+  if (c.ifSafeContact !== 'Yes') return { ok: false, text: '📘 Handbook not texted — "Safe to leave calls/texts?" is not Yes' + before };
+  return { ok: false, ready: true, text: '📘 Handbook not yet sent to this number' + before };
+}
+// Called after an explicit intake save (never from autosave).
+function handbookAfterIntake(c) {
+  const st = handbookStatus(c), mob = auMobile(c.phone);
+  if (!st.ready) return false;
+  if ((c.handbookSent || []).some(h => h.toFull === mob)) return false;        // already sent to this number
+  if (c.handbookPrompted === mob) return false;                               // "not now" for this number
+  setTimeout(() => openHandbookSendModal(c.id, 'intake'), 250);
+  return true;
+}
+// ctx says where the worker came from, so they land back there afterwards:
+// 'intake' (offered after saving an intake), 'profile:<tab>' (a button on the
+// file) or 'sendout' (the Reports send-out list).
+function openHandbookSendModal(clientId, ctx) {
+  const c = clients.find(x => x.id === clientId); if (!c) return;
+  if (ctx === true) ctx = 'intake'; if (!ctx) ctx = 'profile:intake';
+  const mob = auMobile(c.phone), safe = c.ifSafeContact === 'Yes';
+  const q = `'${c.id}','CH','${ctx}'`;
+  const btn = (ch, label, cls, dis, id) => `<button class="btn ${cls}"${id ? ` id="${id}"` : ''} ${dis ? 'disabled' : ''} onclick="sendHandbook(${q.replace('CH', ch)})">${label}</button>`;
+  const html = `
+    <p style="font-size:13px;margin-bottom:10px">${ctx === 'intake' ? 'Intake saved with a mobile number. ' : ''}Send <strong>${sanitize(c.fullName)}</strong> the <strong>${HANDBOOK.title}</strong>?</p>
+    ${!safe ? `<div class="alert alert-warning" style="font-size:12px">"Safe to leave calls/texts?" on the intake is <strong>${sanitize(c.ifSafeContact || 'not answered')}</strong>. Only text the client if they've agreed to texts.</div>` : ''}
+    <div class="form-group"><label>Text to</label><input id="hb-to" value="${sanitize(mob || '')}" placeholder="Mobile number"></div>
+    <div class="form-group"><label>Message</label><textarea id="hb-msg" style="min-height:120px;font-size:13px">${sanitize(handbookMessage(c))}</textarea>
+      <div style="font-size:11px;color:var(--muted);margin-top:3px">A text can't carry the PDF itself, so it carries a link. The handbook is about ${HANDBOOK.sizeMB} MB — suggest opening it on Wi-Fi.</div></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      ${btn('sms', '💬 Send text', 'btn-primary', !(safe && mob), 'hb-sms')}
+      ${btn('copy', '📋 Copy message', 'btn-outline', !safe)}
+      ${c.email ? btn('email', '✉️ Email instead', 'btn-outline', false) : ''}
+      ${btn('in person', '🗂️ Given in person (printed)', 'btn-outline', false)}
+      <button class="btn btn-outline" onclick="handbookNotNow('${c.id}','${ctx}')">Not now</button>
+      <a class="btn btn-outline" href="${sanitize(handbookUrl())}" target="_blank" rel="noopener">👁️ Open handbook</a>
+    </div>
+    <p style="font-size:11px;color:var(--muted);margin-top:10px">"Send text" opens your phone's messages with this text ready — press Send there. On a computer it opens Phone Link (Windows) or Messages (Mac) if set up; otherwise use Copy message.</p>`;
+  showModal('📘 Send the SEWB Participant Handbook', html, null, '640px', true);
+}
+function _handbookReturn(clientId, ctx) {
+  closeModal();
+  if (ctx === 'intake') _reopenProfileTab(clientId, 'intake');
+  else if (String(ctx).startsWith('profile:')) _reopenProfileTab(clientId, String(ctx).slice(8) || 'intake');
+  else if (ctx === 'sendout' && currentPage === 'reports') renderHandbookSendout();
+}
+function sendHandbook(clientId, channel, ctx) {
+  const c = clients.find(x => x.id === clientId); if (!c) return;
+  const msg = document.getElementById('hb-msg')?.value || handbookMessage(c);
+  const to = channel === 'email' ? c.email : auMobile(document.getElementById('hb-to')?.value || c.phone);
+  if (channel === 'sms' && !to) { alert('Enter a mobile number (04…)'); return; }
+  if (channel === 'sms') openExternalLink(`sms:${to}?&body=${encodeURIComponent(msg)}`);
+  else if (channel === 'email') openExternalLink(`mailto:${encodeURIComponent(c.email)}?subject=${encodeURIComponent('Your Worn Gundidj SEWB Participant Handbook')}&body=${encodeURIComponent(msg)}`);
+  else if (channel === 'copy') { try { navigator.clipboard.writeText(msg); } catch (_) {} }
+  const person = channel === 'in person';
+  c.handbookSent = c.handbookSent || [];
+  c.handbookSent.push({ id: uid(), at: now(), by: currentUser?.name || '', channel,
+    to: person ? 'in person' : channel === 'email' ? c.email : _maskPhone(to), toFull: person || channel === 'email' ? '' : to, doc: HANDBOOK.title });
+  audit('Handbook sent', `${c.fullName} — ${HANDBOOK.title} ${person ? 'given in person (printed copy)' : 'by ' + (channel === 'sms' ? 'text' : channel) + (channel === 'email' ? '' : ' to ' + _maskPhone(to))}`, c.id);
+  saveAll();
+  showToast(channel === 'copy' ? 'Message copied — paste it into a text. Recorded on the file.' : person ? 'Recorded: handbook given in person' : 'Handbook send recorded on the file');
+  _handbookReturn(clientId, ctx);
+}
+function handbookNotNow(clientId, ctx) {
+  const c = clients.find(x => x.id === clientId); if (!c) return;
+  if (ctx === 'intake' || ctx === true) { c.handbookPrompted = auMobile(c.phone); saveAll(); }   // don't auto-ask again for this number
+  _handbookReturn(clientId, ctx === true ? 'intake' : ctx);
+}
+const hasHandbook = c => (c.handbookSent || []).length > 0;
+
+// ---- On every client file (Files tab) ----
+function handbookFileCardHTML(c) {
+  const st = handbookStatus(c), given = hasHandbook(c);
+  return `<div class="card handbook-file" style="border-left:4px solid ${given ? '#16a34a' : '#f59e0b'};margin-bottom:12px">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <div style="font-size:28px">📘</div>
+      <div style="flex:1;min-width:200px"><div style="font-size:13px;font-weight:700">${HANDBOOK.title}</div>
+        <div style="font-size:11px;color:var(--muted)">Program document — on every SEWB client file · PDF, ${HANDBOOK.sizeMB} MB</div>
+        <div class="handbook-file-status" style="font-size:12px;margin-top:3px;color:${given ? '#065f46' : '#92400e'}">${given ? sanitize(handbookStatus(c).text.replace(/^📘 /, '')) : 'Not yet given to this client'}</div></div>
+      <a class="btn btn-sm btn-outline" href="${sanitize(handbookUrl())}" target="_blank" rel="noopener">👁 View</a>
+      <button class="btn btn-sm btn-primary" onclick="openHandbookSendModal('${c.id}','profile:files')">${given ? '↻ Send again' : '💬 Send to client'}</button>
+    </div></div>`;
+}
+
+// ---- Send-out list (Reports) ----
+// Works through every client who hasn't had the handbook. Texts still go one
+// at a time from the worker's phone; the list shows who is ready to text, who
+// needs a mobile number or consent first, and who already has it.
+let _hbOpen = false, _hbFilter = 'todo', _hbClosed = false;
+function handbookRowState(c) {
+  if (hasHandbook(c)) return 'done';
+  if (!c.phone) return c.email ? 'emailonly' : 'nophone';
+  if (!auMobile(c.phone)) return c.email ? 'emailonly' : 'landline';
+  if (c.ifSafeContact !== 'Yes') return 'noconsent';
+  return 'ready';
+}
+const HB_STATE = { ready: ['Ready to text', '#065f46', '#d1fae5'], noconsent: ['Needs consent to texts', '#92400e', '#fef3c7'], emailonly: ['No mobile — email or give in person', '#1e40af', '#dbeafe'],
+  landline: ['Landline only — give in person', '#6b7280', '#f3f4f6'], nophone: ['No phone or email — give in person', '#6b7280', '#f3f4f6'], done: ['Has the handbook', '#065f46', '#ecfdf5'] };
+function handbookSendoutCardHTML() {
+  return `<div class="card no-print" style="margin-bottom:20px" id="handbook-sendout-card">
+    <div class="card-header"><div class="card-title">📘 Handbook send-out</div>
+      <button class="btn btn-sm btn-outline" onclick="_hbOpen=!_hbOpen;const b=document.getElementById('hb-sendout-body');b.style.display=_hbOpen?'':'none';if(_hbOpen)renderHandbookSendout()">Show / Hide</button></div>
+    <div id="hb-sendout-body" style="display:${_hbOpen ? '' : 'none'}">${_hbOpen ? handbookSendoutBodyHTML() : ''}</div></div>`;
+}
+function renderHandbookSendout() { const b = document.getElementById('hb-sendout-body'); if (b) b.innerHTML = handbookSendoutBodyHTML(); }
+function handbookSendoutList() {
+  return visibleClients(clients).filter(c => c.fullName && (_hbClosed || (c.status || 'active') !== 'closed'))
+    .map(c => ({ c, st: handbookRowState(c) })).sort((a, b) => a.c.fullName.localeCompare(b.c.fullName));
+}
+function handbookSendoutBodyHTML() {
+  const all = handbookSendoutList(), n = k => all.filter(x => x.st === k).length;
+  const shown = all.filter(x => _hbFilter === 'all' ? true : _hbFilter === 'todo' ? x.st !== 'done' : x.st === _hbFilter);
+  const next = all.find(x => x.st === 'ready');
+  return `
+    <p style="font-size:13px;margin-bottom:10px"><strong>${n('done')} of ${all.length}</strong> ${_hbClosed ? '' : 'open '}clients have the handbook · <strong>${n('ready')}</strong> ready to text now. New clients are offered it automatically when their intake is saved.</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+      <select id="hb-filter" onchange="_hbFilter=this.value;renderHandbookSendout()">
+        ${[['todo', 'Still to give'], ['ready', 'Ready to text'], ['noconsent', 'Needs consent'], ['emailonly', 'No mobile'], ['done', 'Has the handbook'], ['all', 'Everyone']].map(([v, l]) => `<option value="${v}"${_hbFilter === v ? ' selected' : ''}>${l}</option>`).join('')}
+      </select>
+      <label style="font-size:12px;display:flex;gap:4px;align-items:center"><input type="checkbox" ${_hbClosed ? 'checked' : ''} onchange="_hbClosed=this.checked;renderHandbookSendout()"> include closed files</label>
+      ${next ? `<button class="btn btn-primary btn-sm" id="hb-next" onclick="openHandbookSendModal('${next.c.id}','sendout')">💬 Text next client (${sanitize(next.c.fullName)})</button>` : ''}
+    </div>
+    <div class="table-wrap" style="max-height:440px;overflow:auto"><table class="hb-sendout" style="font-size:12px"><thead><tr><th>Client</th><th>Mobile</th><th>Safe to text</th><th>Status</th><th></th></tr></thead><tbody>
+      ${shown.map(({ c, st }) => `<tr data-id="${sanitize(c.id)}" data-state="${st}"><td>${sanitize(c.fullName)}${c.status === 'closed' ? ' <span class="tag tag-closed">closed</span>' : ''}</td>
+        <td>${sanitize(_maskPhone(auMobile(c.phone)) || (c.phone ? 'not a mobile' : '—'))}</td><td>${sanitize(c.ifSafeContact || '—')}</td>
+        <td><span class="tag" style="background:${HB_STATE[st][2]};color:${HB_STATE[st][1]}">${HB_STATE[st][0]}</span>${st === 'done' ? `<div style="font-size:10px;color:var(--muted)">${sanitize(handbookStatus(c).text.replace(/^📘 Handbook sent /, ''))}</div>` : ''}</td>
+        <td style="white-space:nowrap">${st === 'done' ? '' : `<button class="btn btn-sm ${st === 'ready' ? 'btn-primary' : 'btn-outline'}" onclick="openHandbookSendModal('${c.id}','sendout')">${st === 'ready' ? '💬 Text' : 'Send / record'}</button>`}
+          ${st === 'noconsent' || st === 'nophone' || st === 'landline' ? `<button class="btn btn-sm btn-outline" onclick="openClientProfile('${c.id}');setTimeout(()=>_openProfileTab('intake','${c.id}'),0)">Open intake</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="5">Nobody in this list.</td></tr>'}
+    </tbody></table></div>`;
 }
 
 function printIntake(id) {
@@ -4614,6 +4788,7 @@ function renderReportsPage() {
     </div>
   </div>
 
+  ${handbookSendoutCardHTML()}
   ${corePlusCardHTML()}
 
   <!-- BULK CLIENT IMPORT -->
@@ -13858,8 +14033,8 @@ function sendFeedbackRequest(clientId, channel) {
   const c = clients.find(x => x.id === clientId); if (!c) return;
   const msg = document.getElementById('qf-msg')?.value || feedbackMessage(c);
   const point = document.getElementById('qf-point')?.value || 'other';
-  if (channel === 'email') window.location.href = `mailto:${encodeURIComponent(c.email)}?subject=${encodeURIComponent('How are we going? — Worn Gundidj')}&body=${encodeURIComponent(msg)}`;
-  else if (channel === 'sms') window.location.href = `sms:${String(c.phone || '').replace(/[^\d+]/g, '')}?&body=${encodeURIComponent(msg)}`;
+  if (channel === 'email') openExternalLink(`mailto:${encodeURIComponent(c.email)}?subject=${encodeURIComponent('How are we going? — Worn Gundidj')}&body=${encodeURIComponent(msg)}`);
+  else if (channel === 'sms') openExternalLink(`sms:${String(c.phone || '').replace(/[^\d+]/g, '')}?&body=${encodeURIComponent(msg)}`);
   else if (channel === 'copy') { try { navigator.clipboard.writeText(msg); } catch (_) {} }
   c.feedbackRequests = c.feedbackRequests || [];
   c.feedbackRequests.push({ id: uid(), point, channel, sentAt: now(), sentBy: currentUser?.name || '' });
@@ -14037,7 +14212,7 @@ function _isHomeVisitEvent(type, title, location) {
 // Alcohol and Drug Collection needs — confirm against your VADC pre-flight
 // list and add any others here.
 const AOD_VADC_FIELDS = [['aodPrimary','Principal drug of concern'],['aodTreatment','Treatment type'],['referralSource','Referral source']];
-const COMPLETENESS_GROUPS = { intake:'Intake not completed', demo:'Core details missing', consent:'Consent not recorded', goals:'No goals', goalsMeasure:'Goals not measurable', goalReview:'Goal review overdue', risk:'Safety plan missing (medium/high risk)', homerisk:'Home risk assessment missing or out of date', vadc:'AOD / VADC fields missing' };
+const COMPLETENESS_GROUPS = { intake:'Intake not completed', demo:'Core details missing', consent:'Consent not recorded', goals:'No goals', goalsMeasure:'Goals not measurable', goalReview:'Goal review overdue', risk:'Safety plan missing (medium/high risk)', homerisk:'Home risk assessment missing or out of date', handbook:'Participant handbook not given', vadc:'AOD / VADC fields missing' };
 function fileCompleteness(c) {
   const out = [], add = (group, label, tab) => out.push({ group, label, tab });
   if (!(c.intakeSavedAt || c.ifIntakeWorker)) add('intake', 'Intake form not completed', 'intake');
@@ -14050,6 +14225,7 @@ function fileCompleteness(c) {
   if (goals.some(goalReviewOverdue)) add('goalReview', 'Goal review overdue', 'goals');
   if (['medium','high'].includes(c.riskLevel) && !(c.sfWarning || c.sfCoping || c.sfPros || c.sfDate)) add('risk', `Safety plan not completed (${c.riskLevel} risk)`, 'safety');
   const hr = homeRiskStatus(c); if (!hr.ok) add('homerisk', hr.msg, 'homerisk');
+  if (!hasHandbook(c)) add('handbook', 'Participant handbook not given', 'files');
   if (c.aod) { const miss = AOD_VADC_FIELDS.filter(([k]) => !String(c[k] || '').trim()).map(([, l]) => l); if (miss.length) add('vadc', 'AOD / VADC: ' + miss.join(', '), miss[0] === 'Referral source' && miss.length === 1 ? 'overview' : 'aod'); }
   return out;
 }
