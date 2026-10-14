@@ -35,6 +35,10 @@ self.addEventListener('fetch', e => {
     return;
   }
 
+  // The participant handbook (a large PDF for clients) — straight from the
+  // network, never stored in staff devices' offline cache.
+  if (url.pathname.startsWith('/handbook/')) return;
+
   // service-worker.js itself — always network
   if (url.pathname.endsWith('service-worker.js')) {
     e.respondWith(fetch(e.request));
