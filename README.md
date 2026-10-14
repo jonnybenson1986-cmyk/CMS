@@ -191,6 +191,15 @@ Handbook send-out works through existing clients who haven't had it. To
 update the handbook, replace the PDF at the same path; links already sent
 keep working. The service worker never caches it.
 
+**Automatic handbook texts (optional).** A Cloud Function in `functions-sms/`
+can send the handbook text itself — from Firebase through an SMS provider —
+instead of the worker's phone. The app only asks (a client id in the
+`smsOutbox` collection); the function re-checks staff, consent, mobile,
+duplicates and an hourly cap from the client's own file, sends, and writes
+the result back. It is off until a System Manager turns on Settings →
+Automatic texts, and needs the setup in `SMS-SETUP.md` first. Deploy only
+`functions:sms` — never plain `--only functions`.
+
 **Client feedback.** Four plain-language questions, due after intake and at
 mid-episode, and asked at exit through the review. The worker sends them from
 their own email or phone and records the reply on the file. Messages carry the
@@ -223,9 +232,9 @@ Tracked so they are not quietly forgotten:
 - Server-side role enforcement is not deployed (`functions/` + `.strict` rules).
 - Firebase App Check is registered but not enforced.
 - MFA is available but not required for privileged accounts.
-- Texts (feedback requests, the handbook) are sent from the worker's own
-  phone, not automatically — automatic SMS needs an SMS provider and a
-  server-side function.
+- Feedback requests are sent from the worker's own phone. The handbook text
+  can be automatic, but only after the SMS function is set up and deployed
+  (`SMS-SETUP.md`).
 - Feedback requests are not sent automatically, and there is no public form
   for clients to answer online — both need a server-side component (email/SMS
   provider and a locked-down response endpoint).

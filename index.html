@@ -707,6 +707,9 @@ const FSYNC = (() => {
     _listeners.push(col('referrals').onSnapshot(snap=>{ if(!trust(snap))return; referrals=_live(snap.docs.map(d=>d.data()));DB.save('referrals',referrals); if(currentPage==='referrals')setTimeout(()=>showPage('referrals'),50); }, e=>console.warn('referrals listener:',e.message)));
     _listeners.push(col('staff').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; const l=doc.exists?doc.data().list:null; if(Array.isArray(l)&&l.length){ _mergeStaffDirectory(l); if(currentPage==='settings')setTimeout(()=>showPage('settings'),50); } }, e=>{ console.warn('staff listener:',e.message); _noteStaffSync(false,e); }));
     _listeners.push(col('policies').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; const pl=doc.exists?doc.data().list:null; if(pl){ policies=pl; DB.save('policies',policies); if(currentPage==='policies')setTimeout(()=>showPage('policies'),50); } }, e=>console.warn('policies listener:',e.message)));
+    // Automatic texts: the outbox (results written back by the Cloud Function) and the on/off switch.
+    _listeners.push(col('smsOutbox').onSnapshot(snap=>{ smsOutbox=snap.docs.map(d=>Object.assign({id:d.id},d.data())); DB.save('smsOutbox',smsOutbox); try{ _smsRefresh(); }catch(_){} }, e=>console.warn('smsOutbox listener:',e.message)));
+    _listeners.push(col('smsConfig').doc('settings').onSnapshot(doc=>{ smsConfig=doc.exists?doc.data():{}; DB.save('smsConfig',smsConfig); try{ _smsRefresh(); }catch(_){} }, e=>console.warn('smsConfig listener:',e.message)));
     _listeners.push(col('walkins').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; const l=doc.exists?doc.data().list:null; if(l){ walkins=l; DB.save('walkins',walkins); if(currentPage==='walkins')setTimeout(()=>showPage('walkins'),50); } }, e=>console.warn('walkins listener:',e.message)));
     _listeners.push(col('calevents').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; const l=doc.exists?doc.data().list:null; if(l){ calEvents=l; DB.save('calevents',calEvents); if(currentPage==='calendar')setTimeout(()=>showPage('calendar'),50); } }, e=>console.warn('calevents listener:',e.message)));
     _listeners.push(col('fpho').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; if(!doc.exists)return; const d=doc.data();
@@ -1007,9 +1010,20 @@ const FSYNC = (() => {
     showPage('settings');
   }
 
+  // Ask the Cloud Function to text the handbook. Only the client id is sent —
+  // the function reads the number from the client's file and writes the message.
+  async function queueSms(clientId) {
+    if(!db) throw new Error('Not connected to the cloud');
+    const u = firebase.auth().currentUser; if(!u) throw new Error('Not signed in');
+    const ref = await col('smsOutbox').add({ kind:'handbook', clientId:String(clientId), requestedBy:u.uid,
+      requestedByName:(typeof currentUser!=='undefined'&&currentUser&&currentUser.name)||'', requestedAt:new Date().toISOString() });
+    return ref.id;
+  }
+  async function setSmsConfig(cfg) { if(!db) throw new Error('Not connected to the cloud'); await col('smsConfig').doc('settings').set(cfg); }
+
   return { init, isReady, pushAll, pushClients, pushNotes, pushReferrals, pushWorkers, pushTasks, pushAudit, pushBrokerage, deleteDoc, getCfg, saveCfg, showSetupModal, clearConfig,
     storageReady, uploadFile, deleteStorageFile, getStorageURL, pushPolicies,
-    pushFpho, pushWalkins, pushCalEvents, pushResources, resyncAll, pushStaff, fetchStaff, staffSyncStatus };
+    pushFpho, pushWalkins, pushCalEvents, pushResources, resyncAll, pushStaff, fetchStaff, staffSyncStatus, queueSms, setSmsConfig };
 })();
 
 let clients = DB.load('clients', []);
@@ -1035,12 +1049,14 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v80';
+const APP_VERSION = 'v81';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
 let fphoClients = DB.load('fphoClients', []); // separate client roster for the FPHO program
 let resources = DB.load('resources', []);
+let smsOutbox = DB.load('smsOutbox', []);     // automatic text requests + results (Cloud Function)
+let smsConfig = DB.load('smsConfig', {});     // { autoHandbook: true } — set by the System Manager
 let policies = DB.load('policies', []); // organisation policies & procedures library
 function saveFPHO() { DB.save('fphoApplications', fphoApplications); if(FSYNC.isReady()) FSYNC.pushFpho?.(); }
 function saveFPHOClients() { DB.save('fphoClients', fphoClients); if(FSYNC.isReady()) FSYNC.pushFpho?.(); }
@@ -3057,10 +3073,42 @@ function handbookMessage(c) {
   return `Hi ${first}, welcome to Worn Gundidj SEWB. Here is your Participant Handbook — it explains your rights, how we work with you and who to contact: ${handbookUrl()} Any questions, call us on ${ORG_PHONE}.`;
 }
 // Where things stand for this client, in one place (used on the Intake tab).
+// ---- Automatic texts (Firebase) ----
+const SMS_STUCK_MS = 3 * 60 * 1000;
+function smsAutoOn() { return !!(smsConfig && smsConfig.autoHandbook) && FSYNC.isReady(); }
+function outboxFor(clientId) { return (smsOutbox || []).filter(o => o.clientId === clientId && o.kind === 'handbook').sort((a, b) => String(a.requestedAt).localeCompare(String(b.requestedAt))); }
+function smsPending(o) { return !o.status || o.status === 'sending'; }
+function smsStuck(o) { return smsPending(o) && Date.now() - new Date(o.requestedAt || 0).getTime() > SMS_STUCK_MS; }
+// Every way the handbook reached the client: worker-sent records plus texts the function sent.
+function handbookSends(c) {
+  const auto = outboxFor(c.id).filter(o => o.status === 'sent').map(o => ({ at: o.sentAt || o.processedAt, by: o.requestedByName || '', channel: 'sms', auto: true, to: o.to, toFull: o.toFull }));
+  return [...(c.handbookSent || []), ...auto].sort((a, b) => String(a.at).localeCompare(String(b.at)));
+}
+function _smsRefresh() {
+  if (currentClientId) {
+    const c = clients.find(x => x.id === currentClientId);
+    if (c) {
+      const st = handbookStatus(c);
+      document.querySelectorAll('.handbook-status').forEach(el => { el.textContent = st.text; el.style.color = st.ok ? '#065f46' : 'var(--muted)'; });
+      document.querySelectorAll('.handbook-file-status').forEach(el => { el.textContent = hasHandbook(c) ? st.text.replace(/^📘 /, '') : (st.pending ? st.text.replace(/^📘 /, '') : 'Not yet given to this client'); });
+    }
+  }
+  if (currentPage === 'reports' && _hbOpen) renderHandbookSendout();
+  if (currentPage === 'settings') { const el = document.getElementById('sms-settings-status'); if (el) el.innerHTML = smsSettingsStatusHTML(); }
+}
 function handbookStatus(c) {
-  const mob = auMobile(c.phone), sent = c.handbookSent || [], last = sent[sent.length - 1];
+  const mob = auMobile(c.phone), sent = handbookSends(c), last = sent[sent.length - 1];
+  const ob = outboxFor(c.id), lastReq = ob[ob.length - 1];
+  if (lastReq && smsPending(lastReq) && !sent.some(h => h.toFull === mob)) {
+    return smsStuck(lastReq)
+      ? { ok: false, pending: true, stuck: true, text: '📘 Automatic text requested but not sent yet — the text service hasn\'t picked it up (Settings → Automatic texts)' }
+      : { ok: false, pending: true, text: '📘 Handbook text queued — sending automatically…' };
+  }
+  if (lastReq && (lastReq.status === 'skipped' || lastReq.status === 'failed') && !sent.some(h => h.toFull === mob) && !(last && (last.channel === 'in person' || last.channel === 'email'))) {
+    return { ok: false, ready: lastReq.status === 'failed', failed: true, text: '📘 Automatic text not sent: ' + (lastReq.reason || lastReq.status) };
+  }
   const toNow = mob ? sent.filter(h => h.toFull === mob).pop() : null;
-  const how = h => h.channel === 'in person' ? `${fmt(h.at)} — given in person${h.by ? ' (' + h.by + ')' : ''}` : `${fmt(h.at)} by ${h.channel === 'sms' ? 'text' : h.channel} to ${h.to}${h.by ? ' (' + h.by + ')' : ''}`;
+  const how = h => h.channel === 'in person' ? `${fmt(h.at)} — given in person${h.by ? ' (' + h.by + ')' : ''}` : `${fmt(h.at)} by ${h.channel === 'sms' ? (h.auto ? 'automatic text' : 'text') : h.channel} to ${h.to}${h.by ? ' (' + h.by + ')' : ''}`;
   if (toNow) return { ok: true, text: '📘 Handbook sent ' + how(toNow) };
   if (last && (last.channel === 'in person' || last.channel === 'email')) return { ok: true, text: '📘 Handbook ' + (last.channel === 'in person' ? 'given ' : 'sent ') + how(last).replace(' — given in person', ' in person') };
   const before = last ? ` · last sent ${how(last)}` : '';
@@ -3072,11 +3120,26 @@ function handbookStatus(c) {
 // Called after an explicit intake save (never from autosave).
 function handbookAfterIntake(c) {
   const st = handbookStatus(c), mob = auMobile(c.phone);
-  if (!st.ready) return false;
-  if ((c.handbookSent || []).some(h => h.toFull === mob)) return false;        // already sent to this number
+  if (!st.ready || st.failed) return false;
+  if (handbookSends(c).some(h => h.toFull === mob)) return false;             // already sent to this number
+  if (smsAutoOn()) { queueHandbookSms(c, 'intake'); return true; }             // Firebase sends it — no prompt
   if (c.handbookPrompted === mob) return false;                               // "not now" for this number
   setTimeout(() => openHandbookSendModal(c.id, 'intake'), 250);
   return true;
+}
+// Ask Firebase to send it. The function re-checks consent, number and duplicates.
+async function queueHandbookSms(c, ctx) {
+  const mob = auMobile(c.phone);
+  if (!smsAutoOn()) { showToast('Automatic texts are off — use Send text instead'); return false; }
+  if (c.ifSafeContact !== 'Yes' || !mob) { showToast('Not sent — needs a mobile number and "Safe to leave calls/texts?" = Yes'); return false; }
+  if (outboxFor(c.id).some(o => smsPending(o) && !smsStuck(o))) { showToast('A handbook text for this client is already on its way'); return false; }
+  if (handbookSends(c).some(h => h.toFull === mob)) { showToast('The handbook has already been sent to this number'); return false; }
+  try {
+    await FSYNC.queueSms(c.id);
+    audit('Handbook text requested (automatic)', `${c.fullName} — to ${_maskPhone(mob)}`, c.id);
+    if (ctx !== 'bulk') showToast('📤 Handbook text queued — Worn Gundidj will send it automatically');
+    return true;
+  } catch (e) { console.warn('queueSms failed:', e); showToast('⚠️ Could not queue the automatic text: ' + (e.message || e)); return false; }
 }
 // ctx says where the worker came from, so they land back there afterwards:
 // 'intake' (offered after saving an intake), 'profile:<tab>' (a button on the
@@ -3094,7 +3157,8 @@ function openHandbookSendModal(clientId, ctx) {
     <div class="form-group"><label>Message</label><textarea id="hb-msg" style="min-height:120px;font-size:13px">${sanitize(handbookMessage(c))}</textarea>
       <div style="font-size:11px;color:var(--muted);margin-top:3px">A text can't carry the PDF itself, so it carries a link. The handbook is about ${HANDBOOK.sizeMB} MB — suggest opening it on Wi-Fi.</div></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
-      ${btn('sms', '💬 Send text', 'btn-primary', !(safe && mob), 'hb-sms')}
+      ${smsAutoOn() ? `<button class="btn btn-primary" id="hb-auto" ${safe && mob ? '' : 'disabled'} onclick="handbookAutoFromModal('${c.id}','${ctx}')">📤 Send automatically</button>` : ''}
+      ${btn('sms', smsAutoOn() ? '💬 Send from my phone' : '💬 Send text', smsAutoOn() ? 'btn-outline' : 'btn-primary', !(safe && mob), 'hb-sms')}
       ${btn('copy', '📋 Copy message', 'btn-outline', !safe)}
       ${c.email ? btn('email', '✉️ Email instead', 'btn-outline', false) : ''}
       ${btn('in person', '🗂️ Given in person (printed)', 'btn-outline', false)}
@@ -3103,6 +3167,11 @@ function openHandbookSendModal(clientId, ctx) {
     </div>
     <p style="font-size:11px;color:var(--muted);margin-top:10px">"Send text" opens your phone's messages with this text ready — press Send there. On a computer it opens Phone Link (Windows) or Messages (Mac) if set up; otherwise use Copy message.</p>`;
   showModal('📘 Send the SEWB Participant Handbook', html, null, '640px', true);
+}
+async function handbookAutoFromModal(clientId, ctx) {
+  const c = clients.find(x => x.id === clientId); if (!c) return;
+  await queueHandbookSms(c, ctx);
+  _handbookReturn(clientId, ctx);
 }
 function _handbookReturn(clientId, ctx) {
   closeModal();
@@ -3132,7 +3201,7 @@ function handbookNotNow(clientId, ctx) {
   if (ctx === 'intake' || ctx === true) { c.handbookPrompted = auMobile(c.phone); saveAll(); }   // don't auto-ask again for this number
   _handbookReturn(clientId, ctx === true ? 'intake' : ctx);
 }
-const hasHandbook = c => (c.handbookSent || []).length > 0;
+const hasHandbook = c => handbookSends(c).length > 0;
 
 // ---- On every client file (Files tab) ----
 function handbookFileCardHTML(c) {
@@ -3153,15 +3222,49 @@ function handbookFileCardHTML(c) {
 // at a time from the worker's phone; the list shows who is ready to text, who
 // needs a mobile number or consent first, and who already has it.
 let _hbOpen = false, _hbFilter = 'todo', _hbClosed = false;
+async function handbookSendAllAuto() {
+  const ready = handbookSendoutList().filter(x => x.st === 'ready');
+  if (!ready.length) return;
+  if (!confirm(`Send the handbook automatically to ${ready.length} client${ready.length !== 1 ? 's' : ''}?\n\nEach gets one text from Worn Gundidj with the handbook link. Firebase checks consent and the number again before sending.`)) return;
+  let ok = 0; for (const x of ready) { if (await queueHandbookSms(x.c, 'bulk')) ok++; }
+  showToast(`📤 ${ok} handbook text${ok !== 1 ? 's' : ''} queued`);
+  renderHandbookSendout();
+}
+// ---- Settings → Automatic texts ----
+function smsSettingsStatusHTML() {
+  const all = smsOutbox || [], by = k => all.filter(o => (o.status || 'queued') === k).length;
+  const stuck = all.filter(smsStuck).length, last = all.slice().sort((a, b) => String(b.requestedAt).localeCompare(String(a.requestedAt)))[0];
+  return `<div style="font-size:12px;color:var(--muted)">Sent: <strong>${by('sent')}</strong> · not sent: <strong>${by('skipped') + by('failed')}</strong> · waiting: <strong>${all.filter(smsPending).length}</strong>${last ? ` · last request ${fmtdt(last.requestedAt)}${last.status ? ' — ' + sanitize(last.status) + (last.reason ? ': ' + sanitize(last.reason) : '') : ''}` : ''}</div>
+    ${stuck ? `<div class="alert alert-warning" style="font-size:12px;margin-top:8px">${stuck} request${stuck !== 1 ? 's have' : ' has'} waited more than 3 minutes. The text service (Cloud Function) is probably not deployed or not set up — see SMS-SETUP.md. Until then, turn this off and send from your phone.</div>` : ''}`;
+}
+function smsSettingsCardHTML() {
+  const on = !!(smsConfig && smsConfig.autoHandbook);
+  return `<div class="card" style="border-left:4px solid ${on ? '#16a34a' : '#9ca3af'}">
+    <div class="card-header"><div class="card-title">📱 Automatic texts (SMS from Firebase)</div></div>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:10px">When on, saving an intake with a mobile number (and "Safe to leave calls/texts?" = Yes) sends the SEWB Participant Handbook text automatically from Worn Gundidj — no phone needed. Requires the SMS Cloud Function and an SMS provider account (see <code>SMS-SETUP.md</code>). Each text costs a few cents.</p>
+    <label style="display:flex;gap:8px;align-items:center;font-size:14px;font-weight:600"><input type="checkbox" id="sms-auto-toggle" ${on ? 'checked' : ''} ${FSYNC.isReady() ? '' : 'disabled'} onchange="setSmsAuto(this.checked)"> Send the handbook text automatically</label>
+    ${on && smsConfig.updatedBy ? `<div style="font-size:11px;color:var(--muted);margin-top:4px">Turned on by ${sanitize(smsConfig.updatedBy)} · ${fmtdt(smsConfig.updatedAt)}</div>` : ''}
+    <div id="sms-settings-status" style="margin-top:10px">${smsSettingsStatusHTML()}</div>
+  </div>`;
+}
+async function setSmsAuto(on) {
+  if (currentUser?.role !== 'sysmanager') { showToast('Only the System Manager can change this'); return; }
+  if (on && !confirm('Turn on automatic handbook texts?\n\nOnly do this once the SMS Cloud Function is deployed and the provider is set up (SMS-SETUP.md). Otherwise requests will wait and nothing is sent.')) { showPage('settings'); return; }
+  try { await FSYNC.setSmsConfig({ autoHandbook: !!on, updatedBy: currentUser?.name || '', updatedAt: new Date().toISOString() });
+    audit(on ? 'Automatic texts turned on' : 'Automatic texts turned off', 'SEWB Participant Handbook');
+    smsConfig = { autoHandbook: !!on, updatedBy: currentUser?.name || '', updatedAt: new Date().toISOString() }; showToast(on ? 'Automatic texts on' : 'Automatic texts off'); showPage('settings');
+  } catch (e) { showToast('⚠️ Could not change the setting: ' + (e.message || e)); }
+}
 function handbookRowState(c) {
   if (hasHandbook(c)) return 'done';
+  const st = handbookStatus(c); if (st.pending) return st.stuck ? 'stuck' : 'queued';
   if (!c.phone) return c.email ? 'emailonly' : 'nophone';
   if (!auMobile(c.phone)) return c.email ? 'emailonly' : 'landline';
   if (c.ifSafeContact !== 'Yes') return 'noconsent';
   return 'ready';
 }
 const HB_STATE = { ready: ['Ready to text', '#065f46', '#d1fae5'], noconsent: ['Needs consent to texts', '#92400e', '#fef3c7'], emailonly: ['No mobile — email or give in person', '#1e40af', '#dbeafe'],
-  landline: ['Landline only — give in person', '#6b7280', '#f3f4f6'], nophone: ['No phone or email — give in person', '#6b7280', '#f3f4f6'], done: ['Has the handbook', '#065f46', '#ecfdf5'] };
+  landline: ['Landline only — give in person', '#6b7280', '#f3f4f6'], queued: ['Automatic text on its way', '#1e40af', '#dbeafe'], stuck: ['Automatic text not picked up', '#991b1b', '#fee2e2'], nophone: ['No phone or email — give in person', '#6b7280', '#f3f4f6'], done: ['Has the handbook', '#065f46', '#ecfdf5'] };
 function handbookSendoutCardHTML() {
   return `<div class="card no-print" style="margin-bottom:20px" id="handbook-sendout-card">
     <div class="card-header"><div class="card-title">📘 Handbook send-out</div>
@@ -3184,7 +3287,8 @@ function handbookSendoutBodyHTML() {
         ${[['todo', 'Still to give'], ['ready', 'Ready to text'], ['noconsent', 'Needs consent'], ['emailonly', 'No mobile'], ['done', 'Has the handbook'], ['all', 'Everyone']].map(([v, l]) => `<option value="${v}"${_hbFilter === v ? ' selected' : ''}>${l}</option>`).join('')}
       </select>
       <label style="font-size:12px;display:flex;gap:4px;align-items:center"><input type="checkbox" ${_hbClosed ? 'checked' : ''} onchange="_hbClosed=this.checked;renderHandbookSendout()"> include closed files</label>
-      ${next ? `<button class="btn btn-primary btn-sm" id="hb-next" onclick="openHandbookSendModal('${next.c.id}','sendout')">💬 Text next client (${sanitize(next.c.fullName)})</button>` : ''}
+      ${smsAutoOn() && n('ready') ? `<button class="btn btn-primary btn-sm" id="hb-sendall" onclick="handbookSendAllAuto()">📤 Send automatically to all ${n('ready')} ready</button>` : ''}
+      ${next ? `<button class="btn ${smsAutoOn() ? 'btn-outline' : 'btn-primary'} btn-sm" id="hb-next" onclick="openHandbookSendModal('${next.c.id}','sendout')">💬 Text next client (${sanitize(next.c.fullName)})</button>` : ''}
     </div>
     <div class="table-wrap" style="max-height:440px;overflow:auto"><table class="hb-sendout" style="font-size:12px"><thead><tr><th>Client</th><th>Mobile</th><th>Safe to text</th><th>Status</th><th></th></tr></thead><tbody>
       ${shown.map(({ c, st }) => `<tr data-id="${sanitize(c.id)}" data-state="${st}"><td>${sanitize(c.fullName)}${c.status === 'closed' ? ' <span class="tag tag-closed">closed</span>' : ''}</td>
@@ -10637,6 +10741,8 @@ function renderSettings() {
     </div>
     <button class="btn btn-primary" onclick="saveSettings()">Save Settings</button>
   </div>
+
+  ${currentUser?.role==='sysmanager' ? smsSettingsCardHTML() : ''}
 
   <!-- STAFF ACCOUNTS CARD -->
   <div class="card" style="border-left:4px solid var(--primary)">

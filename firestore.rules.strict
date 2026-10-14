@@ -141,6 +141,27 @@ service cloud.firestore {
       allow delete: if isSys();
     }
 
+
+    // ── Automatic texts (SMS Cloud Function, functions-sms/) ───────────────
+    // A browser may only ASK for a text: kind + client id + its own uid. It
+    // cannot supply a number or message, and cannot change a request after
+    // creating it — the Cloud Function (Admin SDK) writes the result.
+    match /teams/{teamId}/smsOutbox/{id} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['kind', 'clientId', 'requestedBy', 'requestedByName', 'requestedAt'])
+        && request.resource.data.kind == 'handbook'
+        && request.resource.data.clientId is string
+        && request.resource.data.clientId.size() > 0 && request.resource.data.clientId.size() < 100
+        && request.resource.data.requestedBy == request.auth.uid;
+      allow update, delete: if false;
+    }
+    // On/off switch for automatic texts (the app shows it to the System Manager only).
+    match /teams/{teamId}/smsConfig/{id} {
+      allow read: if signedIn();
+      allow write: if isSys();
+    }
+
     // Role mirror: written exclusively by the Cloud Functions (Admin SDK
     // bypasses rules). Clients may read it, never write it.
     match /teams/{teamId}/roles/{uid} {
