@@ -153,6 +153,38 @@
   .tab { padding: 10px 16px; font-size: 13px; font-weight: 600; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; white-space: nowrap; color: var(--muted); transition: all 0.15s; }
   .tab.active { color: var(--primary-light); border-bottom-color: var(--primary-light); }
   .tab:hover { color: var(--primary); }
+  /* ── Client profile ── */
+  .pf-header { display:flex; gap:16px; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; margin-bottom:12px; }
+  .pf-id { display:flex; gap:14px; align-items:center; flex:1; min-width:260px; }
+  .pf-title { min-width:0; }
+  .pf-title h2 { font-size:22px; font-weight:700; line-height:1.2; margin:0; overflow-wrap:anywhere; }
+  .pf-name-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .pf-meta { color:var(--muted); font-size:13px; margin-top:4px; display:flex; gap:6px 14px; flex-wrap:wrap; }
+  .pf-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .pf-menu { position:relative; display:inline-block; }
+  .pf-menu > summary { list-style:none; cursor:pointer; user-select:none; }
+  .pf-menu > summary::-webkit-details-marker { display:none; }
+  .pf-menu-list { position:absolute; top:calc(100% + 6px); min-width:250px; max-width:min(340px, 86vw); background:var(--card, #fff); border:1px solid var(--border); border-radius:12px; box-shadow:0 12px 32px rgba(0,0,0,.18); z-index:60; padding:6px; }
+  .pf-menu.right .pf-menu-list { right:0; } .pf-menu.left .pf-menu-list { left:0; }
+  .pf-menu-item { display:flex; gap:10px; align-items:flex-start; width:100%; padding:9px 10px; border:0; background:none; text-align:left; font-size:13px; cursor:pointer; border-radius:8px; color:inherit; font-family:inherit; }
+  .pf-menu-item:hover, .pf-menu-item:focus { background:var(--bg); outline:none; }
+  .pf-menu-item small { display:block; color:var(--muted); font-size:11px; margin-top:1px; font-weight:400; }
+  .pf-menu-item.danger { color:#991b1b; } .pf-menu-sep { height:1px; background:var(--border); margin:5px 4px; }
+  .pf-programs { display:flex; gap:8px; align-items:center; flex-wrap:wrap; padding:10px 12px; background:var(--bg); border-radius:10px; margin-bottom:12px; }
+  .pf-label { font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; }
+  .pf-chip { display:inline-flex; align-items:center; gap:5px; padding:4px 11px; border-radius:20px; font-size:12px; font-weight:700; border:1px solid transparent; cursor:pointer; font-family:inherit; }
+  .pf-chip.todo { background:#fffbeb; color:#92400e; border-color:#fde68a; }
+  .pf-chip.ok { background:#ecfdf5; color:#065f46; border-color:#a7f3d0; cursor:default; }
+  .pf-nav { display:flex; gap:10px; align-items:center; margin:0 0 16px; }
+  .pf-nav label { font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; white-space:nowrap; }
+  .pf-nav select { flex:1; min-width:0; padding:11px 14px; font-size:15px; font-weight:600; border:1px solid var(--border); border-radius:10px; background:var(--card, #fff); color:inherit; cursor:pointer; }
+  .pf-nav select:focus { outline:2px solid var(--primary-light); outline-offset:1px; }
+  .pf-glance { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:12px; margin-bottom:16px; }
+  .pf-glance .stat-card { padding:12px 16px; } .pf-glance .value { font-size:22px; font-weight:700; margin-top:2px; } .pf-glance .sub { font-size:11px; color:var(--muted); margin-top:2px; }
+  .pf-two { display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:16px; align-items:start; }
+  .pf-attn-row { display:flex; gap:10px; align-items:center; padding:8px 0; border-bottom:1px solid var(--border); font-size:13px; }
+  .pf-attn-row:last-child { border-bottom:0; } .pf-attn-row span:first-child { flex:1; min-width:0; }
+  @media (max-width:640px) { .pf-actions { width:100%; } .pf-nav { flex-direction:column; align-items:stretch; gap:4px; } }
 
   /* MODAL */
   .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 200; display: flex; align-items: flex-start; justify-content: center; padding: 40px 20px; overflow-y: auto; }
@@ -1049,7 +1081,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v81';
+const APP_VERSION = 'v82';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -1389,82 +1421,152 @@ function reopenClient(id) {
 }
 
 // ===== CLIENT PROFILE =====
-function openClientProfile(id) {
+// Programs a client can be enrolled in. SEWB is the umbrella: AOD, Justice and
+// Cultural sit under it (enrolling in one enrols the client in SEWB). NDIS and
+// Home Ownership stand alone.
+const PROFILE_PROGRAMS = [
+  { key:'sewb', field:'sewb', label:'SEWB', icon:'💚', tab:'sewb', bg:'#d1fae5', fg:'#065f46', blurb:'Social & Emotional Wellbeing — the umbrella program' },
+  { key:'aod', field:'aod', label:'AOD', icon:'🔴', tab:'aod', sub:true, bg:'#fee2e2', fg:'#991b1b', blurb:'Alcohol & other drugs — sits under SEWB' },
+  { key:'justice', field:'justice', label:'Justice', icon:'⚖️', tab:'justice', sub:true, bg:'#dbeafe', fg:'#1e40af', blurb:'Justice support — sits under SEWB' },
+  { key:'cultural', field:'cultural', label:'Cultural Strengthening', icon:'🌀', tab:'cultural', sub:true, bg:'#ffedd5', fg:'#92400e', blurb:'Connection to culture & Country — sits under SEWB' },
+  { key:'workfoundations', field:'workFoundations', label:'Work Foundations', icon:'💼', tab:'workfoundations', bg:'#dbeafe', fg:'#1e40af', blurb:'Employment & training support' },
+  { key:'disability', field:'disability', label:'NDIS / Disability', icon:'♿', tab:'disability', standalone:true, bg:'#f3e8ff', fg:'#6b21a8', blurb:'Stands alone — NDIS supports' },
+  { key:'homeownership', field:'homeOwnership', label:'Home Ownership', icon:'🏠', tab:'', page:'homeownership', standalone:true, bg:'#e0f2fe', fg:'#0369a1', blurb:'Stands alone — First Peoples Home Ownership' },
+];
+const programEnrolled = (c, p) => !!c[p.field];
+function clientAge(c) { if (!c.dob) return ''; const d = new Date(c.dob); if (isNaN(d)) return ''; return Math.floor((Date.now() - d) / (365.25 * 24 * 3600 * 1000)); }
+
+// The "Section" dropdown — one list in place of the scrolling tab strip.
+function profileSectionGroups(c, counts) {
+  const prog = key => PROFILE_PROGRAMS.find(p => p.key === key);
+  const progItem = key => { const p = prog(key); return { v: p.tab, l: `${p.icon} ${p.label}` }; };
+  const enrolled = PROFILE_PROGRAMS.filter(p => p.tab && programEnrolled(c, p)).map(p => progItem(p.key));
+  const other = PROFILE_PROGRAMS.filter(p => p.tab && !programEnrolled(c, p)).map(p => progItem(p.key));
+  const hr = homeRiskStatus(c).ok ? '' : ' ⚠️';
+  return [
+    ['Client file', [{ v:'overview', l:'🏠 Overview' }, { v:'summary', l:'📄 Summary' }, { v:'demographics', l:'👤 Personal details' }, { v:'keyworkers', l:'👷 Key workers' }]],
+    ['Case work', [{ v:'intake', l:'📋 Intake form' }, { v:'notes', l:`📝 Case notes (${counts.notes})` }, { v:'goals', l:`🎯 Goals & progress (${counts.goals})` }, { v:'time', l:`⏱️ Time (${counts.time})` }, { v:'files', l:`📎 Files (${counts.files})` }]],
+    ['Safety & feedback', [{ v:'safety', l:'🛡️ Safety plan' }, { v:'homerisk', l:`🏠 Home risk assessment${hr}` }, { v:'feedback', l:'⭐ Feedback' }]],
+    enrolled.length ? ['Programs — enrolled', enrolled] : null,
+    other.length ? ['Programs — not enrolled', other] : null,
+  ].filter(Boolean);
+}
+function profileSectionSelectHTML(c, counts, id, current) {
+  return `<select id="profile-section" aria-label="Client file section" onchange="switchProfileTab(this.value,'${id}')">
+    ${profileSectionGroups(c, counts).map(([g, items]) => `<optgroup label="${sanitize(g)}">${items.map(i => `<option value="${sanitize(i.v)}"${i.v === current ? ' selected' : ''}>${i.l}</option>`).join('')}</optgroup>`).join('')}
+  </select>`;
+}
+function profileCounts(c) {
+  const t = timeLogs.filter(x => x.clientId === c.id).reduce((a, x) => a + (x.minutes || 0), 0);
+  return { notes: notes.filter(n => n.clientId === c.id).length, goals: (c.goalPlan || []).length, files: (c.attachments || []).length, time: `${Math.floor(t / 60)}h ${t % 60}m` };
+}
+function profileProgramsRowHTML(c) {
+  const has = PROFILE_PROGRAMS.filter(p => programEnrolled(c, p)), not = PROFILE_PROGRAMS.filter(p => !programEnrolled(c, p));
+  return `<div class="pf-programs" id="pf-programs"><span class="pf-label">Programs</span>
+    ${has.length ? has.map(p => `<button class="pf-chip ok" style="background:${p.bg};color:${p.fg}" title="${sanitize(p.blurb)}" onclick="${p.tab ? `switchProfileTab('${p.tab}','${c.id}')` : `closeModal();showPage('${p.page}')`}">${p.icon} ${sanitize(p.label)}</button>`).join('') : '<span style="font-size:12px;color:var(--muted)">Not enrolled in any program</span>'}
+    ${not.length ? `<details class="pf-menu left" id="pf-add-program"><summary class="btn btn-outline btn-sm">➕ Add to program ▾</summary>
+      <div class="pf-menu-list" role="menu">${not.map(p => `<button class="pf-menu-item" role="menuitem" data-program="${p.key}" onclick="addClientToProgram('${c.id}','${p.key}')"><span>${p.icon}</span><span><strong>${sanitize(p.label)}</strong><small>${sanitize(p.blurb)}</small></span></button>`).join('')}</div></details>` : ''}
+  </div>`;
+}
+function profileHeaderHTML(c) {
+  const id = c.id, closed = (c.status || 'active') === 'closed', role = currentUser?.role;
+  const age = clientAge(c);
+  return `
+  <div class="pf-header">
+    <div class="pf-id">
+      <div class="avatar avatar-lg" style="background:var(--primary);flex-shrink:0">${initials(c.fullName)}</div>
+      <div class="pf-title">
+        <div class="pf-name-row"><h2>${sanitize(c.fullName)}</h2>
+          <span class="tag ${closed ? 'tag-closed' : 'tag-active'}">${sanitize(c.status || 'active')}</span>
+          <span class="risk-pill risk-${c.riskLevel || 'low'}">${(c.riskLevel || 'low').toUpperCase()} RISK</span>
+          ${c.accessRestricted ? `<span class="tag" style="background:#ede9fe;color:#5b21b6;font-size:11px" title="Only the listed workers and managers can open this file">🔒 Restricted</span>` : ''}</div>
+        <div class="pf-meta"><span>ID ${sanitize(c.clientId || '—')}</span><span>${c.dob ? 'DOB ' + sanitize(c.dob) + (age !== '' ? ' (' + age + ')' : '') : 'DOB not recorded'}</span>
+          <span>${c.phone ? '📞 ' + sanitize(c.phone) : 'No phone'}</span>${c.community || c.mob ? `<span>${sanitize([c.mob, c.community].filter(Boolean).join(' · '))}</span>` : ''}</div>
+      </div>
+    </div>
+    <div class="pf-actions">
+      ${closed ? '' : `<button class="btn btn-primary btn-sm" onclick="openNoteModal('${id}')">📝 Add note</button><button class="btn btn-accent btn-sm" onclick="openTimeModal('${id}')">⏱️ Log time</button>`}
+      <details class="pf-menu right" id="pf-actions"><summary class="btn btn-outline btn-sm">⋯ Actions ▾</summary>
+        <div class="pf-menu-list" role="menu">
+          <button class="pf-menu-item" role="menuitem" onclick="openEditClientModal('${id}')"><span>✏️</span><span>Edit details<small>Name, contact, programs, risk</small></span></button>
+          ${['sysmanager', 'admin', 'supervisor'].includes(role) ? `<button class="pf-menu-item" role="menuitem" onclick="openAssignWorkersModal('${id}')"><span>👥</span><span>Assign workers<small>Key worker and team</small></span></button>` : ''}
+          ${role === 'sysmanager' ? `<button class="pf-menu-item" role="menuitem" onclick="openRestrictAccessModal('${id}')"><span>${c.accessRestricted ? '🔒' : '🔓'}</span><span>${c.accessRestricted ? 'Access is restricted' : 'Restrict access'}<small>${c.accessRestricted ? 'Restricted to ' + (c.allowedWorkers || []).length + ' worker' + ((c.allowedWorkers || []).length !== 1 ? 's' : '') + ' + managers' : 'Limit who can open this file'}</small></span></button>` : ''}
+          ${closed ? `<button class="pf-menu-item" role="menuitem" onclick="reopenClient('${id}')"><span>🔓</span><span>Reopen file<small>Starts a new episode</small></span></button>`
+                   : `<div class="pf-menu-sep"></div><button class="pf-menu-item danger" role="menuitem" onclick="closeClient('${id}')"><span>🔒</span><span>Close client file<small>Opens the end-of-episode review</small></span></button>`}
+        </div></details>
+    </div>
+  </div>
+  ${profileProgramsRowHTML(c)}
+  ${closed ? '' : (() => {
+    const nMiss = fileCompleteness(c).length, extras = [feedbackDue(c).length ? 'feedback due' : '', episodeEndReached(c) ? 'episode end reached' : ''].filter(Boolean);
+    const txt = nMiss ? `⚠️ ${nMiss} item${nMiss !== 1 ? 's' : ''} missing on this file${extras.length ? ' · ' + extras.join(' · ') : ''} — view`
+              : extras.length ? `✓ File complete · ${extras.join(' · ')} — view` : '✓ File complete';
+    return `<div style="margin:-4px 0 12px"><button class="pf-chip ${nMiss || extras.length ? 'todo' : 'ok'}" id="pf-todo" onclick="switchProfileTab('overview','${id}')">${txt}</button></div>`;
+  })()}`;
+}
+
+function openClientProfile(id, tab) {
   const c = clients.find(cl=>cl.id===id);
   if(!c) return;
   if(!canViewClient(c)){ showToast('You are not assigned to this client. Ask your System Manager for access.'); return; }
   audit('Viewed client', c.fullName, id);
   currentClientId = id;
+  renderClientProfile(id, tab || 'overview');
+}
+function renderClientProfile(id, tab) {
+  const c = clients.find(cl=>cl.id===id); if(!c) return;
   const clientNotes = notes.filter(n=>n.clientId===id).sort((a,b)=>b.created?.localeCompare(a.created));
   const clientTime = timeLogs.filter(t=>t.clientId===id);
-  const totalMins = clientTime.reduce((a,t)=>a+(t.minutes||0),0);
-  const hrs = Math.floor(totalMins/60), mins = totalMins%60;
-
   const html = `
-  <div style="display:flex;align-items:flex-start;gap:20px;margin-bottom:20px;flex-wrap:wrap">
-    <div class="avatar avatar-lg" style="background:var(--primary)">${initials(c.fullName)}</div>
-    <div style="flex:1">
-      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-        <h2 style="font-size:22px;font-weight:700">${sanitize(c.fullName)}</h2>
-        <span class="tag ${c.status==='active'?'tag-active':'tag-closed'}">${c.status||'active'}</span>
-        <span class="risk-pill risk-${c.riskLevel||'low'}">${(c.riskLevel||'low').toUpperCase()} RISK</span>
-      </div>
-      <div style="color:var(--muted);font-size:13px;margin-top:4px">
-        ID: ${sanitize(c.clientId||'—')} &bull; DOB: ${sanitize(c.dob||'—')} &bull; ${sanitize(c.community||'')} ${c.mob?'· '+sanitize(c.mob):''} &bull; ${sanitize(c.phone||'No phone')}
-      </div>
-      <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
-        ${[c.sewb&&'SEWB',c.aod&&'AOD',c.justice&&'Justice',c.cultural&&'Cultural'].filter(Boolean).map(p=>`<span class="section-badge badge-${p.toLowerCase()}">${p}</span>`).join('')}
-      </div>
-    </div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button class="btn btn-outline btn-sm" onclick="openEditClientModal('${id}')">✏️ Edit</button>
-      <button class="btn btn-primary btn-sm" onclick="openNoteModal('${id}')">📝 Add Note</button>
-      <button class="btn btn-accent btn-sm" onclick="openTimeModal('${id}')">⏱️ Log Time</button>
-      ${['sysmanager','admin','supervisor'].includes(currentUser?.role) ? `<button class="btn btn-sm" style="background:#f3e8ff;color:#6b21a8;border:1px solid #d8b4fe" onclick="openAssignWorkersModal('${id}')">👥 Assign Workers</button>` : ''}
-      ${currentUser?.role==='sysmanager' ? `<button class="btn btn-sm" style="background:${c.accessRestricted?'#ede9fe':'#f8fafc'};color:${c.accessRestricted?'#5b21b6':'#475569'};border:1px solid ${c.accessRestricted?'#c4b5fd':'#e2e8f0'}" onclick="openRestrictAccessModal('${id}')">${c.accessRestricted?'🔒 Access restricted':'🔓 Restrict access'}</button>` : ''}
-      ${c.accessRestricted ? `<span class="tag" style="background:#ede9fe;color:#5b21b6;font-size:11px">🔒 Restricted to ${(c.allowedWorkers||[]).length} worker${(c.allowedWorkers||[]).length!==1?'s':''}</span>` : ''}
-      ${(c.status||'active')==='closed'
-        ? `<button class="btn btn-sm" style="background:#d1fae5;color:#065f46" onclick="reopenClient('${id}')">🔓 Reopen</button>`
-        : `<button class="btn btn-sm" style="background:#fee2e2;color:#991b1b" onclick="closeClient('${id}')">🔒 Close Client</button>`}
-    </div>
-  </div>
-
-  ${renderCompletenessBanner(c)}
-  <div class="tabs" id="profile-tabs">
-    <div class="tab active" onclick="switchProfileTab('overview','${id}',this)">Overview</div>
-    <div class="tab" id="ptab-notes" onclick="switchProfileTab('notes','${id}',this)">📝 Notes &amp; Files (${clientNotes.length})</div>
-    <div class="tab" onclick="switchProfileTab('summary','${id}',this)">📄 Summary</div>
-    <div class="tab" onclick="switchProfileTab('intake','${id}',this)">📋 Intake Form</div>
-    <div class="tab" onclick="switchProfileTab('keyworkers','${id}',this)">👷 Key Workers</div>
-    <div class="tab" onclick="switchProfileTab('demographics','${id}',this)">Demographics</div>
-    <div class="tab" onclick="switchProfileTab('sewb','${id}',this)">SEWB</div>
-    <div class="tab" onclick="switchProfileTab('aod','${id}',this)">AOD</div>
-    <div class="tab" onclick="switchProfileTab('justice','${id}',this)">Justice</div>
-    <div class="tab" onclick="switchProfileTab('disability','${id}',this)">♿ Disability</div>
-    <div class="tab" onclick="switchProfileTab('workfoundations','${id}',this)">💼 Work Foundations</div>
-    <div class="tab" onclick="switchProfileTab('cultural','${id}',this)">Cultural Strengthening</div>
-    <div class="tab" onclick="switchProfileTab('time','${id}',this)">Time (${hrs}h ${mins}m)</div>
-    <div class="tab" onclick="switchProfileTab('safety','${id}',this)">Safety Plan</div>
-    <div class="tab" onclick="switchProfileTab('homerisk','${id}',this)">🏠 Home Risk${homeRiskStatus(c).ok?'':' ⚠️'}</div>
-    <div class="tab" onclick="switchProfileTab('goals','${id}',this)">🎯 Goals (${(c.goalPlan||[]).length})</div>
-    <div class="tab" id="ptab-files" onclick="switchProfileTab('files','${id}',this)">📎 Files (${(c.attachments||[]).length})</div>
-    <div class="tab" onclick="switchProfileTab('feedback','${id}',this)">⭐ Feedback</div>
-  </div>
-  <div id="profile-tab-content">${renderProfileTab('overview', c, clientNotes, clientTime)}</div>
+  ${profileHeaderHTML(c)}
+  <div class="pf-nav" id="profile-tabs"><label for="profile-section">Section</label>${profileSectionSelectHTML(c, profileCounts(c), id, tab)}</div>
+  <div id="profile-tab-content">${renderProfileTab(tab, c, clientNotes, clientTime)}</div>
   `;
-
   showModal('👤 Client Profile', html, null, '900px', true);
+  if (tab === 'intake') startIntakeAutoSave(id); else stopIntakeAutoSave();
 }
 
-function switchProfileTab(tab, id, el) {
+// Enrol a client in another program from the file. SEWB is the umbrella, so
+// AOD / Justice / Cultural also enrol them in SEWB. Existing records are not
+// touched — only the program flag is added — and it is audited and kept in the
+// file's program history.
+function addClientToProgram(id, key) {
+  const c = clients.find(x => x.id === id), p = PROFILE_PROGRAMS.find(x => x.key === key); if (!c || !p) return;
+  document.getElementById('pf-add-program')?.removeAttribute('open');
+  if (programEnrolled(c, p)) { showToast(`${c.fullName} is already in ${p.label}`); return; }
+  const alsoSewb = !!p.sub && !c.sewb;
+  if (!confirm(`Add ${c.fullName} to ${p.label}?` + (alsoSewb ? '\n\nThey will also be enrolled in SEWB, the umbrella program.' : '') + (p.standalone ? '\n\nThis program stands alone from SEWB.' : '') +
+      ((c.status || 'active') === 'closed' ? '\n\nNote: this client\'s file is closed.' : '') + '\n\nThis is recorded in the audit log. Existing records are not changed.')) return;
+  c[p.field] = true;
+  if (p.sub) c.sewb = true;
+  applySewbUmbrella(c);
+  c.programHistory = c.programHistory || [];
+  c.programHistory.push({ program: p.label, action: 'added', date: today(), at: now(), by: currentUser?.name || '' });
+  audit('Added to program', `${c.fullName} — ${p.label}${alsoSewb ? ' (and SEWB)' : ''}`, id);
+  saveAll();
+  showToast(`✓ ${c.fullName} added to ${p.label}`);
+  renderClientProfile(id, p.tab || 'overview');
+}
+// Keep menus tidy: a click elsewhere (or Esc) closes any open profile menu.
+document.addEventListener('click', e => document.querySelectorAll('details.pf-menu[open]').forEach(d => { if (!d.contains(e.target)) d.removeAttribute('open'); }));
+// (Capture phase: Esc closes an open menu first and does NOT also close the whole profile.)
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  const open = document.querySelectorAll('details.pf-menu[open]');
+  if (open.length) { open.forEach(d => d.removeAttribute('open')); e.stopPropagation(); }
+}, true);
+// Jump to a section of the open file (used by links inside the profile).
+function gotoProfileSection(tab) { if (currentClientId) switchProfileTab(tab, currentClientId); }
+
+function switchProfileTab(tab, id) {
   const c = clients.find(cl=>cl.id===id);
   if(!c) return;
   const clientNotes = notes.filter(n=>n.clientId===id).sort((a,b)=>b.created?.localeCompare(a.created));
   const clientTime = timeLogs.filter(t=>t.clientId===id);
-  document.querySelectorAll('#profile-tabs .tab').forEach(t=>t.classList.remove('active'));
-  const _tabEl = el || (typeof event!=='undefined' && event && event.target);
-  if(_tabEl && _tabEl.classList) _tabEl.classList.add('active');
+  const sel = document.getElementById('profile-section'); if (sel && sel.value !== tab) sel.value = tab;
+  document.getElementById('pf-actions')?.removeAttribute('open');
   document.getElementById('profile-tab-content').innerHTML = renderProfileTab(tab, c, clientNotes, clientTime);
+  document.getElementById('profile-tab-content').scrollIntoView?.({ block: 'nearest' });
   if(tab === 'intake') {
     startIntakeAutoSave(id);
   } else {
@@ -1507,25 +1609,56 @@ function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
   if(tab === 'overview') {
     const totalMins = clientTime.reduce((a,t)=>a+(t.minutes||0),0);
     const recent = clientNotes.slice(0,3);
+    const stamps = [...clientNotes.map(n=>String(n.created||'').slice(0,10)), ...clientTime.map(t=>String(t.date||'').slice(0,10))].filter(Boolean).sort();
+    const lastContact = stamps[stamps.length-1] || '';
+    const daysSince = lastContact ? Math.max(0, Math.round((new Date(today()+'T12:00') - new Date(lastContact+'T12:00')) / 86400000)) : null;
+    const openGoals = (c.goalPlan||[]).filter(goalIsOpen), overdueGoals = openGoals.filter(goalReviewOverdue).length;
+    const upcoming = (calEvents||[]).filter(e=>e.clientId===c.id && e.date>=today()).sort((a,b)=>(a.date+(a.startTime||'')).localeCompare(b.date+(b.startTime||''))).slice(0,3);
+    const closed = (c.status||'active')==='closed';
+    const issues = fileCompleteness(c), due = feedbackDue(c);
+    const attn = [
+      ...(episodeEndReached(c) ? [`<div class="pf-attn-row"><span>🗓️ This episode reached its planned end on ${fmt(c.plannedEndDate)}</span><button class="btn btn-sm btn-primary" onclick="openEpisodeReviewModal('${c.id}')">Start review</button></div>`] : []),
+      ...issues.map(i=>`<div class="pf-attn-row"><span>⚠️ ${sanitize(i.label)}</span><button class="btn btn-sm btn-outline" onclick="gotoProfileSection('${i.tab}')">Fix →</button></div>`),
+      ...due.map(d=>`<div class="pf-attn-row"><span>⭐ Feedback due: ${sanitize(QF_POINTS[d])}</span><button class="btn btn-sm btn-outline" onclick="openFeedbackSendModal('${c.id}','${d}')">Ask →</button></div>`),
+    ];
     return `
-    <div class="grid-3">
-      <div class="stat-card"><div class="label">Total Notes</div><div class="value">${clientNotes.length}</div></div>
-      <div class="stat-card"><div class="label">Time Spent</div><div class="value">${Math.floor(totalMins/60)}h ${totalMins%60}m</div></div>
-      <div class="stat-card"><div class="label">Open Since</div><div class="value" style="font-size:16px">${fmt(c.created)}</div></div>
+    <div class="pf-glance">
+      <div class="stat-card"><div class="label">Last contact</div><div class="value" style="font-size:18px;padding:3px 0">${lastContact ? (daysSince===0?'Today':daysSince===1?'Yesterday':daysSince+' days ago') : '—'}</div><div class="sub">${lastContact ? fmt(lastContact) : 'No notes or time yet'}</div></div>
+      <div class="stat-card"><div class="label">Case notes</div><div class="value">${clientNotes.length}</div><div class="sub">on this file</div></div>
+      <div class="stat-card"><div class="label">Time spent</div><div class="value">${Math.floor(totalMins/60)}h ${totalMins%60}m</div><div class="sub">${clientTime.length} entr${clientTime.length!==1?'ies':'y'}</div></div>
+      <div class="stat-card"><div class="label">Goals</div><div class="value">${openGoals.length}</div><div class="sub" style="${overdueGoals?'color:#991b1b;font-weight:600':''}">${overdueGoals ? overdueGoals+' review'+(overdueGoals!==1?'s':'')+' overdue' : 'open'}</div></div>
+      <div class="stat-card"><div class="label">${closed?'Closed':'Open since'}</div><div class="value" style="font-size:16px">${fmt(closed ? c.closedDate : episodeStart(c))||'—'}</div><div class="sub">${closed ? sanitize(c.closureReason||'') : ''}</div></div>
     </div>
-    <div class="card" style="margin-top:16px">
-      <div class="card-header"><div class="card-title">📌 Presenting Issues / Referral Reason</div></div>
-      <p style="font-size:13px;line-height:1.7;color:${c.referralReason?'inherit':'var(--muted)'}">${c.referralReason?sanitize(c.referralReason):'Not recorded'}</p>
-    </div>
-    <div class="card">
-      <div class="card-header"><div class="card-title">🎯 Goals &amp; Strengths</div></div>
-      <div class="grid-2">
-        <div><div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:6px">CLIENT GOALS</div><p style="font-size:13px;line-height:1.6">${c.goals?sanitize(c.goals):'Not recorded'}</p></div>
-        <div><div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:6px">STRENGTHS &amp; PROTECTIVE FACTORS</div><p style="font-size:13px;line-height:1.6">${c.strengths?sanitize(c.strengths):'Not recorded'}</p></div>
+    ${closed ? '' : `<div class="card pf-attention" style="border-left:4px solid ${attn.length?'#f59e0b':'#16a34a'}">
+      <div class="card-header"><div class="card-title">${attn.length ? '⚠️ Needs attention' : '✓ Nothing needs attention'}</div></div>
+      ${attn.length ? attn.join('') : '<p style="font-size:13px;color:#065f46">Intake, consent, goals, safety and home risk are all in order.</p>'}
+    </div>`}
+    <div class="pf-two">
+      <div class="card">
+        <div class="card-header"><div class="card-title">📇 Contact &amp; support</div><button class="btn btn-sm btn-outline" onclick="openEditClientModal('${c.id}')">Edit</button></div>
+        <div class="grid-2">
+          ${field('Preferred name', c.preferredName)} ${field('Key worker', c.keyWorker)}
+          <div class="form-group"><label>Phone</label><div style="padding:8px 12px;background:var(--bg);border-radius:6px;font-size:13px;min-height:36px">${c.phone?`<a href="tel:${sanitize(String(c.phone).replace(/[^\d+]/g,''))}">${sanitize(c.phone)}</a>`:'<span style="color:var(--muted)">Not recorded</span>'}</div></div>
+          ${field('Safe to leave messages', c.ifSafeContact)}
+          ${field('Email', c.email)} ${field('Emergency contact', c.emergencyContact)}
+          ${field('Address', c.address)} ${field('Community / mob', [c.community,c.mob].filter(Boolean).join(' · '))}
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title">📅 Upcoming appointments</div><button class="btn-ghost" onclick="closeModal();showPage('calendar')">Calendar →</button></div>
+        ${upcoming.length ? upcoming.map(e=>`<div class="pf-attn-row"><span><strong>${fmt(e.date)}</strong> ${sanitize(e.startTime||'')}${e.endTime?'–'+sanitize(e.endTime):''}<br><span style="font-size:12px;color:var(--muted)">${sanitize(activityCategory(e.type==='homevisit'?'Home Visit':e.title))}${e.worker?' · '+sanitize(e.worker):''}</span></span></div>`).join('') : '<p style="color:var(--muted);font-size:13px">No upcoming appointments booked</p>'}
       </div>
     </div>
+    <div class="card" style="margin-top:16px">
+      <div class="card-header"><div class="card-title">📌 Presenting issues / referral reason</div></div>
+      <p style="font-size:13px;line-height:1.7;color:${c.referralReason?'inherit':'var(--muted)'}">${c.referralReason?sanitize(c.referralReason):'Not recorded'}</p>
+    </div>
+    <div class="pf-two">
+      <div class="card"><div class="card-header"><div class="card-title">🎯 Client goals</div></div><p style="font-size:13px;line-height:1.6;color:${c.goals?'inherit':'var(--muted)'}">${c.goals?sanitize(c.goals):'Not recorded'}</p></div>
+      <div class="card"><div class="card-header"><div class="card-title">💪 Strengths &amp; protective factors</div></div><p style="font-size:13px;line-height:1.6;color:${c.strengths?'inherit':'var(--muted)'}">${c.strengths?sanitize(c.strengths):'Not recorded'}</p></div>
+    </div>
     <div class="card">
-      <div class="card-header"><div class="card-title">📝 Recent Notes</div><button class="btn-ghost" onclick="document.getElementById('ptab-notes').click()">All notes &amp; files →</button></div>
+      <div class="card-header"><div class="card-title">📝 Recent notes</div><button class="btn-ghost" onclick="gotoProfileSection('notes')">All notes &amp; files →</button></div>
       ${recent.length===0?'<p style="color:var(--muted);font-size:13px">No notes yet</p>':
         recent.map(n=>`<div class="note-entry ${n.type||'general'}">
           <div class="note-meta"><span class="section-badge badge-${n.type||'general'}">${n.type||'general'}</span><span>${fmtdt(n.created)}</span><span>${sanitize(n.worker||'')}</span></div>
@@ -1787,7 +1920,7 @@ function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
     </div>
     ${unlinkedFiles.length?`<div class="card" style="margin-top:16px">
       <div class="card-header"><div class="card-title">📎 Other Client Files <span style="font-weight:400;color:var(--muted);font-size:12px">(not linked to a note)</span></div>
-        <button class="btn btn-sm btn-outline" onclick="document.getElementById('ptab-files').click()">Manage files →</button></div>
+        <button class="btn btn-sm btn-outline" onclick="gotoProfileSection('files')">Manage files →</button></div>
       <div style="display:flex;flex-wrap:wrap;gap:8px">
         ${unlinkedFiles.map(f=>{ const i=allFiles.indexOf(f); return `<span style="display:inline-flex;align-items:center;gap:6px;background:var(--bg);border:1px solid var(--border);border-radius:16px;padding:5px 12px;font-size:12px">
           ${fileIcon(f.type)} <span style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${sanitize(f.name)}</span>
@@ -2286,7 +2419,7 @@ function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
             <div style="flex:1;min-width:0">
               <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${sanitize(f.name)}</div>
               <div style="font-size:11px;color:var(--muted);margin-top:2px">${formatBytes(f.size)} · ${fmt(f.uploadedAt)} · ${f.uploadedBy||'—'}</div>
-              ${srcLabel?`<div style="font-size:11px;color:var(--primary);margin-top:3px">${srcNote?`<a href="#" onclick="event.preventDefault();document.getElementById('ptab-notes').click()" style="color:var(--primary);text-decoration:none">${srcLabel}</a>`:sanitize(srcLabel)}</div>`:''}
+              ${srcLabel?`<div style="font-size:11px;color:var(--primary);margin-top:3px">${srcNote?`<a href="#" onclick="event.preventDefault();gotoProfileSection('notes')" style="color:var(--primary);text-decoration:none">${srcLabel}</a>`:sanitize(srcLabel)}</div>`:''}
             </div>
             <div style="display:flex;gap:6px;flex-shrink:0">
               ${f.type==='application/pdf'||f.type.startsWith('image/')?`<button class="btn btn-sm btn-outline" onclick="previewFile('${c.id}',${i})">👁 View</button>`:''}
@@ -14006,11 +14139,8 @@ function openGoalReviewModal(clientId, goalIdx) {
 // After a modal saved from inside a client file: the modal closes once its save
 // returns, so the file (and the tab the worker was on) is reopened just after.
 function _reopenProfileTab(clientId, tab) { setTimeout(() => { openClientProfile(clientId); _openProfileTab(tab, clientId); }, 0); }
-// Open a profile tab by name.
-function _openProfileTab(tab, clientId) {
-  const el = [...document.querySelectorAll('#profile-tabs .tab')].find(t=>(t.getAttribute('onclick')||'').includes(`'${tab}'`));
-  switchProfileTab(tab, clientId, el||null);
-}
+// Open a profile section by name.
+function _openProfileTab(tab, clientId) { switchProfileTab(tab, clientId); }
 
 // ---- Board report: goal outcomes, de-identified ----
 // No names, goal wording or review notes — only counts and scores, grouped by
@@ -14288,7 +14418,7 @@ function saveHomeRisk(clientId) {
   const st = homeRiskStatus(c);
   audit('Home risk assessment saved', `${c.fullName} — ${st.label}${h.rating ? ', ' + h.rating + ' risk' : ''}${h.visit ? ', ' + h.visit : ''}`, c.id);
   saveAll(); showToast(st.ok ? 'Home risk assessment saved ✓' : '⚠️ Saved, but still incomplete: ' + (st.missing || []).join(', '));
-  switchProfileTab('homerisk', c.id, [...document.querySelectorAll('#profile-tabs .tab')].find(t => (t.getAttribute('onclick') || '').includes("'homerisk'")) || null);
+  switchProfileTab('homerisk', c.id);
 }
 // Called before a home visit is booked. Returns false to stop the booking.
 function homeVisitGate(clientId, isHomeVisit) {
