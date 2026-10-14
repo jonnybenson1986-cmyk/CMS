@@ -184,9 +184,12 @@ public document served with the app. When an intake is saved with a mobile
 number and "Safe to leave calls/texts?" is Yes, the worker is offered a
 ready-written text with a link to it (a text can't carry the PDF itself). It
 is sent from the worker's own phone — the CMS has no SMS gateway — and each
-send is recorded on the file and audited, with the number masked. To update
-the handbook, replace the PDF at the same path; links already sent keep
-working. The service worker never caches it.
+send is recorded on the file and audited, with the number masked. It also
+appears on every client's Files tab, can be recorded as given in person, and
+an open file without it is flagged by the completeness check. Reports →
+Handbook send-out works through existing clients who haven't had it. To
+update the handbook, replace the PDF at the same path; links already sent
+keep working. The service worker never caches it.
 
 **Client feedback.** Four plain-language questions, due after intake and at
 mid-episode, and asked at exit through the review. The worker sends them from
