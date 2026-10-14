@@ -33,7 +33,7 @@ Everything referenced here is in this repo:
 ```bash
 cd <this repo>
 cd functions && npm install && cd ..
-firebase deploy --only functions
+firebase deploy --only functions:default   # role functions only (the SMS function is separate: SMS-SETUP.md)
 ```
 
 Expected output: `setUserRole`, `listStaff`, `onNewUser` deployed to

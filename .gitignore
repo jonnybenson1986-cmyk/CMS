@@ -32,3 +32,7 @@ Thumbs.db
 
 # One-off local tooling
 generate-icons.js
+
+# SMS function secrets and local params
+.secret.local
+functions-sms/.env*

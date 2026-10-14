@@ -6,7 +6,7 @@
 // only this trusted server code can set it and Firestore/Storage rules can
 // enforce it.
 //
-// Deploy:   firebase deploy --only functions
+// Deploy:   firebase deploy --only functions:default   (the SMS function is a separate codebase — see SMS-SETUP.md)
 // Region:   australia-southeast1 (same as Firestore — data stays in Sydney)
 //
 // First-time setup: no user has the 'sysmanager' claim yet, so setUserRole
