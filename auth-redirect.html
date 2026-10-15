@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Signing in…</title>
+<style>
+  body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center; background:#1a3a2a; color:#fff; font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; text-align:center; padding:24px; box-sizing:border-box; }
+  .box { max-width:340px; } .muted { opacity:.75; font-size:13px; }
+</style>
+</head>
+<body>
+  <!--
+    Microsoft sign-in (Outlook calendar sync) returns here inside the sign-in
+    popup. The CMS window reads the result from this page's address and closes
+    the popup. Deliberately blank: no scripts, nothing that could change the
+    address before the CMS reads it. This page is served WITHOUT the
+    Cross-Origin-Opener-Policy header (see netlify.toml) — with it, the browser
+    cuts the popup off from the CMS and sign-in can never finish.
+    Register this exact address in Azure as a Single-page application redirect URI.
+  -->
+  <div class="box">
+    <p><strong>Signing you in to Microsoft…</strong></p>
+    <p class="muted">This window will close by itself. If it doesn't, you can close it and return to the Worn Gundidj CMS.</p>
+  </div>
+</body>
+</html>

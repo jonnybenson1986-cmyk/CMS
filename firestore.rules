@@ -78,6 +78,12 @@ service cloud.firestore {
         && request.resource.data.requestedBy == request.auth.uid;
       allow update, delete: if false;
     }
+    // Shared app settings, e.g. appConfig/outlook = the Azure client id for Outlook sync
+    // (not a secret — it identifies the app). Set by the System Manager in Settings.
+    match /teams/{teamId}/appConfig/{id} {
+      allow read: if signedIn();
+      allow write: if signedIn();
+    }
     // On/off switch for automatic texts (the app shows it to the System Manager only).
     match /teams/{teamId}/smsConfig/{id} {
       allow read: if signedIn();

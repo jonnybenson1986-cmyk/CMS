@@ -83,6 +83,30 @@ Restore the previous rules immediately.
 
 **3 — Cloud Functions.** Not currently deployed. Follow `SECURITY-DEPLOY.md`.
 
+## Outlook calendar sync
+
+Each worker can put the CMS appointments booked for them into their own
+Outlook calendar (one-way, CMS → Outlook; 30 days back to 6 months ahead).
+Events are matched by a hidden id, so re-syncing updates rather than
+duplicates, and appointments deleted in the CMS are removed. Only events the
+CMS created are touched. They are marked Private, show the client's first
+name and initial only, and carry no notes.
+
+* Microsoft's sign-in library (MSAL 4.30, LTS) is **self-hosted** in
+  `vendor/msal/` — the old alcdn.msauth.net CDN now returns 404.
+* Microsoft returns the sign-in popup to `auth-redirect.html`, a blank page
+  served **without** Cross-Origin-Opener-Policy. The app page uses
+  `same-origin-allow-popups` (set for `/` and `/index.html` in netlify.toml).
+  Either header on the return page, or `same-origin` on the app page, cuts
+  the popup off and sign-in never finishes.
+* Set-up (System Manager, once — also shown in Settings): one Azure app
+  registration; Authentication → **Single-page application** redirect URI
+  `https://<cms-address>/auth-redirect.html`; API permissions → Microsoft
+  Graph → delegated `Calendars.ReadWrite` → Grant admin consent; paste the
+  Application (client) ID and Directory (tenant) ID in Settings. They are
+  shared with all staff via `appConfig/outlook` (publish `firestore.rules`).
+  Staff then use **Connect Outlook / Sync to Outlook** on the Calendar page.
+
 ## Forgotten passwords
 
 The sign-in page has a **Forgot password?** link. Firebase emails the person a
