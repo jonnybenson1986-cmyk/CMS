@@ -495,7 +495,8 @@
 <script src="vendor/firebase/firebase-auth-compat.js"></script>
 <script src="vendor/firebase/firebase-storage-compat.js"></script>
 <script src="vendor/firebase/firebase-app-check-compat.js"></script>
-<script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
+<!-- Microsoft sign-in (MSAL 4.30, LTS) — self-hosted like Firebase: Microsoft retired the alcdn.msauth.net CDN (every version now 404s). -->
+<script src="vendor/msal/msal-browser.min.js"></script>
 <script>
 // ===== DATA LAYER =====
 const DB = {
@@ -741,6 +742,7 @@ const FSYNC = (() => {
     _listeners.push(col('policies').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; const pl=doc.exists?doc.data().list:null; if(pl){ policies=pl; DB.save('policies',policies); if(currentPage==='policies')setTimeout(()=>showPage('policies'),50); } }, e=>console.warn('policies listener:',e.message)));
     // Automatic texts: the outbox (results written back by the Cloud Function) and the on/off switch.
     _listeners.push(col('smsOutbox').onSnapshot(snap=>{ smsOutbox=snap.docs.map(d=>Object.assign({id:d.id},d.data())); DB.save('smsOutbox',smsOutbox); try{ _smsRefresh(); }catch(_){} }, e=>console.warn('smsOutbox listener:',e.message)));
+    _listeners.push(col('appConfig').doc('outlook').onSnapshot(doc=>{ if(doc.exists){ outlookOrgConfig=doc.data()||{}; DB.save('outlookOrgConfig',outlookOrgConfig); } }, e=>console.warn('appConfig listener:',e.message)));
     _listeners.push(col('smsConfig').doc('settings').onSnapshot(doc=>{ smsConfig=doc.exists?doc.data():{}; DB.save('smsConfig',smsConfig); try{ _smsRefresh(); }catch(_){} }, e=>console.warn('smsConfig listener:',e.message)));
     _listeners.push(col('walkins').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; const l=doc.exists?doc.data().list:null; if(l){ walkins=l; DB.save('walkins',walkins); if(currentPage==='walkins')setTimeout(()=>showPage('walkins'),50); } }, e=>console.warn('walkins listener:',e.message)));
     _listeners.push(col('calevents').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; const l=doc.exists?doc.data().list:null; if(l){ calEvents=l; DB.save('calevents',calEvents); if(currentPage==='calendar')setTimeout(()=>showPage('calendar'),50); } }, e=>console.warn('calevents listener:',e.message)));
@@ -1052,10 +1054,11 @@ const FSYNC = (() => {
     return ref.id;
   }
   async function setSmsConfig(cfg) { if(!db) throw new Error('Not connected to the cloud'); await col('smsConfig').doc('settings').set(cfg); }
+  async function setAppConfig(id, cfg) { if(!db) throw new Error('Not connected to the cloud'); await col('appConfig').doc(id).set(cfg); }
 
   return { init, isReady, pushAll, pushClients, pushNotes, pushReferrals, pushWorkers, pushTasks, pushAudit, pushBrokerage, deleteDoc, getCfg, saveCfg, showSetupModal, clearConfig,
     storageReady, uploadFile, deleteStorageFile, getStorageURL, pushPolicies,
-    pushFpho, pushWalkins, pushCalEvents, pushResources, resyncAll, pushStaff, fetchStaff, staffSyncStatus, queueSms, setSmsConfig };
+    pushFpho, pushWalkins, pushCalEvents, pushResources, resyncAll, pushStaff, fetchStaff, staffSyncStatus, queueSms, setSmsConfig, setAppConfig };
 })();
 
 let clients = DB.load('clients', []);
@@ -1081,14 +1084,15 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v82';
+const APP_VERSION = 'v83';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
 let fphoClients = DB.load('fphoClients', []); // separate client roster for the FPHO program
 let resources = DB.load('resources', []);
 let smsOutbox = DB.load('smsOutbox', []);     // automatic text requests + results (Cloud Function)
-let smsConfig = DB.load('smsConfig', {});     // { autoHandbook: true } — set by the System Manager
+let smsConfig = DB.load('smsConfig', {});
+let outlookOrgConfig = DB.load('outlookOrgConfig', {}) || {};   // { clientId, tenant } — set once by the System Manager, shared     // { autoHandbook: true } — set by the System Manager
 let policies = DB.load('policies', []); // organisation policies & procedures library
 function saveFPHO() { DB.save('fphoApplications', fphoApplications); if(FSYNC.isReady()) FSYNC.pushFpho?.(); }
 function saveFPHOClients() { DB.save('fphoClients', fphoClients); if(FSYNC.isReady()) FSYNC.pushFpho?.(); }
@@ -7381,6 +7385,7 @@ function renderTodayView() {
     <button class="btn btn-sm btn-accent" onclick="openEventModal()">➕ New Appointment</button>
     <button class="btn btn-sm btn-outline" onclick="openAdminNotesModal()">🗒️ Admin Notes</button>
     <button class="btn btn-sm btn-outline" onclick="exportToOutlook()" title="Export all appointments to Outlook (.ics file)">📤 Export to Outlook</button>
+    ${outlookCalendarButtonHTML()}
   </div>
 
   <div class="cp-layout">
@@ -11040,37 +11045,7 @@ function renderSettings() {
   </div>
 
   <!-- OUTLOOK SYNC CARD -->
-  <div class="card" style="border-left:4px solid #0078d4">
-    <div class="card-header">
-      <div class="card-title" style="display:flex;align-items:center;gap:10px">
-        <img src="https://upload.wikimedia.org/wikipedia/commons/d/df/Microsoft_Office_Outlook_%282018%E2%80%93present%29.svg" style="width:22px;height:22px" alt="Outlook">
-        Outlook Calendar Sync
-        <span id="outlook-status-badge" style="font-size:11px;padding:2px 10px;border-radius:12px;font-weight:700;${DB.load('msalToken','')?'background:#dbeafe;color:#1e40af':'background:#f3f4f6;color:#6b7280'}">${DB.load('msalToken','')?'● Connected':'○ Not connected'}</span>
-      </div>
-      <div style="display:flex;gap:8px">
-        ${DB.load('msalToken','')?`
-          <button class="btn btn-sm btn-outline" onclick="outlookSync()">🔄 Sync Now</button>
-          <button class="btn btn-sm btn-danger" onclick="outlookDisconnect()">Disconnect</button>
-        `:`<button class="btn btn-sm btn-primary" onclick="outlookConnect()" style="background:#0078d4;border-color:#0078d4">Connect to Outlook</button>`}
-      </div>
-    </div>
-    <p style="font-size:13px;color:var(--muted);margin-bottom:14px">Sync CMS sessions and calendar events to your Microsoft Outlook calendar. Requires an Azure App Registration.</p>
-    <div style="background:#f8fafc;border:1px solid var(--border);border-radius:8px;padding:14px;font-size:12px;line-height:1.7">
-      <strong>Setup steps:</strong><br>
-      1. Go to <strong>portal.azure.com</strong> → Azure Active Directory → App registrations → New registration<br>
-      2. Name it "Worn Gundidj CMS" — select <em>Accounts in any org + personal</em><br>
-      3. Set Redirect URI to <strong>Single-page application (SPA)</strong> → <code style="background:#e2e8f0;padding:1px 5px;border-radius:3px">${location.origin+location.pathname}</code><br>
-      4. Copy the <strong>Application (client) ID</strong> and paste below
-    </div>
-    <div class="form-group" style="margin-top:12px">
-      <label>Azure Application (Client) ID</label>
-      <div style="display:flex;gap:8px">
-        <input id="msal-clientid" value="${sanitize(DB.load('msalClientId',''))}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" style="flex:1;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px">
-        <button class="btn btn-outline btn-sm" onclick="saveMsalClientId()">Save</button>
-      </div>
-    </div>
-    ${DB.load('msalLastSync','')?`<div style="font-size:12px;color:var(--muted);margin-top:8px">Last synced: ${DB.load('msalLastSync','')}</div>`:''}
-  </div>
+  ${outlookSettingsCardHTML()}
 
   <div class="card">
     <div class="card-title" style="margin-bottom:12px">ℹ️ About</div>
@@ -11378,127 +11353,289 @@ function deletePolicy(id) {
 }
 
 // ===== OUTLOOK / MICROSOFT GRAPH SYNC =====
-let _msalInstance = null;
+// Each worker connects their OWN Microsoft 365 account and pushes the CMS
+// appointments booked for them into their Outlook calendar (one-way: CMS →
+// Outlook). The Azure app registration (Client ID, optional tenant) is set
+// once by the System Manager and shared with every device through
+// teams/{team}/appConfig/outlook.
+//
+// Events are matched to their CMS appointment through a hidden property, so
+// syncing again updates them instead of creating duplicates, and an
+// appointment deleted in the CMS is removed from Outlook. Only events this
+// sync created are ever changed or removed. Events are marked Private, carry
+// the client's first name and surname initial only, and no notes.
+const OUTLOOK_SCOPES = ['Calendars.ReadWrite', 'User.Read'];
+const OUTLOOK_CATEGORY = 'Worn Gundidj CMS';
+const OUTLOOK_PROP = 'String {5b3c2f2a-7d0e-4a8e-9a51-6f1c0e2d9b47} Name WGCMSAppointmentId';
+const OUTLOOK_TZ = 'AUS Eastern Standard Time';     // Victoria (Melbourne / Warrnambool), with daylight saving
+const OUTLOOK_DAYS_BACK = 30, OUTLOOK_DAYS_AHEAD = 180;
+const _GUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+let _msalInstance = null, _msalKey = '', _outlookBusy = false;
+
+// The ID is pulled out of whatever was pasted (": b7fba3e9-…" → "b7fba3e9-…").
+function cleanGuid(v) { const m = String(v || '').match(_GUID); return m ? m[0].toLowerCase() : ''; }
+function outlookClientId() { return cleanGuid(outlookOrgConfig.clientId) || cleanGuid(DB.load('msalClientId', '')); }
+// Sign-in authority: the tenant if set (GUID or verified domain); otherwise the
+// domain of the signed-in staff email — that works for single-tenant AND
+// multi-tenant registrations, where "/common" fails for single-tenant ones.
+function outlookTenant() {
+  const t = String(outlookOrgConfig.tenant || DB.load('msalTenant', '') || '').trim();
+  if (cleanGuid(t)) return cleanGuid(t);
+  if (/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(t)) return t.toLowerCase();
+  const dom = String(currentUser?.email || '').split('@')[1] || '';
+  return /\./.test(dom) && !/^(gmail|outlook|hotmail|live|yahoo|icloud)\./i.test(dom) ? dom.toLowerCase() : 'organizations';
+}
+// Where Microsoft returns inside the sign-in popup: a blank page served without
+// the popup-isolation header (see auth-redirect.html). One exact address,
+// whatever page the CMS was opened on — Azure must list it as a SPA redirect URI.
+function outlookRedirectUri() { return location.origin + '/auth-redirect.html'; }
+function outlookAccount() { try { return JSON.parse(DB.load('msalAccount', '') || 'null'); } catch (_) { return null; } }
 
 function _getMsalInstance() {
-  const clientId = DB.load('msalClientId', '');
-  if(!clientId) { showToast('Enter your Azure Client ID in Settings first'); return null; }
-  if(!window.msal) { showToast('Microsoft auth library not loaded'); return null; }
-  if(!_msalInstance || _msalInstance._clientId !== clientId) {
+  const clientId = outlookClientId();
+  if (!clientId) { _outlookError('Outlook isn\'t set up yet — the System Manager needs to enter the Azure Application (client) ID in Settings → Outlook Calendar Sync.'); return null; }
+  if (!window.msal || !msal.PublicClientApplication) { _outlookError('The Microsoft sign-in component didn\'t load. Refresh the page (Ctrl+Shift+R) and try again.'); return null; }
+  const key = clientId + '|' + outlookTenant();
+  if (!_msalInstance || _msalKey !== key) {
     _msalInstance = new msal.PublicClientApplication({
-      auth: { clientId, authority: 'https://login.microsoftonline.com/common', redirectUri: location.origin + location.pathname },
-      cache: { cacheLocation: 'localStorage' }
+      auth: { clientId, authority: 'https://login.microsoftonline.com/' + outlookTenant(), redirectUri: outlookRedirectUri() },
+      cache: { cacheLocation: 'localStorage' },
     });
-    _msalInstance._clientId = clientId;
+    _msalKey = key;
   }
   return _msalInstance;
 }
 
-function saveMsalClientId() {
-  const v = document.getElementById('msal-clientid')?.value?.trim();
-  if(!v) { showToast('Please enter a Client ID'); return; }
-  DB.save('msalClientId', v);
-  _msalInstance = null;
-  showToast('Client ID saved ✓');
+// Microsoft's error codes → what to actually do about them.
+function outlookErrorText(e) {
+  const code = String((e && (e.errorCode || e.code)) || ''), msg = String((e && (e.errorMessage || e.message)) || '');
+  const aad = (msg.match(/AADSTS\d+/) || [''])[0];
+  const fix = {
+    AADSTS700016: 'Microsoft can\'t find an app with this Client ID in your organisation. Check the ID was copied from the right app registration (you have two called "Worn Gundidj CMS" — keep one and delete the other).',
+    AADSTS50011: `The address the CMS returns to isn't registered. In Azure → the app → Authentication, add a Single-page application redirect URI of exactly ${outlookRedirectUri()}`,
+    AADSTS9002326: `The redirect URI is registered as "Web". It must be "Single-page application": Azure → the app → Authentication → delete the Web entry and add ${outlookRedirectUri()} under Single-page application.`,
+    AADSTS50194: 'This app is set to your organisation only. Enter the Directory (tenant) ID from the app\'s Overview page in Settings, then try again.',
+    AADSTS65001: 'Permission to use the calendar hasn\'t been granted. An Azure administrator should open the app → API permissions → Grant admin consent for Worn Gundidj.',
+    AADSTS90094: 'Your organisation requires an administrator to approve calendar access. An Azure administrator should open the app → API permissions → Grant admin consent.',
+    AADSTS90008: 'An administrator needs to approve this app (API permissions → Grant admin consent).',
+    AADSTS50020: 'That Microsoft account belongs to a different organisation. Sign in with your Worn Gundidj account.',
+    AADSTS50105: 'Your account hasn\'t been given access to this app. Ask the Azure administrator to assign you (Enterprise applications → Worn Gundidj CMS → Users and groups).',
+    AADSTS900023: 'The Directory (tenant) ID in Settings isn\'t valid. Copy it from the app\'s Overview page.',
+  }[aad];
+  if (fix) return fix + ` (${aad})`;
+  if (code === 'popup_window_error' || code === 'empty_window_error') return 'The browser blocked the Microsoft sign-in window. Allow pop-ups for this site (the icon at the right of the address bar), then try again.';
+  if (code === 'user_cancelled') return 'The Microsoft sign-in window was closed before sign-in finished. Try again and complete the sign-in.';
+  if (code === 'interaction_in_progress') return 'A Microsoft sign-in window is already open. Finish or close it, then try again.';
+  if (code === 'no_network_connectivity' || /Failed to fetch|NetworkError/i.test(msg)) return 'Couldn\'t reach Microsoft — check the internet connection.';
+  if (code === 'consent_required' || code === 'interaction_required' || code === 'login_required') return 'Microsoft needs you to sign in again. Press Connect to Outlook.';
+  return 'Microsoft sign-in failed' + (aad || code ? ` (${aad || code})` : '') + (msg ? ': ' + msg.split('\n')[0].slice(0, 200) : '');
+}
+function _outlookError(text) {
+  DB.save('outlookLastError', { at: now(), text });
+  showToast('⚠️ ' + text.slice(0, 140));
+  const el = document.getElementById('outlook-error'); if (el) { el.style.display = ''; el.textContent = text; }
+}
+
+async function saveMsalClientId() {
+  if (currentUser?.role !== 'sysmanager') { showToast('Only the System Manager can change the Outlook set-up'); return; }
+  const raw = document.getElementById('msal-clientid')?.value || '', tenantRaw = (document.getElementById('msal-tenant')?.value || '').trim();
+  const clientId = cleanGuid(raw);
+  if (!clientId) { _outlookError('That doesn\'t look like an Application (client) ID. It is 36 characters like b7fba3e9-1f06-4a44-85de-b1718f821df6 — copy it from the app\'s Overview page in Azure.'); return; }
+  const tenant = cleanGuid(tenantRaw) || (/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(tenantRaw) ? tenantRaw.toLowerCase() : '');
+  if (tenantRaw && !tenant) { _outlookError('The Directory (tenant) ID should be a 36-character ID (or your domain, e.g. worngundidj.org.au). Leave it blank if unsure.'); return; }
+  const cfg = { clientId, tenant, updatedBy: currentUser?.name || '', updatedAt: now() };
+  outlookOrgConfig = cfg; DB.save('outlookOrgConfig', cfg); DB.save('msalClientId', clientId); DB.save('msalTenant', tenant);
+  DB.save('outlookLastError', null); _msalInstance = null;
+  let shared = false;
+  try { if (FSYNC.isReady()) { await FSYNC.setAppConfig('outlook', cfg); shared = true; } } catch (e) { console.warn('Outlook config not shared:', e.message); }
+  audit('Outlook set-up changed', `Client ID ${clientId.slice(0, 8)}…${tenant ? ', tenant ' + tenant : ''}${shared ? '' : ' (this device only)'}`);
+  showToast(shared ? `✓ Saved for all staff${raw.trim() !== clientId ? ' — tidied the pasted ID' : ''}` : '✓ Saved on this device. To share it with all staff, publish the latest firestore.rules.');
+  showPage('settings');
 }
 
 async function outlookConnect() {
-  const msalApp = _getMsalInstance();
-  if(!msalApp) return;
+  if (_outlookBusy) return; _outlookBusy = true;
   try {
+    const msalApp = _getMsalInstance(); if (!msalApp) return;
     await msalApp.initialize();
-    const result = await msalApp.loginPopup({ scopes: ['Calendars.ReadWrite', 'User.Read'] });
-    DB.save('msalToken', result.accessToken);
-    DB.save('msalAccount', JSON.stringify({ name: result.account.name, username: result.account.username }));
-    showToast(`Connected as ${result.account.name} ✓`);
-    showPage('settings');
-  } catch(e) {
-    console.warn('Outlook connection failed:', e); showToast("Couldn't connect to Outlook — please try again.");
-  }
+    const result = await msalApp.loginPopup({ scopes: OUTLOOK_SCOPES, prompt: 'select_account', loginHint: currentUser?.email || undefined });
+    msalApp.setActiveAccount(result.account);
+    DB.save('msalAccount', JSON.stringify({ name: result.account.name, username: result.account.username, homeAccountId: result.account.homeAccountId }));
+    DB.save('msalToken', ''); DB.save('outlookLastError', null);      // tokens stay in Microsoft's own cache only
+    audit('Outlook connected', result.account.username || '');
+    showToast(`✓ Outlook connected as ${result.account.name || result.account.username}`);
+    if (currentPage === 'settings' || currentPage === 'calendar') showPage(currentPage);
+  } catch (e) { console.warn('Outlook connection failed:', e); _outlookError(outlookErrorText(e)); }
+  finally { _outlookBusy = false; }
 }
 
-function outlookDisconnect() {
-  if(!confirm('Disconnect Outlook sync?')) return;
-  DB.save('msalToken', '');
-  DB.save('msalAccount', '');
-  DB.save('msalLastSync', '');
+async function outlookDisconnect() {
+  if (!confirm('Disconnect your Outlook calendar from the CMS?\n\nEvents already in Outlook stay there.')) return;
+  try { const app = _getMsalInstance(); if (app) { await app.initialize(); const acc = app.getAllAccounts(); if (acc[0] && app.clearCache) await app.clearCache({ account: acc[0] }); } } catch (_) {}
+  ['msalToken', 'msalAccount', 'msalLastSync', 'outlookLastResult'].forEach(k => DB.save(k, ''));
   _msalInstance = null;
+  audit('Outlook disconnected', '');
   showToast('Outlook disconnected');
-  showPage('settings');
+  if (currentPage === 'settings' || currentPage === 'calendar') showPage(currentPage);
 }
 
-async function _getOutlookToken() {
-  const msalApp = _getMsalInstance();
-  if(!msalApp) return null;
+async function _getOutlookToken(forceInteractive) {
+  const msalApp = _getMsalInstance(); if (!msalApp) return null;
   await msalApp.initialize();
-  const accounts = msalApp.getAllAccounts();
-  if(!accounts.length) { showToast('Please reconnect Outlook in Settings'); return null; }
-  try {
-    const result = await msalApp.acquireTokenSilent({ scopes: ['Calendars.ReadWrite'], account: accounts[0] });
-    return result.accessToken;
-  } catch {
-    try {
-      const result = await msalApp.acquireTokenPopup({ scopes: ['Calendars.ReadWrite'], account: accounts[0] });
-      return result.accessToken;
-    } catch(e) { console.warn('Outlook sign-in failed:', e); showToast('Outlook sign-in failed — please reconnect in Settings.'); return null; }
+  const saved = outlookAccount();
+  const account = msalApp.getAllAccounts().find(a => !saved || a.homeAccountId === saved.homeAccountId || a.username === saved.username) || msalApp.getAllAccounts()[0];
+  if (!account) { _outlookError('Your Outlook connection has expired on this device. Press Connect to Outlook.'); DB.save('msalAccount', ''); return null; }
+  if (!forceInteractive) {
+    try { return (await msalApp.acquireTokenSilent({ scopes: OUTLOOK_SCOPES, account })).accessToken; } catch (_) { /* fall through to a popup */ }
   }
+  try { return (await msalApp.acquireTokenPopup({ scopes: OUTLOOK_SCOPES, account })).accessToken; }
+  catch (e) { console.warn('Outlook token failed:', e); _outlookError(outlookErrorText(e)); return null; }
+}
+
+// ---- what gets synced ----
+function _hhmm(t, d) { return /^\d{1,2}:\d{2}$/.test(String(t || '')) ? String(t).padStart(5, '0') : d; }
+function _shortClientName(c) {
+  if (!c) return '';
+  const parts = String(c.preferredName || c.fullName || '').replace(/"[^"]*"/g, ' ').trim().split(/\s+/);
+  const surname = String(c.fullName || '').replace(/"[^"]*"/g, ' ').trim().split(/\s+/).pop() || '';
+  return parts[0] ? parts[0] + (surname && surname !== parts[0] ? ' ' + surname[0] + '.' : '') : '';
+}
+// My appointments, from 30 days ago to 6 months ahead.
+function outlookCmsEvents() {
+  const me = canonicalWorker(currentUser?.name || ''), from = addDaysStr(today(), -OUTLOOK_DAYS_BACK), to = addDaysStr(today(), OUTLOOK_DAYS_AHEAD);
+  return (calEvents || []).filter(e => e && e.id && e.date >= from && e.date <= to && canonicalWorker(e.worker || '') === me);
+}
+function outlookEventBody(e) {
+  const c = e.clientId ? clients.find(x => x.id === e.clientId) : null;
+  const start = _hhmm(e.startTime, '09:00');
+  let end = _hhmm(e.endTime, '');
+  if (!end || end <= start) end = minsToTime(Math.min(timeToMins(start) + 60, 23 * 60 + 59));
+  const typeLabel = (EVT_TYPES[e.type] || {}).label || '';
+  return {
+    subject: [e.title || typeLabel || 'Appointment', _shortClientName(c)].filter(Boolean).join(' — '),
+    start: { dateTime: `${e.date}T${start}:00`, timeZone: OUTLOOK_TZ },
+    end: { dateTime: `${e.date}T${end}:00`, timeZone: OUTLOOK_TZ },
+    location: { displayName: e.location || '' },
+    body: { contentType: 'text', content: 'Booked in the Worn Gundidj CMS — see the CMS for details.' },
+    categories: [OUTLOOK_CATEGORY],
+    sensitivity: 'private', showAs: 'busy',
+    isReminderOn: !!e.reminder, reminderMinutesBeforeStart: Number(e.reminder) || 15,
+    singleValueExtendedProperties: [{ id: OUTLOOK_PROP, value: String(e.id) }],
+  };
+}
+
+async function _graph(token, method, path, body) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const res = await fetch('https://graph.microsoft.com/v1.0' + path, { method,
+      headers: Object.assign({ Authorization: 'Bearer ' + token, Prefer: `outlook.timezone="${OUTLOOK_TZ}"` }, body ? { 'Content-Type': 'application/json' } : {}),
+      body: body ? JSON.stringify(body) : undefined });
+    if (res.status === 429 || res.status === 503) { await new Promise(r => setTimeout(r, Math.min(10, Number(res.headers.get('Retry-After')) || 2) * 1000)); continue; }
+    if (res.status === 204) return {};
+    let data = {}; try { data = await res.json(); } catch (_) {}
+    if (!res.ok) { const err = new Error((data.error && data.error.message) || ('HTTP ' + res.status)); err.status = res.status; err.code = data.error && data.error.code; throw err; }
+    return data;
+  }
+  const err = new Error('Microsoft is busy — try again in a minute'); err.status = 429; throw err;
+}
+// Events this sync created earlier, keyed by CMS appointment id.
+async function _outlookExisting(token) {
+  const found = new Map();
+  let path = `/me/events?$filter=${encodeURIComponent(`categories/any(c:c eq '${OUTLOOK_CATEGORY}')`)}&$select=id,subject,start&$top=250&$expand=${encodeURIComponent(`singleValueExtendedProperties($filter=id eq '${OUTLOOK_PROP}')`)}`;
+  for (let page = 0; path && page < 20; page++) {
+    const data = await _graph(token, 'GET', path);
+    (data.value || []).forEach(ev => { const p = (ev.singleValueExtendedProperties || []).find(x => x.id === OUTLOOK_PROP); if (p && p.value) found.set(p.value, ev); });
+    path = data['@odata.nextLink'] ? data['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0', '') : '';
+  }
+  return found;
 }
 
 async function outlookSync() {
-  showToast('Syncing to Outlook…');
-  const token = await _getOutlookToken();
-  if(!token) return;
-  const events = _buildOutlookEvents();
-  let ok = 0, fail = 0;
-  for(const ev of events) {
-    try {
-      await fetch('https://graph.microsoft.com/v1.0/me/events', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(ev)
-      });
-      ok++;
-    } catch { fail++; }
-  }
-  const ts = new Date().toLocaleString('en-AU');
-  DB.save('msalLastSync', ts);
-  showToast(`Synced ${ok} event${ok!==1?'s':''} to Outlook${fail?` (${fail} failed)`:''} ✓`);
-  audit('Outlook sync', `${ok} events synced`);
-  showPage('settings');
+  if (_outlookBusy) return; _outlookBusy = true;
+  try {
+    if (!outlookAccount()) { _outlookError('Connect your Outlook calendar first.'); return; }
+    showToast('Syncing to Outlook…');
+    let token = await _getOutlookToken(); if (!token) return;
+    let existing;
+    try { existing = await _outlookExisting(token); }
+    catch (e) {
+      if (e.status === 401) { token = await _getOutlookToken(true); if (!token) return; existing = await _outlookExisting(token); }
+      else throw e;
+    }
+    const mine = outlookCmsEvents(), ids = new Set(mine.map(e => String(e.id)));
+    const from = addDaysStr(today(), -OUTLOOK_DAYS_BACK);
+    const r = { created: 0, updated: 0, removed: 0, failed: 0, errors: [] };
+    for (const e of mine) {
+      const ev = existing.get(String(e.id));
+      try {
+        if (ev) { await _graph(token, 'PATCH', '/me/events/' + encodeURIComponent(ev.id), outlookEventBody(e)); r.updated++; }
+        else { await _graph(token, 'POST', '/me/events', outlookEventBody(e)); r.created++; }
+      } catch (err) { r.failed++; r.errors.push(err.message); }
+    }
+    // Appointments deleted in the CMS (or reassigned to someone else) come out of Outlook too —
+    // only events this sync made, and only within the sync window.
+    for (const [cmsId, ev] of existing) {
+      if (ids.has(cmsId)) continue;
+      if (String(ev.start && ev.start.dateTime || '').slice(0, 10) < from) continue;
+      try { await _graph(token, 'DELETE', '/me/events/' + encodeURIComponent(ev.id)); r.removed++; } catch (err) { r.failed++; r.errors.push(err.message); }
+    }
+    const ts = new Date().toLocaleString('en-AU');
+    DB.save('msalLastSync', ts);
+    DB.save('outlookLastResult', { at: now(), created: r.created, updated: r.updated, removed: r.removed, failed: r.failed, error: r.errors[0] || '' });
+    DB.save('outlookLastError', r.failed ? { at: now(), text: `${r.failed} event${r.failed !== 1 ? 's' : ''} could not be synced: ${r.errors[0]}` } : null);
+    audit('Outlook sync', `${r.created} added, ${r.updated} updated, ${r.removed} removed${r.failed ? ', ' + r.failed + ' failed' : ''}`);
+    showToast(r.failed ? `⚠️ Outlook: ${r.created} added, ${r.updated} updated, ${r.removed} removed — ${r.failed} failed` : `✓ Outlook up to date: ${r.created} added, ${r.updated} updated, ${r.removed} removed`);
+    if (currentPage === 'settings' || currentPage === 'calendar') showPage(currentPage);
+  } catch (e) {
+    console.warn('Outlook sync failed:', e);
+    _outlookError(e.status === 403 ? 'Microsoft refused access to your calendar. An Azure administrator should grant the Calendars.ReadWrite permission (API permissions → Grant admin consent).' : e.status ? `Outlook sync failed: ${e.message}` : outlookErrorText(e));
+  } finally { _outlookBusy = false; }
 }
 
-function _buildOutlookEvents() {
-  const today = new Date();
-  const cutoff = new Date(today); cutoff.setDate(cutoff.getDate() - 30);
-  const events = [];
-  // Sessions
-  (notes||[]).filter(n => n.type === 'session' && n.date >= isoDate(cutoff)).forEach(n => {
-    const client = clients.find(c=>c.id===n.clientId);
-    const start = new Date(n.date + 'T' + (n.startTime||'09:00') + ':00');
-    const end = new Date(n.date + 'T' + (n.endTime||'10:00') + ':00');
-    events.push({
-      subject: `Session — ${client?.fullName||'Client'}`,
-      body: { contentType: 'text', content: n.content||'' },
-      start: { dateTime: start.toISOString(), timeZone: 'Australia/Melbourne' },
-      end: { dateTime: end.toISOString(), timeZone: 'Australia/Melbourne' },
-      categories: ['Worn Gundidj CMS']
-    });
-  });
-  // Calendar events
-  (typeof calendarEvents !== 'undefined' ? calendarEvents : [])
-    .filter(e => e.date >= isoDate(cutoff))
-    .forEach(e => {
-      const start = new Date(e.date + 'T' + (e.startTime||'09:00') + ':00');
-      const end = new Date(e.date + 'T' + (e.endTime||'10:00') + ':00');
-      events.push({
-        subject: e.title||'CMS Event',
-        body: { contentType: 'text', content: e.notes||'' },
-        start: { dateTime: start.toISOString(), timeZone: 'Australia/Melbourne' },
-        end: { dateTime: end.toISOString(), timeZone: 'Australia/Melbourne' },
-        categories: ['Worn Gundidj CMS']
-      });
-    });
-  return events;
+// ---- screens ----
+function outlookStatusHTML() {
+  const acc = outlookAccount(), last = DB.load('outlookLastResult', null), err = DB.load('outlookLastError', null);
+  return `${acc ? `<div style="font-size:12px;color:#065f46">● Connected as <strong>${sanitize(acc.name || acc.username)}</strong> (${sanitize(acc.username || '')})</div>` : ''}
+    ${last && last.at ? `<div style="font-size:12px;color:var(--muted);margin-top:4px">Last sync ${fmtdt(last.at)}: ${last.created} added, ${last.updated} updated, ${last.removed} removed${last.failed ? `, <span style="color:#991b1b">${last.failed} failed</span>` : ''}</div>` : ''}
+    <div id="outlook-error" class="alert alert-warning" style="font-size:12px;margin-top:8px;${err && err.text ? '' : 'display:none'}">${sanitize(err && err.text || '')}</div>`;
+}
+function outlookCalendarButtonHTML() {
+  if (!outlookClientId()) return '';
+  return outlookAccount()
+    ? `<button class="btn btn-sm btn-outline" id="outlook-sync-btn" onclick="outlookSync()" title="Put your CMS appointments into your Outlook calendar">🔄 Sync to Outlook</button>`
+    : `<button class="btn btn-sm btn-outline" id="outlook-connect-btn" onclick="outlookConnect()" title="Connect your Microsoft 365 calendar">🔗 Connect Outlook</button>`;
+}
+function outlookSettingsCardHTML() {
+  const sys = currentUser?.role === 'sysmanager', acc = outlookAccount(), id = outlookClientId();
+  const shownId = outlookOrgConfig.clientId || DB.load('msalClientId', '');
+  return `<div class="card" style="border-left:4px solid #0078d4">
+    <div class="card-header">
+      <div class="card-title" style="display:flex;align-items:center;gap:10px"><span style="font-size:20px">📅</span> Outlook Calendar Sync
+        <span id="outlook-status-badge" style="font-size:11px;padding:2px 10px;border-radius:12px;font-weight:700;${acc ? 'background:#dbeafe;color:#1e40af' : 'background:#f3f4f6;color:#6b7280'}">${acc ? '● Connected' : '○ Not connected'}</span></div>
+      <div style="display:flex;gap:8px">
+        ${!id ? '' : acc ? `<button class="btn btn-sm btn-outline" onclick="outlookSync()">🔄 Sync now</button><button class="btn btn-sm btn-danger" onclick="outlookDisconnect()">Disconnect</button>`
+                         : `<button class="btn btn-sm btn-primary" onclick="outlookConnect()" style="background:#0078d4;border-color:#0078d4">Connect to Outlook</button>`}
+      </div>
+    </div>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:12px">Puts each worker's CMS appointments into their own Outlook calendar — 30 days back to 6 months ahead. Syncing again updates them (no duplicates) and removes ones deleted in the CMS. Events are marked Private and show only the client's first name and initial. Staff connect from the <strong>Calendar</strong> page; the set-up below is done once.</p>
+    ${outlookStatusHTML()}
+    ${sys ? `<details style="margin-top:12px" ${id ? '' : 'open'}><summary style="font-size:13px;font-weight:700;cursor:pointer">Azure set-up (System Manager)</summary>
+    <div style="background:#f8fafc;border:1px solid var(--border);border-radius:8px;padding:14px;font-size:12px;line-height:1.75;margin-top:8px">
+      1. <strong>portal.azure.com</strong> → Microsoft Entra ID → <strong>App registrations</strong>. Use <em>one</em> registration called "Worn Gundidj CMS" (if there are two, delete the spare so the IDs can't get mixed up). "Accounts in this organizational directory only" is fine.<br>
+      2. In that app → <strong>Authentication</strong> → Add a platform → <strong>Single-page application</strong> → Redirect URI exactly:
+        <code style="background:#e2e8f0;padding:1px 6px;border-radius:3px;user-select:all">${sanitize(outlookRedirectUri())}</code>
+        <button class="btn btn-sm btn-outline" style="padding:1px 8px;font-size:11px" onclick="navigator.clipboard&&navigator.clipboard.writeText('${sanitize(outlookRedirectUri())}');showToast('Copied')">Copy</button><br>
+        &nbsp;&nbsp;&nbsp;(It must be under <em>Single-page application</em>, not <em>Web</em>.)<br>
+      3. <strong>API permissions</strong> → Add → Microsoft Graph → Delegated → <strong>Calendars.ReadWrite</strong> (User.Read is usually already there) → <strong>Grant admin consent for Worn Gundidj</strong>.<br>
+      4. From the app's <strong>Overview</strong>, copy the <strong>Application (client) ID</strong> and the <strong>Directory (tenant) ID</strong> into the boxes below and Save.
+    </div>
+    <div class="grid-2" style="margin-top:12px">
+      <div class="form-group"><label>Application (client) ID</label><input id="msal-clientid" value="${sanitize(shownId)}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" spellcheck="false" autocomplete="off"></div>
+      <div class="form-group"><label>Directory (tenant) ID <span style="font-weight:400;color:var(--muted)">(recommended)</span></label><input id="msal-tenant" value="${sanitize(outlookOrgConfig.tenant || DB.load('msalTenant', '') || '')}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" spellcheck="false" autocomplete="off"></div>
+    </div>
+    <button class="btn btn-sm btn-primary" onclick="saveMsalClientId()">Save</button>
+    ${id ? `<span style="font-size:11px;color:var(--muted);margin-left:8px">Using ${sanitize(id)} · sign-in via ${sanitize(outlookTenant())}${outlookOrgConfig.updatedBy ? ' · set by ' + sanitize(outlookOrgConfig.updatedBy) : ''}</span>` : ''}
+    </details>` : (!id ? `<p style="font-size:12px;color:var(--muted)">Ask your System Manager to complete the Outlook set-up.</p>` : '')}
+  </div>`;
 }
 
 function applySidebarBg() {

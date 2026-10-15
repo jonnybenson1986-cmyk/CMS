@@ -7,15 +7,13 @@
     X-Frame-Options = "DENY"
     # Stop browsers sniffing MIME types
     X-Content-Type-Options = "nosniff"
-    # Isolate cross-origin popups/embeds
-    Cross-Origin-Opener-Policy = "same-origin"
     # Only send referrer to same origin
     Referrer-Policy = "strict-origin-when-cross-origin"
     # Restrict permissions
     Permissions-Policy = "camera=(), microphone=(self), geolocation=()"
     # Content Security Policy
     # - default: self only
-    # - scripts: self + Firebase + MSAL CDN + reCAPTCHA (needed for SMS MFA)
+    # - scripts: self (incl. self-hosted Firebase + Microsoft MSAL) + Google + reCAPTCHA (SMS MFA)
     # - connect: Firebase Firestore/Auth APIs + Microsoft login + reCAPTCHA
     # - frame:   reCAPTCHA challenge iframe (mandatory for phone MFA)
     # - manifest: allow the embedded data: PWA manifest
@@ -29,8 +27,7 @@
         https://www.googleapis.com
         https://www.google.com
         https://www.recaptcha.net
-        https://cdn.jsdelivr.net
-        https://alcdn.msauth.net;
+        https://cdn.jsdelivr.net;
       style-src 'self' 'unsafe-inline';
       connect-src 'self'
         https://*.googleapis.com
@@ -64,3 +61,18 @@
   [headers.values]
     Cache-Control = "no-cache"
     Service-Worker-Allowed = "/"
+
+# Cross-Origin-Opener-Policy for the app page only. "same-origin-allow-popups"
+# keeps the window isolated but lets the Microsoft sign-in popup it opens (Outlook
+# calendar sync) report back — the old "same-origin" cut the popup off, so sign-in
+# always ended as "user_cancelled". auth-redirect.html (where Microsoft returns,
+# inside the popup) must NOT have this header, so it is not set on "/*".
+[[headers]]
+  for = "/"
+  [headers.values]
+    Cross-Origin-Opener-Policy = "same-origin-allow-popups"
+
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cross-Origin-Opener-Policy = "same-origin-allow-popups"
