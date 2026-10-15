@@ -1,4 +1,4 @@
-const CACHE_NAME = 'wg-cms-v83';
+const CACHE_NAME = 'wg-cms-v84';
 
 self.addEventListener('install', e => {
   // Take control immediately — don't wait for old SW to finish
@@ -26,6 +26,10 @@ self.addEventListener('fetch', e => {
   // breaking the Firebase SDK from loading. Returning without respondWith
   // means the request bypasses the service worker entirely.
   if (!isSameOrigin) return;
+
+  // The Microsoft sign-in return page (Outlook sync) — straight from the network,
+  // untouched, so the sign-in window always gets it exactly as Netlify serves it.
+  if (url.pathname === '/auth-redirect.html') return;
 
   // index.html and navigations — always network-first so updates are instant
   if (isNavigation || url.pathname === '/' || url.pathname.endsWith('index.html')) {

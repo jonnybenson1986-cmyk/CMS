@@ -742,7 +742,11 @@ const FSYNC = (() => {
     _listeners.push(col('policies').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; const pl=doc.exists?doc.data().list:null; if(pl){ policies=pl; DB.save('policies',policies); if(currentPage==='policies')setTimeout(()=>showPage('policies'),50); } }, e=>console.warn('policies listener:',e.message)));
     // Automatic texts: the outbox (results written back by the Cloud Function) and the on/off switch.
     _listeners.push(col('smsOutbox').onSnapshot(snap=>{ smsOutbox=snap.docs.map(d=>Object.assign({id:d.id},d.data())); DB.save('smsOutbox',smsOutbox); try{ _smsRefresh(); }catch(_){} }, e=>console.warn('smsOutbox listener:',e.message)));
-    _listeners.push(col('appConfig').doc('outlook').onSnapshot(doc=>{ if(doc.exists){ outlookOrgConfig=doc.data()||{}; DB.save('outlookOrgConfig',outlookOrgConfig); } }, e=>console.warn('appConfig listener:',e.message)));
+    // Outlook set-up: appConfig/outlook, mirrored to staff/outlookSetup (readable under the rules
+    // already published, so staff get it before the newer appConfig rules are). Newest copy wins.
+    const _outlookCfgIn=(where)=>doc=>{ _outlookCfgSeen[where]=true; if(doc.exists) _applyOutlookConfig(doc.data()||{}); };
+    _listeners.push(col('appConfig').doc('outlook').onSnapshot(_outlookCfgIn('appConfig'), e=>{ _outlookCfgSeen.appConfigError=e.code||e.message; console.warn('appConfig listener:',e.message); }));
+    _listeners.push(col('staff').doc('outlookSetup').onSnapshot(_outlookCfgIn('staff'), e=>{ _outlookCfgSeen.staffError=e.code||e.message; console.warn('outlook set-up listener:',e.message); }));
     _listeners.push(col('smsConfig').doc('settings').onSnapshot(doc=>{ smsConfig=doc.exists?doc.data():{}; DB.save('smsConfig',smsConfig); try{ _smsRefresh(); }catch(_){} }, e=>console.warn('smsConfig listener:',e.message)));
     _listeners.push(col('walkins').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; const l=doc.exists?doc.data().list:null; if(l){ walkins=l; DB.save('walkins',walkins); if(currentPage==='walkins')setTimeout(()=>showPage('walkins'),50); } }, e=>console.warn('walkins listener:',e.message)));
     _listeners.push(col('calevents').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; const l=doc.exists?doc.data().list:null; if(l){ calEvents=l; DB.save('calevents',calEvents); if(currentPage==='calendar')setTimeout(()=>showPage('calendar'),50); } }, e=>console.warn('calevents listener:',e.message)));
@@ -1054,7 +1058,16 @@ const FSYNC = (() => {
     return ref.id;
   }
   async function setSmsConfig(cfg) { if(!db) throw new Error('Not connected to the cloud'); await col('smsConfig').doc('settings').set(cfg); }
-  async function setAppConfig(id, cfg) { if(!db) throw new Error('Not connected to the cloud'); await col('appConfig').doc(id).set(cfg); }
+  // Returns where it was saved. The Outlook set-up also goes to staff/outlookSetup (see the listener).
+  async function setAppConfig(id, cfg) {
+    if(!db) throw new Error('Not connected to the cloud');
+    const targets = [['appConfig', col('appConfig').doc(id)]];
+    if(id==='outlook') targets.push(['staff', col('staff').doc('outlookSetup')]);
+    const res = await Promise.allSettled(targets.map(([,ref])=>ref.set(cfg)));
+    const saved = targets.filter((_,i)=>res[i].status==='fulfilled').map(([w])=>w);
+    if(!saved.length) throw res[0].reason;
+    return saved;
+  }
 
   return { init, isReady, pushAll, pushClients, pushNotes, pushReferrals, pushWorkers, pushTasks, pushAudit, pushBrokerage, deleteDoc, getCfg, saveCfg, showSetupModal, clearConfig,
     storageReady, uploadFile, deleteStorageFile, getStorageURL, pushPolicies,
@@ -1084,7 +1097,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v83';
+const APP_VERSION = 'v84';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -1092,7 +1105,15 @@ let fphoClients = DB.load('fphoClients', []); // separate client roster for the 
 let resources = DB.load('resources', []);
 let smsOutbox = DB.load('smsOutbox', []);     // automatic text requests + results (Cloud Function)
 let smsConfig = DB.load('smsConfig', {});
-let outlookOrgConfig = DB.load('outlookOrgConfig', {}) || {};   // { clientId, tenant } — set once by the System Manager, shared     // { autoHandbook: true } — set by the System Manager
+let outlookOrgConfig = DB.load('outlookOrgConfig', {}) || {};   // { clientId, tenant } — set once by the System Manager, shared
+const _outlookCfgSeen = {};                                       // which cloud copies of the Outlook set-up this device has read
+function _applyOutlookConfig(cfg) {
+  if (!cfg || !cfg.clientId) return;
+  if (outlookOrgConfig.clientId && String(cfg.updatedAt || '') < String(outlookOrgConfig.updatedAt || '')) return;   // keep the newer copy
+  const changed = cfg.clientId !== outlookOrgConfig.clientId || cfg.tenant !== outlookOrgConfig.tenant;
+  outlookOrgConfig = cfg; DB.save('outlookOrgConfig', cfg);
+  if (changed) { try { _msalInstance = null; if (currentPage === 'calendar' || currentPage === 'settings') setTimeout(() => showPage(currentPage), 50); } catch (_) {} }
+}
 let policies = DB.load('policies', []); // organisation policies & procedures library
 function saveFPHO() { DB.save('fphoApplications', fphoApplications); if(FSYNC.isReady()) FSYNC.pushFpho?.(); }
 function saveFPHOClients() { DB.save('fphoClients', fphoClients); if(FSYNC.isReady()) FSYNC.pushFpho?.(); }
@@ -4135,7 +4156,7 @@ function openTimeModal(clientId) {
         <option value="">— Not program-specific —</option>
         ${EOC_TIME_PROGRAMS.map(p=>`<option value="${sanitize(p)}">${p==='workfoundations'?'Work Foundations':p.toUpperCase()}</option>`).join('')}
       </select>
-      <div style="font-size:11px;color:var(--muted);margin-top:4px">Time left as "Not program-specific" is recorded, but does not count toward the episode-of-care target.</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">Time left as "Not program-specific" counts toward SEWB episodes of care (once). Choose a program to count it toward AOD, Justice, etc. instead.</div>
     </div>
     <div class="form-group"><label>Worker</label>${workerSelectHTML('tm-worker','tm-worker-new', DB.load('workerName',''))}</div>
   </div>
@@ -4977,7 +4998,7 @@ function renderReportsPage() {
   <div class="card no-print" style="margin-bottom:20px;border-left:4px solid var(--primary)">
     <div class="card-header"><div class="card-title">🏛️ SEWB Official Funding Reports</div></div>
     <p style="font-size:13px;color:var(--muted);margin-bottom:6px">Completed <strong>episodes of care</strong> for SEWB, AOD and Justice clients — for official funding acquittal.</p>
-    <p style="font-size:12px;color:var(--muted);margin-bottom:16px">Episode criteria: <strong>12 weeks</strong> engaged with the program <strong>and</strong> a minimum of <strong>5 client contacts</strong>. A contact is a case note whose Session Type is that program, or time logged against that program. Notes left as <strong>GENERAL</strong>, and time left as “Not program-specific”, are recorded but do not count. First Peoples Home Ownership is excluded.</p>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:16px">Episode criteria: <strong>12 weeks</strong> engaged with the program <strong>and</strong> a minimum of <strong>5 client contacts</strong>. A contact is a case note whose Session Type is that program, or time logged against that program. Notes left as <strong>GENERAL</strong>, and time left as “Not program-specific”, count once, toward <strong>SEWB</strong> (the umbrella program), so the same contact is never counted for AOD or Justice as well. A general contact on the same day as another counted contact for that client is the same contact. First Peoples Home Ownership is excluded.</p>
     ${renderFundingKPIWidget()}
     <div class="grid-3">
       <div class="report-card" onclick="generateFundingReport('sewb')">
@@ -6440,7 +6461,8 @@ function _buildProgramReport(type, from, to) {
 // ===== EPISODE OF CARE — OFFICIAL FUNDING REPORTS =====
 // A completed "episode of care" = a 12-week (84-day) period of engagement with
 // a program containing a minimum of 5 recorded client contacts. Contacts are
-// case notes tagged to the program OR general. A client may accrue multiple consecutive,
+// case notes / time tagged to the program; GENERAL ones count once, toward SEWB
+// (see eocContactStamps). A client may accrue multiple consecutive,
 // non-overlapping episodes; an unfinished window is reported as "in progress".
 const EOC_WEEKS = 12;
 const EOC_MIN_CONTACTS = 5;
@@ -6486,37 +6508,59 @@ function timeLogProgram(tl) {
   return '';
 }
 
-// Every countable contact for one client in one program, as timestamps.
-// A contact is counted when it is EXPLICITLY recorded against the program:
-//   • a case note whose Session Type IS that program — 'general' no longer
-//     counts, because a general note is not a record of SEWB activity and was
-//     previously counted toward SEWB, AOD and Justice simultaneously; and
-//   • logged time explicitly attributed to that program (excluding FPHO).
+// GENERAL contacts — a case note whose Session Type is GENERAL (or blank), and
+// time left as "Not program-specific" — count toward the target ONCE, toward
+// SEWB. SEWB is the umbrella every AOD, Justice and Cultural client sits under,
+// so general work with them is SEWB activity. Counting it toward AOD and Justice
+// as well would count one contact up to three times (why it was left out
+// before). Clients who are only NDIS or Home Ownership aren't SEWB clients, so
+// their general contacts don't count. FPHO time is never general.
+const EOC_GENERAL_PROGRAM = 'sewb';
+function eocIsGeneral(type) { const t = String(type || '').toLowerCase(); return !t || t === 'general'; }
+function eocGeneralCountsFor(clientId, program) {
+  if (program !== EOC_GENERAL_PROGRAM) return false;
+  const c = (clients || []).find(x => x && x.id === clientId);
+  return !!c && !isStandaloneOnlyClient(c);
+}
+function _eocDay(t) { const d = new Date(t); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
+
+// Every countable contact for one client in one program, as timestamps:
+//   • a case note whose Session Type is that program — or GENERAL, for SEWB (above);
+//   • logged time attributed to that program — or not program-specific, for
+//     SEWB — never FPHO.
 // A session creates both a note and a linked time entry for the SAME contact,
 // so time carrying fromNoteId for an already-counted note is skipped rather
-// than counted twice.
+// than counted twice. Likewise general time (e.g. "Log time" on a calendar
+// appointment) on a day that already has a counted contact for the client is
+// the same contact, so it is counted once.
 function eocContactStamps(clientId, program) {
-  const countedNoteIds = new Set();
+  const general = eocGeneralCountsFor(clientId, program);
+  const countedNoteIds = new Set(), countedDays = new Set();
   const stamps = [];
   (notes || []).forEach(n => {
     if (!n || n.clientId !== clientId || !n.created) return;
-    if (String(n.type || '').toLowerCase() !== program) return;   // explicit only
+    const type = String(n.type || '').toLowerCase();
+    if (type !== program && !(general && eocIsGeneral(type))) return;
     const t = new Date(n.created).getTime();
     if (isNaN(t)) return;
-    countedNoteIds.add(n.id);
+    countedNoteIds.add(n.id); countedDays.add(_eocDay(t));
     stamps.push(t);
   });
+  const generalTime = [];
   (timeLogs || []).forEach(tl => {
     if (!tl || tl.clientId !== clientId) return;
     if (tl.fromNoteId && countedNoteIds.has(tl.fromNoteId)) return;  // same contact
     const p = timeLogProgram(tl);
-    if (!p || p !== program) return;                                  // explicit only
-    if (EOC_EXCLUDED_PROGRAMS.includes(p)) return;                    // FPHO excluded
-    if (!EOC_TIME_PROGRAMS.includes(p)) return;
     const t = new Date(tl.date || tl.created || '').getTime();
     if (isNaN(t)) return;
+    if (general && eocIsGeneral(p)) { generalTime.push(t); return; }
+    if (!p || p !== program) return;
+    if (EOC_EXCLUDED_PROGRAMS.includes(p)) return;                    // FPHO excluded
+    if (!EOC_TIME_PROGRAMS.includes(p)) return;
+    countedDays.add(_eocDay(t));
     stamps.push(t);
   });
+  generalTime.sort((a, b) => a - b).forEach(t => { const d = _eocDay(t); if (countedDays.has(d)) return; countedDays.add(d); stamps.push(t); });
   return stamps.sort((a, b) => a - b);
 }
 
@@ -6556,8 +6600,10 @@ function fundingProgramStats(program) {
   // activity that was already explicitly labelled — it never invents any.
   const flagged = new Set(clients.filter(c=>c[program]).map(c=>c.id));
   const active  = new Set();
-  (notes||[]).forEach(n=>{ if(n && String(n.type||'').toLowerCase()===program && n.clientId) active.add(n.clientId); });
-  (timeLogs||[]).forEach(tl=>{ if(tl && tl.clientId && timeLogProgram(tl)===program) active.add(tl.clientId); });
+  const genOk = new Map();   // general contacts only add SEWB clients who aren't NDIS/Home Ownership-only
+  const countsGeneral = id => { if (!genOk.has(id)) genOk.set(id, eocGeneralCountsFor(id, program)); return genOk.get(id); };
+  (notes||[]).forEach(n=>{ if(!n || !n.clientId) return; const t=String(n.type||'').toLowerCase(); if(t===program || (eocIsGeneral(t) && countsGeneral(n.clientId))) active.add(n.clientId); });
+  (timeLogs||[]).forEach(tl=>{ if(!tl || !tl.clientId) return; const p=timeLogProgram(tl); if(p===program || (eocIsGeneral(p) && countsGeneral(tl.clientId))) active.add(tl.clientId); });
   const cl = clients.filter(c=>flagged.has(c.id) || active.has(c.id));
   let totalEpisodes=0, clientsWithEpisode=0, totalContacts=0, partialEpisodes=0, clientsInPartial=0;
   const allEpisodeDates = [];
@@ -6726,7 +6772,7 @@ function buildFundingReport(program) {
     <div class="stat-box"><div class="sv">${grandWithEp}/${grandClients}</div><div class="sl">Clients with ≥1 Episode</div></div>
   </div>`;
   body += `<div style="background:#f0f7f3;border:1px solid #cde5d8;border-radius:6px;padding:10px 14px;font-size:11px;margin-bottom:16px;line-height:1.6">
-    <strong>Episode of Care — definition.</strong> A completed episode is a period of <strong>${EOC_WEEKS} weeks (${EOC_DAYS} days)</strong> of engagement with the program containing a minimum of <strong>${EOC_MIN_CONTACTS} recorded client contacts</strong> (case notes tagged to the program <em>or</em> general). A client may accrue multiple consecutive episodes; a window that has not yet reached both thresholds is shown as <em>in&nbsp;progress</em>.
+    <strong>Episode of Care — definition.</strong> A completed episode is a period of <strong>${EOC_WEEKS} weeks (${EOC_DAYS} days)</strong> of engagement with the program containing a minimum of <strong>${EOC_MIN_CONTACTS} recorded client contacts</strong> (case notes or time tagged to the program; GENERAL notes and not-program-specific time count toward SEWB only, once). A client may accrue multiple consecutive episodes; a window that has not yet reached both thresholds is shown as <em>in&nbsp;progress</em>.
   </div>`;
 
   allStats.forEach(s=>{
@@ -11389,7 +11435,33 @@ function outlookTenant() {
 // the popup-isolation header (see auth-redirect.html). One exact address,
 // whatever page the CMS was opened on — Azure must list it as a SPA redirect URI.
 function outlookRedirectUri() { return location.origin + '/auth-redirect.html'; }
-function outlookAccount() { try { return JSON.parse(DB.load('msalAccount', '') || 'null'); } catch (_) { return null; } }
+// The Microsoft account connected on this device — only for the CMS user who connected it,
+// so on a shared computer the next worker never syncs into someone else's Outlook.
+function _outlookOwner() { return String(currentUser?.email || currentUser?.name || '').toLowerCase(); }
+function outlookAccount() {
+  let a = null; try { a = JSON.parse(DB.load('msalAccount', '') || 'null'); } catch (_) {}
+  return a && (!a.cmsUser || a.cmsUser === _outlookOwner()) ? a : null;
+}
+function _saveOutlookAccount(acc) {
+  DB.save('msalAccount', JSON.stringify({ name: acc.name, username: acc.username, homeAccountId: acc.homeAccountId, cmsUser: _outlookOwner() }));
+}
+// Microsoft still remembers this worker's sign-in (e.g. the CMS's own record was cleared):
+// pick it back up instead of showing "Not connected".
+let _outlookRestoreTried = '';
+async function outlookRestore() {
+  const key = _outlookOwner() + '|' + outlookClientId();
+  if (outlookAccount() || !outlookClientId() || !window.msal || _outlookRestoreTried === key) return;
+  _outlookRestoreTried = key;
+  try {
+    const app = _getMsalInstance(); if (!app) return;
+    await app.initialize();
+    const email = String(currentUser?.email || '').toLowerCase();
+    const acc = email && app.getAllAccounts().find(a => String(a.username || '').toLowerCase() === email);
+    if (!acc) return;
+    _saveOutlookAccount(acc);
+    if (currentPage === 'settings' || currentPage === 'calendar') showPage(currentPage);
+  } catch (e) { console.warn('Outlook restore:', e.message); }
+}
 
 function _getMsalInstance() {
   const clientId = outlookClientId();
@@ -11448,8 +11520,9 @@ async function saveMsalClientId() {
   DB.save('outlookLastError', null); _msalInstance = null;
   let shared = false;
   try { if (FSYNC.isReady()) { await FSYNC.setAppConfig('outlook', cfg); shared = true; } } catch (e) { console.warn('Outlook config not shared:', e.message); }
+  _outlookRestoreTried = '';
   audit('Outlook set-up changed', `Client ID ${clientId.slice(0, 8)}…${tenant ? ', tenant ' + tenant : ''}${shared ? '' : ' (this device only)'}`);
-  showToast(shared ? `✓ Saved for all staff${raw.trim() !== clientId ? ' — tidied the pasted ID' : ''}` : '✓ Saved on this device. To share it with all staff, publish the latest firestore.rules.');
+  showToast(shared ? `✓ Saved for all staff${raw.trim() !== clientId ? ' — tidied the pasted ID' : ''}. Now press Connect to Outlook.` : '⚠️ Saved on this device only — Cloud Sync isn\'t connected, so other staff won\'t get it yet.');
   showPage('settings');
 }
 
@@ -11460,7 +11533,7 @@ async function outlookConnect() {
     await msalApp.initialize();
     const result = await msalApp.loginPopup({ scopes: OUTLOOK_SCOPES, prompt: 'select_account', loginHint: currentUser?.email || undefined });
     msalApp.setActiveAccount(result.account);
-    DB.save('msalAccount', JSON.stringify({ name: result.account.name, username: result.account.username, homeAccountId: result.account.homeAccountId }));
+    _saveOutlookAccount(result.account);
     DB.save('msalToken', ''); DB.save('outlookLastError', null);      // tokens stay in Microsoft's own cache only
     audit('Outlook connected', result.account.username || '');
     showToast(`✓ Outlook connected as ${result.account.name || result.account.username}`);
@@ -11599,12 +11672,96 @@ function outlookStatusHTML() {
     <div id="outlook-error" class="alert alert-warning" style="font-size:12px;margin-top:8px;${err && err.text ? '' : 'display:none'}">${sanitize(err && err.text || '')}</div>`;
 }
 function outlookCalendarButtonHTML() {
-  if (!outlookClientId()) return '';
-  return outlookAccount()
+  if (!outlookClientId()) {
+    return currentUser?.role === 'sysmanager'
+      ? `<button class="btn btn-sm btn-outline" id="outlook-setup-btn" onclick="showPage('settings')" title="Outlook sync needs the Azure IDs entered once in Settings">⚙️ Set up Outlook sync</button>`
+      : `<button class="btn btn-sm btn-outline" id="outlook-setup-btn" style="opacity:.75" onclick="showToast('Outlook sync isn\'t set up yet — ask the System Manager to enter the Azure IDs in Settings → Outlook Calendar Sync.')" title="Not set up yet">📅 Outlook not set up</button>`;
+  }
+  setTimeout(outlookRestore, 0);
+  const err = DB.load('outlookLastError', null);
+  const check = `<button class="btn btn-sm btn-outline" id="outlook-check-btn" onclick="outlookCheck()" title="${sanitize(err && err.text ? 'Last problem: ' + err.text : 'Check each step of the Outlook connection')}">${err && err.text ? '⚠️ ' : ''}🩺 Check</button>`;
+  return (outlookAccount()
     ? `<button class="btn btn-sm btn-outline" id="outlook-sync-btn" onclick="outlookSync()" title="Put your CMS appointments into your Outlook calendar">🔄 Sync to Outlook</button>`
-    : `<button class="btn btn-sm btn-outline" id="outlook-connect-btn" onclick="outlookConnect()" title="Connect your Microsoft 365 calendar">🔗 Connect Outlook</button>`;
+    : `<button class="btn btn-sm btn-outline" id="outlook-connect-btn" onclick="outlookConnect()" title="Connect your Microsoft 365 calendar">🔗 Connect Outlook</button>`) + check;
+}
+
+// ---- "Check connection": runs every step and says which one fails, in plain words ----
+async function outlookCheck() {
+  const rows = [];
+  const draw = (busy) => {
+    const el = document.getElementById('outlook-check-body'); if (!el) return;
+    const icon = { ok: '✅', bad: '❌', warn: '⚠️', info: 'ℹ️' };
+    el.innerHTML = rows.map(r => `<div class="ol-chk ol-chk-${r.s}"><span>${icon[r.s]}</span><div><strong>${sanitize(r.label)}</strong>${r.detail ? `<div class="ol-chk-d">${sanitize(r.detail)}</div>` : ''}${r.action || ''}</div></div>`).join('')
+      + (busy ? '<div class="ol-chk ol-chk-info"><span>⏳</span><div>Checking…</div></div>' : '');
+  };
+  const add = (s, label, detail, action) => { rows.push({ s, label, detail, action }); draw(true); };
+  const done = () => { draw(false); const bad = rows.filter(r => r.s === 'bad').length; audit('Outlook connection check', bad ? rows.find(r => r.s === 'bad').label : 'All steps passed'); };
+  showModal('🩺 Outlook connection check', `<style>
+      .ol-chk{display:flex;gap:10px;padding:9px 0;border-bottom:1px solid var(--border);font-size:13px;line-height:1.5}
+      .ol-chk:last-child{border-bottom:none} .ol-chk>span{flex:none;width:20px} .ol-chk-d{color:var(--muted);font-size:12px;margin-top:2px}
+      .ol-chk-bad strong{color:#991b1b} .ol-chk .btn{margin-top:6px}</style>
+    <div id="outlook-check-body"></div>`, null, '620px', true);
+  const sys = currentUser?.role === 'sysmanager';
+
+  // 1. The shared set-up
+  add(FSYNC.isReady() ? 'ok' : 'warn', FSYNC.isReady() ? 'Cloud Sync connected' : 'Cloud Sync is not connected on this device', FSYNC.isReady() ? '' : 'The Outlook set-up is shared through Cloud Sync. Reload the page, or check Settings → Cloud Sync.');
+  const id = outlookClientId();
+  if (!id) {
+    add('bad', 'No Azure Application (client) ID has been entered', sys ? 'Open Settings → Outlook Calendar Sync → Azure set-up, paste the Application (client) ID and Directory (tenant) ID, and Save.' : 'Ask the System Manager to enter the Azure IDs in Settings → Outlook Calendar Sync.',
+      sys ? `<div><button class="btn btn-sm btn-primary" onclick="closeModal();showPage('settings')">Open Settings</button></div>` : '');
+    return done();
+  }
+  add('ok', `Azure app ID: ${id}`, `Signing in through ${outlookTenant()}${outlookOrgConfig.updatedBy ? ' · set by ' + outlookOrgConfig.updatedBy : ''}`);
+  if (_outlookCfgSeen.appConfig || _outlookCfgSeen.staff) add('ok', 'The set-up is shared with all staff');
+  else if (_outlookCfgSeen.appConfigError && _outlookCfgSeen.staffError) add('bad', 'Other staff can\'t read the shared set-up', 'Firebase refused (' + _outlookCfgSeen.staffError + '). Publish the latest firestore.rules in the Firebase console.');
+  else add('warn', 'Not yet confirmed that the set-up is shared', sys ? 'Press Save in Settings → Outlook Calendar Sync once more so it is shared with everyone.' : '');
+
+  // 2. This website
+  if (!window.msal || !msal.PublicClientApplication) { add('bad', 'The Microsoft sign-in component didn\'t load', 'Reload the page with Ctrl+Shift+R. If it still fails, the site needs redeploying.'); return done(); }
+  add('ok', 'Microsoft sign-in component loaded');
+  try {
+    const r = await fetch('/auth-redirect.html', { cache: 'no-store' });
+    const coop = r.headers.get('cross-origin-opener-policy');
+    if (!r.ok) add('bad', 'The sign-in return page is missing from the website', `${outlookRedirectUri()} returned ${r.status}. Redeploy the site from the latest main branch.`);
+    else if (coop && coop !== 'unsafe-none') add('bad', 'The sign-in return page has the wrong security header', `It sends Cross-Origin-Opener-Policy: ${coop}, which cuts the sign-in window off. Redeploy with the latest netlify.toml.`);
+    else add('ok', 'Sign-in return page is in place', outlookRedirectUri());
+  } catch (e) { add('warn', 'Couldn\'t check the sign-in return page', e.message); }
+
+  // 3. This worker's Microsoft connection
+  const acc = outlookAccount();
+  if (!acc) {
+    add('bad', 'You haven\'t connected your Outlook on this computer yet', 'Each worker connects once on each computer they use. Press Connect, sign in with your Worn Gundidj Microsoft account and accept. If a window doesn\'t open, allow pop-ups for this site.',
+      `<div><button class="btn btn-sm btn-primary" style="background:#0078d4;border-color:#0078d4" onclick="closeModal();outlookConnect()">🔗 Connect Outlook</button></div>`);
+    const last = DB.load('outlookLastError', null);
+    if (last && last.text) add('info', 'Last sign-in problem on this computer', last.text);
+    return done();
+  }
+  add('ok', `Connected as ${acc.name || acc.username}`, acc.username || '');
+  const token = await _getOutlookToken();
+  if (!token) { add('bad', 'Microsoft didn\'t give the CMS access to your calendar', (DB.load('outlookLastError', null) || {}).text || 'Press Connect again.', `<div><button class="btn btn-sm btn-outline" onclick="closeModal();outlookConnect()">Reconnect</button></div>`); return done(); }
+  add('ok', 'Microsoft sign-in is working');
+  try {
+    const cal = await _graph(token, 'GET', '/me/calendar?$select=name,canEdit');
+    add(cal.canEdit === false ? 'bad' : 'ok', cal.canEdit === false ? 'Your Outlook calendar is read-only for the CMS' : `Outlook calendar reachable: ${cal.name || 'Calendar'}`, cal.canEdit === false ? 'An Azure administrator should grant Calendars.ReadWrite (API permissions → Grant admin consent).' : '');
+  } catch (e) {
+    add('bad', 'Microsoft refused access to your calendar', e.status === 403 || e.status === 401 ? 'An Azure administrator should add Microsoft Graph → Delegated → Calendars.ReadWrite and press "Grant admin consent", then press Reconnect here.' : e.message,
+      `<div><button class="btn btn-sm btn-outline" onclick="closeModal();outlookConnect()">Reconnect</button></div>`);
+    return done();
+  }
+
+  // 4. What would be synced
+  const mine = outlookCmsEvents();
+  const from = addDaysStr(today(), -OUTLOOK_DAYS_BACK), to = addDaysStr(today(), OUTLOOK_DAYS_AHEAD);
+  const unassigned = (calEvents || []).filter(e => e && e.date >= from && e.date <= to && !String(e.worker || '').trim()).length;
+  if (mine.length) add('ok', `${mine.length} CMS appointment${mine.length !== 1 ? 's are' : ' is'} ready to sync`, 'Appointments where the Worker is ' + (currentUser?.name || 'you') + ', from 30 days ago to 6 months ahead.',
+    `<div><button class="btn btn-sm btn-primary" onclick="closeModal();outlookSync()">🔄 Sync to Outlook now</button></div>`);
+  else add('warn', 'You have no CMS appointments to sync', `Only appointments whose Worker is ${currentUser?.name || 'you'} are synced${unassigned ? ` — ${unassigned} appointment${unassigned !== 1 ? 's have' : ' has'} no worker set` : ''}. Set the Worker on your appointments, then Sync.`);
+  const last = DB.load('outlookLastResult', null);
+  if (last && last.at) add(last.failed ? 'warn' : 'info', `Last sync ${fmtdt(last.at)}`, `${last.created} added, ${last.updated} updated, ${last.removed} removed${last.failed ? `, ${last.failed} failed: ${last.error || ''}` : ''}`);
+  done();
 }
 function outlookSettingsCardHTML() {
+  if (outlookClientId()) setTimeout(outlookRestore, 0);
   const sys = currentUser?.role === 'sysmanager', acc = outlookAccount(), id = outlookClientId();
   const shownId = outlookOrgConfig.clientId || DB.load('msalClientId', '');
   return `<div class="card" style="border-left:4px solid #0078d4">
@@ -11614,6 +11771,7 @@ function outlookSettingsCardHTML() {
       <div style="display:flex;gap:8px">
         ${!id ? '' : acc ? `<button class="btn btn-sm btn-outline" onclick="outlookSync()">🔄 Sync now</button><button class="btn btn-sm btn-danger" onclick="outlookDisconnect()">Disconnect</button>`
                          : `<button class="btn btn-sm btn-primary" onclick="outlookConnect()" style="background:#0078d4;border-color:#0078d4">Connect to Outlook</button>`}
+        <button class="btn btn-sm btn-outline" id="outlook-check-settings" onclick="outlookCheck()" title="Check each step of the Outlook connection">🩺 Check connection</button>
       </div>
     </div>
     <p style="font-size:13px;color:var(--muted);margin-bottom:12px">Puts each worker's CMS appointments into their own Outlook calendar — 30 days back to 6 months ahead. Syncing again updates them (no duplicates) and removes ones deleted in the CMS. Events are marked Private and show only the client's first name and initial. Staff connect from the <strong>Calendar</strong> page; the set-up below is done once.</p>
@@ -15081,7 +15239,7 @@ function corePlusRenderPreview() {
       ${p.groups.map(g => `<tr><td>${sanitize(g.client.fullName)} ${g.client.status === 'closed' ? '<span class="tag tag-closed">closed</span>' : ''}</td><td>${[...g.how].map(sanitize).join(', ')}</td><td>${g.rows.length}</td><td>${g.minutes} <span style="color:var(--muted)">(${_hm(g.minutes)})</span></td>
         <td>${Object.entries(g.programs).map(([k, n]) => `<span class="tag" style="background:${k ? '#d1fae5' : '#f3f4f6'};color:${k ? '#065f46' : '#6b7280'}">${CP_PROGRAM_LABEL[k] || sanitize(k)} ${n}</span>`).join(' ')}</td></tr>`).join('')}
     </tbody></table></div>
-    <p style="font-size:11px;color:var(--muted);margin:6px 0 10px">Program comes from the Appointment Type. Types that don't name a program (e.g. "Client Intake") are logged as <em>Not program-specific</em> and do not count toward episode-of-care targets.</p>` : ''}
+    <p style="font-size:11px;color:var(--muted);margin:6px 0 10px">Program comes from the Appointment Type. Types that don't name a program (e.g. "Client Intake") are logged as <em>Not program-specific</em>, which counts toward SEWB episodes of care.</p>` : ''}
     ${p.skipped.length ? `<details style="margin-bottom:10px"><summary style="font-size:12px;cursor:pointer">Skipped (${p.skipped.length}): ${Object.entries(reasons).map(([k, n]) => sanitize(k) + ' ' + n).join(' · ')}</summary>
       <table style="font-size:12px;margin-top:6px"><tr><th>Row</th><th>Name</th><th>Date</th><th>Why</th></tr>
       ${p.skipped.map(s => `<tr><td>${s.line}</td><td>${sanitize(s.name)}</td><td>${sanitize(s.date)}</td><td>${sanitize(s.reason)}</td></tr>`).join('')}</table></details>` : ''}
