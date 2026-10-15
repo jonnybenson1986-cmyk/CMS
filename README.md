@@ -104,8 +104,17 @@ name and initial only, and carry no notes.
   `https://<cms-address>/auth-redirect.html`; API permissions → Microsoft
   Graph → delegated `Calendars.ReadWrite` → Grant admin consent; paste the
   Application (client) ID and Directory (tenant) ID in Settings. They are
-  shared with all staff via `appConfig/outlook` (publish `firestore.rules`).
+  shared with all staff via `appConfig/outlook`, mirrored to
+  `staff/outlookSetup` (readable under the rules already published), so staff
+  get them even before the newer rules are published.
   Staff then use **Connect Outlook / Sync to Outlook** on the Calendar page.
+* Each worker connects once per computer. The connection belongs to the CMS
+  user who made it — on a shared computer the next worker is never shown (or
+  synced into) someone else's Outlook.
+* **🩺 Check** (Calendar page and Settings) runs every step — set-up entered and
+  shared, sign-in component, return page and its header, this worker's
+  connection, Microsoft access, calendar permission, appointments to sync — and
+  says in plain words which one fails and what to do.
 
 ## Forgotten passwords
 
@@ -156,10 +165,13 @@ for genuine timestamps (audit entries, `created`).
 
 **Episodes of care.** Only activity *explicitly* recorded against a program
 counts toward the funding target: a case note whose Session Type is that
-program, or time logged against it. Notes left as `GENERAL` and unlabelled time
-are recorded but never counted, and First Peoples Home Ownership is excluded.
-These figures are used for funding acquittal — never infer a program from
-activity type or contact mode.
+program, or time logged against it. Notes left as `GENERAL` (or blank) and
+time left as "Not program-specific" count **once, toward SEWB** — the umbrella
+program — never toward AOD or Justice as well (that would count one contact up
+to three times), and not for NDIS- or Home Ownership-only clients. General time
+on a day that already has a counted contact for the client is the same contact.
+First Peoples Home Ownership is excluded. These figures are used for funding
+acquittal — never infer AOD, Justice etc. from activity type or contact mode.
 
 **Program structure.** SEWB is the umbrella program; AOD, Justice and Cultural
 Strengthening sit under it. NDIS/Disability and First Peoples Home Ownership are
