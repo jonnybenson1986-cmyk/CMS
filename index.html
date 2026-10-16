@@ -741,13 +741,13 @@ const FSYNC = (() => {
     _listeners.push(col('staff').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; const l=doc.exists?doc.data().list:null; if(Array.isArray(l)&&l.length){ _mergeStaffDirectory(l); if(currentPage==='settings')setTimeout(()=>showPage('settings'),50); } }, e=>{ console.warn('staff listener:',e.message); _noteStaffSync(false,e); }));
     _listeners.push(col('policies').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; const pl=doc.exists?doc.data().list:null; if(pl){ policies=pl; DB.save('policies',policies); if(currentPage==='policies')setTimeout(()=>showPage('policies'),50); } }, e=>console.warn('policies listener:',e.message)));
     // Automatic texts: the outbox (results written back by the Cloud Function) and the on/off switch.
-    _listeners.push(col('smsOutbox').onSnapshot(snap=>{ smsOutbox=snap.docs.map(d=>Object.assign({id:d.id},d.data())); DB.save('smsOutbox',smsOutbox); try{ _smsRefresh(); }catch(_){} }, e=>console.warn('smsOutbox listener:',e.message)));
+    _listeners.push(col('smsOutbox').onSnapshot(snap=>{ smsOutbox=snap.docs.map(d=>Object.assign({id:d.id},d.data())); DB.save('smsOutbox',smsOutbox); try{ _smsRefresh(); }catch(_){} }, e=>{ window._smsListenErr=e.code||e.message; console.warn('smsOutbox listener:',e.message); }));
     // Outlook set-up: appConfig/outlook, mirrored to staff/outlookSetup (readable under the rules
     // already published, so staff get it before the newer appConfig rules are). Newest copy wins.
     const _outlookCfgIn=(where)=>doc=>{ _outlookCfgSeen[where]=true; if(doc.exists) _applyOutlookConfig(doc.data()||{}); };
     _listeners.push(col('appConfig').doc('outlook').onSnapshot(_outlookCfgIn('appConfig'), e=>{ _outlookCfgSeen.appConfigError=e.code||e.message; console.warn('appConfig listener:',e.message); }));
     _listeners.push(col('staff').doc('outlookSetup').onSnapshot(_outlookCfgIn('staff'), e=>{ _outlookCfgSeen.staffError=e.code||e.message; console.warn('outlook set-up listener:',e.message); }));
-    _listeners.push(col('smsConfig').doc('settings').onSnapshot(doc=>{ smsConfig=doc.exists?doc.data():{}; DB.save('smsConfig',smsConfig); try{ _smsRefresh(); }catch(_){} }, e=>console.warn('smsConfig listener:',e.message)));
+    _listeners.push(col('smsConfig').doc('settings').onSnapshot(doc=>{ smsConfig=doc.exists?doc.data():{}; DB.save('smsConfig',smsConfig); try{ _smsRefresh(); }catch(_){} }, e=>{ window._smsListenErr=e.code||e.message; console.warn('smsConfig listener:',e.message); }));
     _listeners.push(col('walkins').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; const l=doc.exists?doc.data().list:null; if(l){ walkins=l; DB.save('walkins',walkins); if(currentPage==='walkins')setTimeout(()=>showPage('walkins'),50); } }, e=>console.warn('walkins listener:',e.message)));
     _listeners.push(col('calevents').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; const l=doc.exists?doc.data().list:null; if(l){ calEvents=l; DB.save('calevents',calEvents); if(currentPage==='calendar')setTimeout(()=>showPage('calendar'),50); } }, e=>console.warn('calevents listener:',e.message)));
     _listeners.push(col('fpho').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; if(!doc.exists)return; const d=doc.data();
@@ -1097,7 +1097,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v84';
+const APP_VERSION = 'v85';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -3213,7 +3213,7 @@ function saveIntake(id, quiet=false) {
 // the CMS has no SMS gateway. Each send is recorded on the file and audited.
 // To update the handbook, replace the PDF at the same path — links already
 // sent keep working.
-const HANDBOOK = { title: 'SEWB Participant Handbook', path: 'handbook/SEWB-Participant-Handbook.pdf', sizeMB: 14 };
+const HANDBOOK = { title: 'SEWB Participant Handbook', path: 'handbook/SEWB-Participant-Handbook.pdf', sizeMB: 4.5 };
 const ORG_PHONE = '(03) 5561 5315';
 // Hand an sms:/mailto: link to the device's own messaging or email app.
 function openExternalLink(url) { window.location.href = url; }
@@ -3280,12 +3280,62 @@ function handbookAfterIntake(c) {
   const st = handbookStatus(c), mob = auMobile(c.phone);
   if (!st.ready || st.failed) return false;
   if (handbookSends(c).some(h => h.toFull === mob)) return false;             // already sent to this number
-  if (smsAutoOn()) { queueHandbookSms(c, 'intake'); return true; }             // Firebase sends it — no prompt
+  if (smsAutoOn()) {                                                          // Firebase sends it — no prompt
+    const since = new Date(Date.now() - 5000).toISOString();
+    queueHandbookSms(c, 'intake').then(r => {
+      if (r) _watchIntakeHandbookSms(c.id, since);
+      else if (r === null) _handbookFallback(c.id, 'The automatic text couldn\'t be requested. Send it from your phone now so the client has it, or give it in person.');
+    });
+    return true;
+  }
   if (c.handbookPrompted === mob) return false;                               // "not now" for this number
   setTimeout(() => openHandbookSendModal(c.id, 'intake'), 250);
   return true;
 }
+// After an intake, follow the automatic text: confirm when it has gone, and if
+// the text service hasn't sent it within a minute (not deployed, provider down)
+// or the provider refused it, hand straight back to the worker — usually still
+// with the client — to send it from their phone or give it in person. Either
+// way the client leaves intake with the handbook. If the service sends it later
+// anyway it skips numbers that already have it, so the client isn't texted twice.
+let HB_WATCH_MS = 60 * 1000;     // how long to wait for the text service before handing back to the worker
+function _watchIntakeHandbookSms(clientId, since) {
+  const t0 = Date.now();
+  const tick = () => {
+    const c = clients.find(x => x.id === clientId); if (!c) return;
+    const mob = auMobile(c.phone);
+    const req = outboxFor(clientId).filter(o => String(o.requestedAt || '') >= since).pop();
+    if (req && req.status === 'sent') { showToast(`✓ Handbook texted to ${c.fullName}${req.to ? ' (' + req.to + ')' : ''}`); return; }
+    if ((c.handbookSent || []).some(h => h && h.toFull === mob)) return;          // the worker sent it meanwhile
+    if (req && (req.status === 'failed' || req.status === 'skipped')) {
+      if (/already sent/i.test(req.reason || '')) return;
+      return _handbookFallback(clientId, `The automatic text wasn't sent: ${req.reason || req.status}. Send it from your phone now, or give the handbook in person.`);
+    }
+    if (Date.now() - t0 >= HB_WATCH_MS) return _handbookFallback(clientId, 'The automatic text hasn\'t gone after a minute — the text service isn\'t responding (System Manager: Settings → Automatic texts). Send it from your phone now so the client has it, or give it in person.');
+    setTimeout(tick, 3000);
+  };
+  setTimeout(tick, 3000);
+}
+// A banner that stays on screen (never replaces an open window, so nothing the
+// worker is typing is lost) until they act on it.
+function _handbookFallback(clientId, notice) {
+  const c = clients.find(x => x.id === clientId);
+  if (!c || handbookSends(c).some(h => h.toFull === auMobile(c.phone))) return;
+  document.getElementById('hb-fallback')?.remove();
+  const el = document.createElement('div');
+  el.id = 'hb-fallback'; el.setAttribute('role', 'alert');
+  el.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:10050;max-width:min(420px,calc(100vw - 32px));background:#fff7ed;border:1px solid #fdba74;border-left:5px solid #ea580c;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.18);padding:12px 14px;font-size:13px;line-height:1.45;color:#7c2d12';
+  el.innerHTML = `<div style="font-weight:700;margin-bottom:4px">📘 Handbook not sent to ${sanitize(c.fullName)} yet</div>
+    <div style="margin-bottom:10px">${sanitize(notice)}</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-sm btn-primary" id="hb-fallback-send">💬 Send it now</button>
+      <button class="btn btn-sm btn-outline" id="hb-fallback-close">Later</button></div>`;
+  document.body.appendChild(el);
+  el.querySelector('#hb-fallback-send').onclick = () => { el.remove(); openHandbookSendModal(clientId, 'intake', notice); };
+  el.querySelector('#hb-fallback-close').onclick = () => el.remove();
+}
 // Ask Firebase to send it. The function re-checks consent, number and duplicates.
+// Returns true when queued, false when not needed/allowed, null when the request failed.
 async function queueHandbookSms(c, ctx) {
   const mob = auMobile(c.phone);
   if (!smsAutoOn()) { showToast('Automatic texts are off — use Send text instead'); return false; }
@@ -3297,26 +3347,27 @@ async function queueHandbookSms(c, ctx) {
     audit('Handbook text requested (automatic)', `${c.fullName} — to ${_maskPhone(mob)}`, c.id);
     if (ctx !== 'bulk') showToast('📤 Handbook text queued — Worn Gundidj will send it automatically');
     return true;
-  } catch (e) { console.warn('queueSms failed:', e); showToast('⚠️ Could not queue the automatic text: ' + (e.message || e)); return false; }
+  } catch (e) { console.warn('queueSms failed:', e); showToast('⚠️ Could not queue the automatic text: ' + (e.message || e)); return null; }
 }
 // ctx says where the worker came from, so they land back there afterwards:
 // 'intake' (offered after saving an intake), 'profile:<tab>' (a button on the
 // file) or 'sendout' (the Reports send-out list).
-function openHandbookSendModal(clientId, ctx) {
+function openHandbookSendModal(clientId, ctx, notice) {
   const c = clients.find(x => x.id === clientId); if (!c) return;
   if (ctx === true) ctx = 'intake'; if (!ctx) ctx = 'profile:intake';
   const mob = auMobile(c.phone), safe = c.ifSafeContact === 'Yes';
   const q = `'${c.id}','CH','${ctx}'`;
   const btn = (ch, label, cls, dis, id) => `<button class="btn ${cls}"${id ? ` id="${id}"` : ''} ${dis ? 'disabled' : ''} onclick="sendHandbook(${q.replace('CH', ch)})">${label}</button>`;
   const html = `
+    ${notice ? `<div class="alert alert-warning" id="hb-notice" style="font-size:12px">${sanitize(notice)}</div>` : ''}
     <p style="font-size:13px;margin-bottom:10px">${ctx === 'intake' ? 'Intake saved with a mobile number. ' : ''}Send <strong>${sanitize(c.fullName)}</strong> the <strong>${HANDBOOK.title}</strong>?</p>
     ${!safe ? `<div class="alert alert-warning" style="font-size:12px">"Safe to leave calls/texts?" on the intake is <strong>${sanitize(c.ifSafeContact || 'not answered')}</strong>. Only text the client if they've agreed to texts.</div>` : ''}
     <div class="form-group"><label>Text to</label><input id="hb-to" value="${sanitize(mob || '')}" placeholder="Mobile number"></div>
     <div class="form-group"><label>Message</label><textarea id="hb-msg" style="min-height:120px;font-size:13px">${sanitize(handbookMessage(c))}</textarea>
       <div style="font-size:11px;color:var(--muted);margin-top:3px">A text can't carry the PDF itself, so it carries a link. The handbook is about ${HANDBOOK.sizeMB} MB — suggest opening it on Wi-Fi.</div></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
-      ${smsAutoOn() ? `<button class="btn btn-primary" id="hb-auto" ${safe && mob ? '' : 'disabled'} onclick="handbookAutoFromModal('${c.id}','${ctx}')">📤 Send automatically</button>` : ''}
-      ${btn('sms', smsAutoOn() ? '💬 Send from my phone' : '💬 Send text', smsAutoOn() ? 'btn-outline' : 'btn-primary', !(safe && mob), 'hb-sms')}
+      ${smsAutoOn() && !notice ? `<button class="btn btn-primary" id="hb-auto" ${safe && mob ? '' : 'disabled'} onclick="handbookAutoFromModal('${c.id}','${ctx}')">📤 Send automatically</button>` : ''}
+      ${btn('sms', smsAutoOn() ? '💬 Send from my phone' : '💬 Send text', smsAutoOn() && !notice ? 'btn-outline' : 'btn-primary', !(safe && mob), 'hb-sms')}
       ${btn('copy', '📋 Copy message', 'btn-outline', !safe)}
       ${c.email ? btn('email', '✉️ Email instead', 'btn-outline', false) : ''}
       ${btn('in person', '🗂️ Given in person (printed)', 'btn-outline', false)}
@@ -3392,7 +3443,8 @@ async function handbookSendAllAuto() {
 function smsSettingsStatusHTML() {
   const all = smsOutbox || [], by = k => all.filter(o => (o.status || 'queued') === k).length;
   const stuck = all.filter(smsStuck).length, last = all.slice().sort((a, b) => String(b.requestedAt).localeCompare(String(a.requestedAt)))[0];
-  return `<div style="font-size:12px;color:var(--muted)">Sent: <strong>${by('sent')}</strong> · not sent: <strong>${by('skipped') + by('failed')}</strong> · waiting: <strong>${all.filter(smsPending).length}</strong>${last ? ` · last request ${fmtdt(last.requestedAt)}${last.status ? ' — ' + sanitize(last.status) + (last.reason ? ': ' + sanitize(last.reason) : '') : ''}` : ''}</div>
+  const denied = window._smsListenErr ? `<div class="alert alert-warning" style="font-size:12px;margin-bottom:8px">Firebase refused access to the automatic-text settings (${sanitize(window._smsListenErr)}). Publish the latest <strong>firestore.rules</strong> in the Firebase console (SMS-SETUP.md), then reload. Until then, intakes ask the worker to send the text from their phone.</div>` : '';
+  return denied + `<div style="font-size:12px;color:var(--muted)">Sent: <strong>${by('sent')}</strong> · not sent: <strong>${by('skipped') + by('failed')}</strong> · waiting: <strong>${all.filter(smsPending).length}</strong>${last ? ` · last request ${fmtdt(last.requestedAt)}${last.status ? ' — ' + sanitize(last.status) + (last.reason ? ': ' + sanitize(last.reason) : '') : ''}` : ''}</div>
     ${stuck ? `<div class="alert alert-warning" style="font-size:12px;margin-top:8px">${stuck} request${stuck !== 1 ? 's have' : ' has'} waited more than 3 minutes. The text service (Cloud Function) is probably not deployed or not set up — see SMS-SETUP.md. Until then, turn this off and send from your phone.</div>` : ''}`;
 }
 function smsSettingsCardHTML() {
