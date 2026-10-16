@@ -247,6 +247,18 @@ the result back. It is off until a System Manager turns on Settings →
 Automatic texts, and needs the setup in `SMS-SETUP.md` first. Deploy only
 `functions:sms` — never plain `--only functions`.
 
+When it is on, saving an intake sends the text with no prompt, and the CMS
+follows it: the worker is told when it has gone. If the function hasn't sent
+it within a minute (not deployed, provider down), the provider refuses it, or
+Firebase refuses the request (rules not published), a banner hands it back to
+the worker — "Send it now" opens the text ready to send from their phone — so
+the client leaves intake with the handbook either way. The banner never
+replaces an open window. If the function sends it later anyway, it skips a
+number that already has it.
+
+The current handbook (October 2026) is a 12-page scan with no text layer;
+the PDF is titled "SEWB Participant Handbook" so phones show the name.
+
 **Client feedback.** Four plain-language questions, due after intake and at
 mid-episode, and asked at exit through the review. The worker sends them from
 their own email or phone and records the reply on the file. Messages carry the
