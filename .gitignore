@@ -36,3 +36,5 @@ generate-icons.js
 # SMS function secrets and local params
 .secret.local
 functions-sms/.env*
+tests/rules/node_modules
+tests/rules/*.log

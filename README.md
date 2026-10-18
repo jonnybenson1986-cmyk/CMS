@@ -116,6 +116,87 @@ name and initial only, and carry no notes.
   connection, Microsoft access, calendar permission, appointments to sync — and
   says in plain words which one fails and what to do.
 
+## 🔗 Merging duplicate client files
+
+Managers see **possible duplicate client files** at the top of the Clients page
+(same REF number, a file listed twice, or the same name with the same — or a
+missing — date of birth), or use a file's **Actions → Merge with another file**.
+
+* The file with the most information (details plus case notes, time and
+  appointments) is chosen to keep — you can pick the other one.
+* The preview shows exactly what happens: everything linked to the other file
+  (case notes, time entries, appointments, tasks, walk-ins, intake forms, the
+  referral link, automatic handbook texts) **moves** to the kept file; blank
+  details are **filled in**; lists (services, goals, attachments…) are
+  **combined**; the earliest start date, the higher risk level, restricted
+  access and an open file win automatically; any other real difference (e.g.
+  two phone numbers) is yours to choose.
+* The other file is then removed for everyone (a tracked delete) and the kept
+  file records `mergedFrom`. Audited. "Not the same person" stops a pair being
+  suggested again.
+* Cause of the duplicates: converting the same referral twice made a second
+  file with the same REF number. Converting again now opens the existing file.
+
+## 📲 Client intake form by link
+
+A worker can send a client a link to fill in their own SEWB intake on their
+phone or computer: client file → **Intake** tab → **📲 Intake form by link**.
+
+* What's already on file is **filled in** for them. The questions are in
+  `intake/intake-fields.js`, shared by the client page (`intake.html`, served at
+  `/i`) and the CMS. Self-harm, family violence, court orders and safety at home
+  are deliberately **not** on it — workers ask those in person.
+* Send it as an automatic text (one SMS), from the worker's own phone, by
+  email, or copy the link. The link works for 3, 7 or 14 days and can be
+  cancelled at any time.
+* The client's answers **save as they go** — they can stop and come back with
+  the same link. Before sending they check every answer and tick a declaration.
+* When it comes back: a toast, a card on the **Dashboard**, a banner on the
+  Intake tab and a line under *Needs attention*. **Review** shows each answer
+  next to what's on file; tick the ones to add (blank answers are unticked; services
+  are only ever added). Applying opens the Intake tab to check with the client
+  and Save. Audited by count only.
+* **Security** (`intakeForms` / `intakeLinks` in `firestore.rules`): the link
+  carries a random 128-bit id after `#` (never sent to the web server). When a
+  date of birth is on file the form's id is SHA-256(link + ":" + DOB), so the
+  link alone doesn't open it. A signed-out visitor can only open a form whose id
+  they know — never list — only before it expires, can change only the intake
+  answers, and can send it once. Tested against the Firestore emulator
+  (`tests/rules`).
+
+## Publishing and texts
+
+* `.github/workflows/firebase-deploy.yml` tests the rules (both files) and the
+  text service on every pull request, and **publishes `firestore.rules` when
+  merged to main**. Run it by hand to also deploy the SMS text service. Set-up,
+  costs and go-live checklist: **DEPLOY-FIREBASE.md**.
+* Texts are plain characters within 160 = **one SMS** each (`/hb` and `/i` short
+  links in netlify.toml). The text service stops at **$10 a month**
+  (`SMS_MONTHLY_BUDGET`) and hands texts to workers' phones until the 1st;
+  Settings → Automatic texts shows the month's spend.
+
+## 💡 Ideas button
+
+A light-globe button floats at the bottom right of every page (above the
+phone menu bar; behind open windows, so it never covers a Save button). Any
+staff member can send the System Manager an idea for improving the CMS — a
+category, the idea (up to 2,000 characters, voice typing works) and,
+automatically, the screen they were on. It warns, without blocking, if an idea
+names a client or carries a phone number or email address.
+
+* The System Manager's globe shows how many ideas are **New**; it opens to the
+  **Inbox** (filters: Open / New / Done & not now / All), where each idea gets a
+  status — Thinking about it, Planned, Done, Not now — and an optional reply.
+* Staff see their ideas, status and any reply under **My ideas**.
+* Stored in `ideas` (publish `firestore.rules`): anyone signed in can add one,
+  only as themselves and only as New; updates can change only the review
+  fields; nothing is ever deleted. Strict rules: only the System Manager reads
+  them all and reviews; others read only their own.
+* Until the rules are published, an idea is delivered to the System Manager
+  as a chat message instead; if nothing can be reached it waits on the device
+  and sends itself later. Sending and reviewing are audited (category and
+  status only, never the idea text).
+
 ## Forgotten passwords
 
 The sign-in page has a **Forgot password?** link. Firebase emails the person a

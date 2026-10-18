@@ -76,3 +76,32 @@
   for = "/index.html"
   [headers.values]
     Cross-Origin-Opener-Policy = "same-origin-allow-popups"
+
+# Short links used in texts — they keep every text to ONE SMS (160 characters).
+#   /hb → the SEWB Participant Handbook (HANDBOOK_URL on the text service)
+#   /i  → a client's own intake form; the link id follows "#", so it is never
+#         sent to this server or written to its logs.
+[[redirects]]
+  from = "/hb"
+  to = "/handbook/SEWB-Participant-Handbook.pdf"
+  status = 200
+
+[[redirects]]
+  from = "/i"
+  to = "/intake.html"
+  status = 200
+
+# The client intake form: never indexed, never cached, never leaks a referrer.
+[[headers]]
+  for = "/intake.html"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+    Referrer-Policy = "no-referrer"
+    Cache-Control = "no-cache"
+
+[[headers]]
+  for = "/i"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+    Referrer-Policy = "no-referrer"
+    Cache-Control = "no-cache"

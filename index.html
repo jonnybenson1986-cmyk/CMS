@@ -116,6 +116,39 @@
     border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 -4px 14px rgba(0,0,0,0.08); }
   .save-bar .save-bar-note { font-size: 12px; color: var(--muted); margin-right: auto; }
   @media print { .save-bar { display: none !important; } }
+
+  /* 💡 Ideas — floating light-globe button, bottom right. Sits below open
+     windows (z 200) so it never covers a Save button; pop-up messages and the
+     sync badge sit clear of it (--fab-clear). */
+  :root { --fab-clear: 92px; }
+  #idea-fab { position: fixed; right: 20px; bottom: calc(20px + env(safe-area-inset-bottom)); z-index: 150;
+    width: 58px; height: 58px; border-radius: 50%; border: none; cursor: pointer; padding: 0;
+    background: radial-gradient(circle at 50% 38%, #fffbeb 0%, #fde68a 38%, #f59e0b 100%);
+    box-shadow: 0 0 0 3px rgba(255,255,255,.9), 0 6px 18px rgba(180,83,9,.35), 0 0 22px rgba(251,191,36,.55);
+    display: flex; align-items: center; justify-content: center; transition: transform .15s ease, box-shadow .15s ease;
+    animation: ideaGlow 3.2s ease-in-out infinite; }
+  #idea-fab:hover, #idea-fab:focus-visible { transform: translateY(-2px) scale(1.06); outline: none;
+    box-shadow: 0 0 0 3px #fff, 0 8px 22px rgba(180,83,9,.45), 0 0 34px rgba(251,191,36,.85); }
+  #idea-fab:focus-visible { box-shadow: 0 0 0 3px #fff, 0 0 0 6px var(--primary), 0 0 30px rgba(251,191,36,.8); }
+  #idea-fab svg { width: 34px; height: 34px; filter: drop-shadow(0 1px 1px rgba(120,53,15,.25)); }
+  #idea-fab .idea-fab-badge { position: absolute; top: -4px; right: -4px; min-width: 22px; height: 22px; padding: 0 6px;
+    border-radius: 11px; background: #dc2626; color: #fff; font: 700 12px/22px system-ui, sans-serif; text-align: center;
+    box-shadow: 0 0 0 2px #fff; }
+  #idea-fab .idea-fab-tip { position: absolute; right: 68px; top: 50%; transform: translateY(-50%); white-space: nowrap;
+    background: #1f2937; color: #fff; font-size: 12px; font-weight: 600; padding: 6px 10px; border-radius: 6px;
+    opacity: 0; pointer-events: none; transition: opacity .15s; }
+  #idea-fab:hover .idea-fab-tip, #idea-fab:focus-visible .idea-fab-tip { opacity: 1; }
+  @keyframes ideaGlow { 0%,100% { box-shadow: 0 0 0 3px rgba(255,255,255,.9), 0 6px 18px rgba(180,83,9,.35), 0 0 16px rgba(251,191,36,.45); }
+                        50%     { box-shadow: 0 0 0 3px rgba(255,255,255,.9), 0 6px 18px rgba(180,83,9,.35), 0 0 30px rgba(251,191,36,.8); } }
+  @media (prefers-reduced-motion: reduce) { #idea-fab { animation: none; transition: none; } }
+  @media print { #idea-fab { display: none !important; } }
+  body.has-idea-fab .save-bar { padding-right: 88px; }
+  .idea-chip { display:inline-block; font-size:11px; font-weight:700; padding:2px 9px; border-radius:10px; }
+  .idea-card { border:1px solid var(--border); border-radius:10px; padding:12px 14px; margin-bottom:10px; background:#fff; }
+  .idea-card.is-new { border-left:4px solid #f59e0b; }
+  .idea-card .idea-text { font-size:14px; white-space:pre-wrap; word-break:break-word; margin:6px 0 8px; }
+  .idea-card .idea-meta { font-size:11px; color:var(--muted); }
+  .idea-tabs { display:flex; gap:6px; margin-bottom:14px; flex-wrap:wrap; }
   .btn-accent { background: var(--accent); color: #fff; }
   .btn-accent:hover { background: var(--accent2); }
   .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text); }
@@ -337,6 +370,10 @@
 
     /* Bottom navigation bar */
     .save-bar { bottom: calc(66px + env(safe-area-inset-bottom)); }
+    :root { --fab-clear: 144px; }
+    #idea-fab { bottom: calc(72px + env(safe-area-inset-bottom)); right: 14px; width: 52px; height: 52px; }
+    #idea-fab svg { width: 30px; height: 30px; }
+    #idea-fab .idea-fab-tip { display: none; }
     #mob-bottomnav {
       display: flex; position: fixed; bottom: 0; left: 0; right: 0; height: 60px;
       background: var(--primary); z-index: 97;
@@ -497,6 +534,7 @@
 <script src="vendor/firebase/firebase-app-check-compat.js"></script>
 <!-- Microsoft sign-in (MSAL 4.30, LTS) — self-hosted like Firebase: Microsoft retired the alcdn.msauth.net CDN (every version now 404s). -->
 <script src="vendor/msal/msal-browser.min.js"></script>
+<script src="intake/intake-fields.js"></script>
 <script>
 // ===== DATA LAYER =====
 const DB = {
@@ -741,6 +779,17 @@ const FSYNC = (() => {
     _listeners.push(col('staff').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; const l=doc.exists?doc.data().list:null; if(Array.isArray(l)&&l.length){ _mergeStaffDirectory(l); if(currentPage==='settings')setTimeout(()=>showPage('settings'),50); } }, e=>{ console.warn('staff listener:',e.message); _noteStaffSync(false,e); }));
     _listeners.push(col('policies').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; const pl=doc.exists?doc.data().list:null; if(pl){ policies=pl; DB.save('policies',policies); if(currentPage==='policies')setTimeout(()=>showPage('policies'),50); } }, e=>console.warn('policies listener:',e.message)));
     // Automatic texts: the outbox (results written back by the Cloud Function) and the on/off switch.
+    // 💡 Ideas: the System Manager reads them all; with the strict rules anyone
+    // else may read only their own, so a refused full read falls back to that.
+    const _ideasIn = snap => { ideas = snap.docs.map(d=>Object.assign({id:d.id}, d.data())); DB.save('ideas', ideas); window._ideasErr = ''; try{ _ideasRefresh(); }catch(_){} };
+    _listeners.push(col('ideas').onSnapshot(_ideasIn, e=>{
+      const u = firebase.auth().currentUser;
+      if (e.code==='permission-denied' && u) _listeners.push(col('ideas').where('submittedBy','==',u.uid).onSnapshot(_ideasIn, e2=>{ window._ideasErr=e2.code||e2.message; console.warn('ideas listener:', e2.message); }));
+      else { window._ideasErr=e.code||e.message; console.warn('ideas listener:', e.message); }
+    }));
+    // 📲 Intake forms sent by link: staff see all of them (the rules keep signed-out visitors to one form by id).
+    _listeners.push(col('intakeForms').onSnapshot(snap=>{ intakeForms = snap.docs.map(d=>{ const x=d.data(); const e=x.expiresAt; return Object.assign({id:d.id}, x, { expiresAt: e && e.toDate ? e.toDate().toISOString() : e }); }); DB.save('intakeForms', intakeForms); try{ _intakeFormsRefresh(); }catch(_){} }, e=>console.warn('intakeForms listener:', e.message)));
+    _listeners.push(col('smsUsage').doc(smsBudgetMonth()).onSnapshot(doc=>{ smsUsageMonth = doc.exists ? doc.data() : null; DB.save('smsUsageMonth', smsUsageMonth); try{ _smsRefresh(); }catch(_){} }, e=>console.warn('smsUsage listener:', e.message)));
     _listeners.push(col('smsOutbox').onSnapshot(snap=>{ smsOutbox=snap.docs.map(d=>Object.assign({id:d.id},d.data())); DB.save('smsOutbox',smsOutbox); try{ _smsRefresh(); }catch(_){} }, e=>{ window._smsListenErr=e.code||e.message; console.warn('smsOutbox listener:',e.message); }));
     // Outlook set-up: appConfig/outlook, mirrored to staff/outlookSetup (readable under the rules
     // already published, so staff get it before the newer appConfig rules are). Newest copy wins.
@@ -982,7 +1031,7 @@ const FSYNC = (() => {
 
   function _showSyncBadge(ok, err) {
     let b=document.getElementById('sync-badge');
-    if (!b) { b=document.createElement('div'); b.id='sync-badge'; b.style.cssText='position:fixed;bottom:16px;right:16px;padding:6px 14px;border-radius:20px;font-size:12px;font-weight:700;z-index:9999;box-shadow:0 2px 8px rgba(0,0,0,0.15);transition:opacity 0.5s'; document.body.appendChild(b); }
+    if (!b) { b=document.createElement('div'); b.id='sync-badge'; b.style.cssText='position:fixed;bottom:calc(var(--fab-clear,92px) - 72px);right:92px;padding:6px 14px;border-radius:20px;font-size:12px;font-weight:700;z-index:9999;box-shadow:0 2px 8px rgba(0,0,0,0.15);transition:opacity 0.5s'; document.body.appendChild(b); }
     if (ok) { b.style.background='#d1fae5';b.style.color='#065f46';b.textContent='☁️ Cloud sync active';setTimeout(()=>{b.style.opacity='0';setTimeout(()=>b.remove(),600);},3000); }
     else { b.style.background='#fee2e2';b.style.color='#991b1b';b.title=err||'';b.textContent='☁️ Sync offline'; }
   }
@@ -1050,13 +1099,39 @@ const FSYNC = (() => {
 
   // Ask the Cloud Function to text the handbook. Only the client id is sent —
   // the function reads the number from the client's file and writes the message.
-  async function queueSms(clientId) {
+  // An idea always goes in as the signed-in person, status "new" (the rules check both).
+  async function submitIdea(d) {
     if(!db) throw new Error('Not connected to the cloud');
     const u = firebase.auth().currentUser; if(!u) throw new Error('Not signed in');
-    const ref = await col('smsOutbox').add({ kind:'handbook', clientId:String(clientId), requestedBy:u.uid,
-      requestedByName:(typeof currentUser!=='undefined'&&currentUser&&currentUser.name)||'', requestedAt:new Date().toISOString() });
+    const doc = { text:String(d.text||''), category:String(d.category||''), page:String(d.page||''), submittedBy:u.uid,
+      submittedByName:String(d.submittedByName||''), submittedRole:String(d.submittedRole||''), createdAt:new Date().toISOString(), status:'new' };
+    const ref = await col('ideas').add(doc); return Object.assign({ id:ref.id }, doc);
+  }
+  async function updateIdea(id, patch) { if(!db) throw new Error('Not connected to the cloud'); await col('ideas').doc(id).update(patch); }
+  async function queueSms(clientId, kind, linkId) {
+    if(!db) throw new Error('Not connected to the cloud');
+    const u = firebase.auth().currentUser; if(!u) throw new Error('Not signed in');
+    const req = { kind: kind==='intake' ? 'intake' : 'handbook', clientId:String(clientId), requestedBy:u.uid,
+      requestedByName:(typeof currentUser!=='undefined'&&currentUser&&currentUser.name)||'', requestedAt:new Date().toISOString() };
+    if (req.kind==='intake') req.linkId = String(linkId||'');
+    const ref = await col('smsOutbox').add(req);
     return ref.id;
   }
+  // 📲 Intake by link. Expiry is a Firestore Timestamp — the rules compare it with the server clock.
+  const _ts = d => (firebase.firestore && firebase.firestore.Timestamp) ? firebase.firestore.Timestamp.fromDate(d) : d.toISOString();
+  async function createIntakeForm(formId, form, link) {
+    if(!db) throw new Error('Not connected to the cloud');
+    const b = db.batch();
+    b.set(col('intakeLinks').doc(form.linkId), Object.assign({}, link, { expiresAt:_ts(link.expiresAt) }));
+    b.set(col('intakeForms').doc(formId), Object.assign({}, form, { expiresAt:_ts(form.expiresAt) }));
+    await b.commit();
+  }
+  async function updateIntakeForm(formId, patch, linkId) {
+    if(!db) throw new Error('Not connected to the cloud');
+    await col('intakeForms').doc(formId).update(patch);
+    if (linkId && patch.status) await col('intakeLinks').doc(linkId).update({ status:patch.status });
+  }
+  async function cancelIntakeForm(formId, linkId) { await updateIntakeForm(formId, { status:'cancelled', cancelledAt:new Date().toISOString() }, linkId); }
   async function setSmsConfig(cfg) { if(!db) throw new Error('Not connected to the cloud'); await col('smsConfig').doc('settings').set(cfg); }
   // Returns where it was saved. The Outlook set-up also goes to staff/outlookSetup (see the listener).
   async function setAppConfig(id, cfg) {
@@ -1071,7 +1146,8 @@ const FSYNC = (() => {
 
   return { init, isReady, pushAll, pushClients, pushNotes, pushReferrals, pushWorkers, pushTasks, pushAudit, pushBrokerage, deleteDoc, getCfg, saveCfg, showSetupModal, clearConfig,
     storageReady, uploadFile, deleteStorageFile, getStorageURL, pushPolicies,
-    pushFpho, pushWalkins, pushCalEvents, pushResources, resyncAll, pushStaff, fetchStaff, staffSyncStatus, queueSms, setSmsConfig, setAppConfig };
+    pushFpho, pushWalkins, pushCalEvents, pushResources, resyncAll, pushStaff, fetchStaff, staffSyncStatus, queueSms, setSmsConfig, setAppConfig, submitIdea, updateIdea,
+    createIntakeForm, updateIntakeForm, cancelIntakeForm };
 })();
 
 let clients = DB.load('clients', []);
@@ -1097,7 +1173,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v85';
+const APP_VERSION = 'v88';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -1228,6 +1304,7 @@ function showPage(page) {
   // Background refreshes (e.g. sync snapshots) can fire while the login screen
   // has replaced #main — nothing to render onto yet, so bail out safely.
   if(!document.getElementById('page-title')) return;
+  ensureIdeaFab();
   setMobTab(page);
   document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
   const items = document.querySelectorAll('.nav-item');
@@ -1315,6 +1392,7 @@ function renderDashboard() {
 
   return `
   ${alertHTML}
+  ${returnedIntakeFormsCardHTML()}
   ${renderCompletenessDashboard()}
   <div class="grid-4" style="margin-bottom:20px">
     <div class="stat-card"><div class="label">Active Clients</div><div class="value" style="color:var(--primary-light)">${active}</div><div class="sub">${clients.length} total</div></div>
@@ -1360,7 +1438,7 @@ function renderClients() {
     .filter(canViewClient)
     .filter(c=>(c.status||'active')!=='closed')
     .filter(c=>!search||c.fullName?.toLowerCase().includes(search)||c.clientId?.toLowerCase().includes(search)||c.community?.toLowerCase().includes(search));
-  return `
+  return `${duplicateClientsBannerHTML()}
   <div class="card" style="padding:0;overflow:hidden">
     <div class="table-wrap">
       <table>
@@ -1515,6 +1593,7 @@ function profileHeaderHTML(c) {
         <div class="pf-menu-list" role="menu">
           <button class="pf-menu-item" role="menuitem" onclick="openEditClientModal('${id}')"><span>✏️</span><span>Edit details<small>Name, contact, programs, risk</small></span></button>
           ${['sysmanager', 'admin', 'supervisor'].includes(role) ? `<button class="pf-menu-item" role="menuitem" onclick="openAssignWorkersModal('${id}')"><span>👥</span><span>Assign workers<small>Key worker and team</small></span></button>` : ''}
+          ${_canMergeClients() ? `<button class="pf-menu-item" role="menuitem" id="pf-merge" onclick="openMergeWithModal('${id}')"><span>🔗</span><span>Merge with another file<small>Combine a duplicate file into this one</small></span></button>` : ''}
           ${role === 'sysmanager' ? `<button class="pf-menu-item" role="menuitem" onclick="openRestrictAccessModal('${id}')"><span>${c.accessRestricted ? '🔒' : '🔓'}</span><span>${c.accessRestricted ? 'Access is restricted' : 'Restrict access'}<small>${c.accessRestricted ? 'Restricted to ' + (c.allowedWorkers || []).length + ' worker' + ((c.allowedWorkers || []).length !== 1 ? 's' : '') + ' + managers' : 'Limit who can open this file'}</small></span></button>` : ''}
           ${closed ? `<button class="pf-menu-item" role="menuitem" onclick="reopenClient('${id}')"><span>🔓</span><span>Reopen file<small>Starts a new episode</small></span></button>`
                    : `<div class="pf-menu-sep"></div><button class="pf-menu-item danger" role="menuitem" onclick="closeClient('${id}')"><span>🔒</span><span>Close client file<small>Opens the end-of-episode review</small></span></button>`}
@@ -1644,6 +1723,7 @@ function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
     const attn = [
       ...(episodeEndReached(c) ? [`<div class="pf-attn-row"><span>🗓️ This episode reached its planned end on ${fmt(c.plannedEndDate)}</span><button class="btn btn-sm btn-primary" onclick="openEpisodeReviewModal('${c.id}')">Start review</button></div>`] : []),
       ...issues.map(i=>`<div class="pf-attn-row"><span>⚠️ ${sanitize(i.label)}</span><button class="btn btn-sm btn-outline" onclick="gotoProfileSection('${i.tab}')">Fix →</button></div>`),
+      ...(intakeFormState(currentIntakeForm(c.id))==='submitted' ? [`<div class="pf-attn-row"><span>📲 ${sanitize(smsFirstName(c))} sent back their intake form</span><button class="btn btn-sm btn-primary" onclick="openIntakeReviewModal('${sanitize(currentIntakeForm(c.id).id)}')">Review →</button></div>`] : []),
       ...due.map(d=>`<div class="pf-attn-row"><span>⭐ Feedback due: ${sanitize(QF_POINTS[d])}</span><button class="btn btn-sm btn-outline" onclick="openFeedbackSendModal('${c.id}','${d}')">Ask →</button></div>`),
     ];
     return `
@@ -2014,9 +2094,13 @@ function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
         <button class="btn btn-primary btn-sm" onclick="saveIntake('${c.id}')">💾 Save Intake</button>
         <button class="btn btn-outline btn-sm" onclick="printIntake('${c.id}')">🖨️ Print / Export</button>
         <button class="btn btn-outline btn-sm" onclick="openHandbookSendModal('${c.id}','profile:intake')">📘 Send handbook</button>
+        <button class="btn btn-outline btn-sm" id="intake-link-btn" onclick="openIntakeLinkModal('${c.id}')">📲 Intake form by link</button>
       </div>
     </div>
     <div class="handbook-status" style="font-size:12px;margin:-8px 0 14px;color:${handbookStatus(c).ok ? '#065f46' : 'var(--muted)'}">${sanitize(handbookStatus(c).text)}</div>
+    ${(() => { const f = currentIntakeForm(c.id), st = intakeFormState(f); return st === 'submitted'
+      ? `<div class="alert alert-warning" style="font-size:13px;margin:-6px 0 14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span style="flex:1">📲 ${sanitize(smsFirstName(c))} filled in their intake form ${fmtdt(f.submittedAt)}. Review their answers before adding them here.</span><button class="btn btn-sm btn-primary" onclick="openIntakeReviewModal('${sanitize(f.id)}')">Review answers →</button></div>`
+      : `<div class="intake-link-status" data-client="${sanitize(c.id)}" style="font-size:12px;margin:-8px 0 14px;color:var(--muted)">${sanitize(intakeLinkStatusText(c))}</div>`; })()}
 
     <!-- CLIENT DETAILS -->
     <div class="card">
@@ -3226,9 +3310,10 @@ function auMobile(v) {
   return /^04\d{8}$/.test(d) ? d : '';
 }
 const _maskPhone = m => m ? m.slice(0, 4) + ' ••• ' + m.slice(-3) : '';
+// Short link (netlify.toml: /hb → the PDF) so the whole text fits in one SMS.
+function handbookShortUrl() { return location.origin + '/hb'; }
 function handbookMessage(c) {
-  const first = String(c.preferredName || c.fullName || '').trim().split(/\s+/)[0] || 'there';
-  return `Hi ${first}, welcome to Worn Gundidj SEWB. Here is your Participant Handbook — it explains your rights, how we work with you and who to contact: ${handbookUrl()} Any questions, call us on ${ORG_PHONE}.`;
+  return toGsmText(`Hi ${smsFirstName(c)}, welcome to Worn Gundidj SEWB. Your Participant Handbook: ${handbookShortUrl()} Questions? Call ${ORG_PHONE}`);
 }
 // Where things stand for this client, in one place (used on the Intake tab).
 // ---- Automatic texts (Firebase) ----
@@ -3252,7 +3337,8 @@ function _smsRefresh() {
     }
   }
   if (currentPage === 'reports' && _hbOpen) renderHandbookSendout();
-  if (currentPage === 'settings') { const el = document.getElementById('sms-settings-status'); if (el) el.innerHTML = smsSettingsStatusHTML(); }
+  if (document.getElementById('if-body') && typeof _ifOpenClient !== 'undefined' && _ifOpenClient) _ifRefreshModal(_ifOpenClient);
+  if (currentPage === 'settings') { const el = document.getElementById('sms-settings-status'); if (el) el.innerHTML = smsSettingsStatusHTML(); const u = document.getElementById('sms-usage'); if (u) u.innerHTML = smsUsageHTML(); }
 }
 function handbookStatus(c) {
   const mob = auMobile(c.phone), sent = handbookSends(c), last = sent[sent.length - 1];
@@ -3324,7 +3410,7 @@ function _handbookFallback(clientId, notice) {
   document.getElementById('hb-fallback')?.remove();
   const el = document.createElement('div');
   el.id = 'hb-fallback'; el.setAttribute('role', 'alert');
-  el.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:10050;max-width:min(420px,calc(100vw - 32px));background:#fff7ed;border:1px solid #fdba74;border-left:5px solid #ea580c;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.18);padding:12px 14px;font-size:13px;line-height:1.45;color:#7c2d12';
+  el.style.cssText = 'position:fixed;right:16px;bottom:var(--fab-clear,92px);z-index:10050;max-width:min(420px,calc(100vw - 32px));background:#fff7ed;border:1px solid #fdba74;border-left:5px solid #ea580c;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.18);padding:12px 14px;font-size:13px;line-height:1.45;color:#7c2d12';
   el.innerHTML = `<div style="font-weight:700;margin-bottom:4px">📘 Handbook not sent to ${sanitize(c.fullName)} yet</div>
     <div style="margin-bottom:10px">${sanitize(notice)}</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -3455,6 +3541,7 @@ function smsSettingsCardHTML() {
     <label style="display:flex;gap:8px;align-items:center;font-size:14px;font-weight:600"><input type="checkbox" id="sms-auto-toggle" ${on ? 'checked' : ''} ${FSYNC.isReady() ? '' : 'disabled'} onchange="setSmsAuto(this.checked)"> Send the handbook text automatically</label>
     ${on && smsConfig.updatedBy ? `<div style="font-size:11px;color:var(--muted);margin-top:4px">Turned on by ${sanitize(smsConfig.updatedBy)} · ${fmtdt(smsConfig.updatedAt)}</div>` : ''}
     <div id="sms-settings-status" style="margin-top:10px">${smsSettingsStatusHTML()}</div>
+    <div id="sms-usage">${smsUsageHTML()}</div>
   </div>`;
 }
 async function setSmsAuto(on) {
@@ -8340,6 +8427,15 @@ function openReferralStatusModal(id) {
 // ---- CONVERT TO CLIENT ----
 function convertToClient(id) {
   const r = referrals.find(rf=>rf.id===id); if(!r) return;
+  // Converting twice (double-click, two staff, two devices) used to make a second
+  // file with the same REF number. Open the existing file instead.
+  const ref = 'REF-'+id.slice(-6).toUpperCase();
+  const existing = clients.find(c=>c.id===r.convertedClientId) || clients.find(c=>c.clientId===ref);
+  if (existing) {
+    if (r.status!=='converted' || r.convertedClientId!==existing.id) { r.status='converted'; r.convertedClientId=existing.id; saveReferrals(); }
+    showToast(`${existing.fullName} already has a client file — opening it`);
+    return openClientProfile(existing.id);
+  }
   if(!confirm(`Create a full client record for ${sanitize(r.name)}?\n\nAll referral information will be copied across.`)) return;
   const newClient = {
     id:uid(), created:today(), status:'active',
@@ -8349,7 +8445,7 @@ function convertToClient(id) {
     referralSource:r.referralSource||'', referralDate:r.created?.split('T')[0]||today(),
     referralReason:r.referralReason||'', keyWorker:r.allocatedTo||'',
     sewb:r.sewb||false, aod:r.aod||false, justice:r.justice||false, cultural:r.cultural||false,
-    ndis:r.ndis||false, clientId:'REF-'+id.slice(-6).toUpperCase(),
+    ndis:r.ndis||false, clientId:ref,
     attachments:[], keyWorkers: r.allocatedTo ? [{name:r.allocatedTo, role:'Key Worker', primary:true, consentShare:true, startDate:today()}] : [],
   };
   applySewbUmbrella(newClient);
@@ -12301,6 +12397,730 @@ function removeDemoData() {
 }
 
 // ============================================================
+// 🔗 MERGING DUPLICATE CLIENT FILES
+// Two files for one person (e.g. a referral converted twice) split their notes,
+// time and appointments across two records. Merging keeps the file with the
+// most information, fills its gaps from the other, combines lists, moves every
+// linked record across, and removes the spare file (a tracked delete, so every
+// device drops it). Managers only; previewed before anything changes; audited.
+// ============================================================
+const _MERGE_SKIP = new Set(['id', 'clientId', 'mergedFrom', '_sewbUmbrella', '_demo']);
+const _RISK_ORDER = { low: 1, medium: 2, high: 3 };
+const _canMergeClients = () => ['sysmanager', 'admin', 'supervisor'].includes(currentUser?.role);
+function _isEmptyVal(v) {
+  if (v === undefined || v === null || v === false) return true;
+  if (typeof v === 'string') return v.trim() === '';
+  if (Array.isArray(v)) return v.length === 0;
+  if (typeof v === 'object') return Object.keys(v).every(k => _isEmptyVal(v[k]));
+  return false;
+}
+function _infoCount(v) {
+  if (v === undefined || v === null || v === false) return 0;
+  if (typeof v === 'string') return v.trim() ? 1 : 0;
+  if (typeof v === 'number' || v === true) return 1;
+  if (Array.isArray(v)) return v.length;
+  if (typeof v === 'object') return Object.keys(v).reduce((n, k) => n + _infoCount(v[k]), 0);
+  return 0;
+}
+// What hangs off a client file, so it can be counted and moved.
+function clientLinked(id) {
+  return {
+    notes: (notes || []).filter(n => n && n.clientId === id),
+    time: (timeLogs || []).filter(t => t && t.clientId === id),
+    events: (calEvents || []).filter(e => e && e.clientId === id),
+    tasks: (workflowTasks || []).filter(t => t && t.clientId === id),
+    walkins: (typeof walkins !== 'undefined' ? walkins || [] : []).filter(w => w && w.clientId === id),
+    referrals: (referrals || []).filter(r => r && r.convertedClientId === id),
+    forms: (typeof intakeForms !== 'undefined' ? intakeForms || [] : []).filter(f => f && f.clientId === id),
+  };
+}
+function clientInfoScore(c) {
+  const details = Object.keys(c || {}).filter(k => !_MERGE_SKIP.has(k) && !k.startsWith('_') && k !== 'created').reduce((n, k) => n + _infoCount(c[k]), 0);
+  const L = clientLinked(c.id);
+  return { details, notes: L.notes.length, time: L.time.length, events: L.events.length, total: details + 3 * (L.notes.length + L.time.length + L.events.length) + L.tasks.length + L.forms.length };
+}
+const _normName = s => String(s || '').toLowerCase().replace(/"[^"]*"/g, ' ').replace(/[^a-z]+/g, ' ').trim();
+// Pairs that look like the same person: same REF number, or same name with the same (or a missing) date of birth.
+function clientDuplicatePairs() {
+  const list = (clients || []).filter(c => c && c.id && canViewClient(c)), pairs = [], seen = new Set();
+  for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
+    const a = list[i], b = list[j];
+    if ((a.dupDismissed || []).includes(b.id) || (b.dupDismissed || []).includes(a.id)) continue;
+    const sameRef = a.clientId && a.clientId === b.clientId;
+    const sameName = _normName(a.fullName) && _normName(a.fullName) === _normName(b.fullName) && (!a.dob || !b.dob || a.dob === b.dob);
+    const key = [a.id, b.id].sort().join('|') + (a.id === b.id ? '|' + i + '|' + j : '');
+    if ((sameRef || sameName || a.id === b.id) && !seen.has(key)) { seen.add(key); pairs.push([a, b, a.id === b.id ? 'listed twice' : sameRef ? 'same ID ' + a.clientId : 'same name' + (a.dob && b.dob ? ' and date of birth' : '')]); }
+  }
+  return pairs;
+}
+function duplicateClientsBannerHTML() {
+  if (!_canMergeClients()) return '';
+  const pairs = clientDuplicatePairs(); if (!pairs.length) return '';
+  return `<div class="card" id="dup-clients-card" style="margin-bottom:14px;border-left:4px solid #f59e0b;background:#fffbeb">
+    <div class="card-header"><div class="card-title">🔗 ${pairs.length} possible duplicate client file${pairs.length !== 1 ? 's' : ''}</div></div>
+    ${pairs.map(([a, b, why], i) => `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid #fde68a;flex-wrap:wrap">
+      <span style="flex:1;min-width:220px"><strong>${sanitize(a.fullName || 'Unnamed')}</strong> × 2 <span style="font-size:12px;color:var(--muted)">· ${sanitize(why)}</span></span>
+      <button class="btn btn-sm btn-primary" onclick="openClientMergeModal('${sanitize(a.id)}','${sanitize(b.id)}',${i})">Review &amp; merge →</button>
+      <button class="btn btn-sm btn-outline" onclick="dismissDuplicatePair('${sanitize(a.id)}','${sanitize(b.id)}')" title="They are different people">Not the same person</button></div>`).join('')}</div>`;
+}
+function dismissDuplicatePair(aId, bId) {
+  const a = clients.find(c => c.id === aId), b = clients.find(c => c.id === bId); if (!a || !b || a === b) return;
+  a.dupDismissed = [...new Set([...(a.dupDismissed || []), bId])]; b.dupDismissed = [...new Set([...(b.dupDismissed || []), aId])];
+  saveAll(); audit('Marked as different people', `${a.fullName} — not a duplicate`, aId); showToast('OK — they won’t be suggested again'); showPage(currentPage);
+}
+
+// ---- plan ----
+function _mergeArrays(a, b) {
+  const out = a.slice(), keyOf = x => (x && typeof x === 'object' && x.id) ? 'id:' + x.id : 'v:' + JSON.stringify(x);
+  const have = new Set(out.map(keyOf)); let added = 0;
+  b.forEach(x => { const k = keyOf(x); if (!have.has(k)) { have.add(k); out.push(x); added++; } });
+  return { out, added };
+}
+function buildClientMerge(keep, drop) {
+  const plan = { keep, drop, filled: [], combined: [], conflicts: [], auto: [] };
+  const keys = new Set([...Object.keys(keep), ...Object.keys(drop)]);
+  keys.forEach(k => {
+    if (_MERGE_SKIP.has(k) || k === 'dupDismissed') return;
+    const a = keep[k], b = drop[k];
+    if (_isEmptyVal(b)) return;
+    if (_isEmptyVal(a)) { plan.filled.push(k); return; }
+    if (Array.isArray(a) && Array.isArray(b)) { const m = _mergeArrays(a, b); if (m.added) plan.combined.push(k); return; }
+    if (a && b && typeof a === 'object' && typeof b === 'object') { if (Object.keys(b).some(s => _isEmptyVal(a[s]) && !_isEmptyVal(b[s]))) plan.combined.push(k); return; }
+    if (String(a) === String(b)) return;
+    // Safe automatic choices: earliest start, the higher risk, restricted wins, open wins.
+    if (k === 'created' || k === 'referralDate') { plan.auto.push([k, String(a) < String(b) ? a : b]); return; }
+    if (k === 'riskLevel') { plan.auto.push([k, (_RISK_ORDER[b] || 0) > (_RISK_ORDER[a] || 0) ? b : a]); return; }
+    if (k === 'accessRestricted') { plan.auto.push([k, true]); return; }
+    if (k === 'status') { plan.auto.push([k, a === 'active' || b === 'active' ? 'active' : a]); return; }
+    if (typeof a === 'object' || typeof b === 'object') return;
+    plan.conflicts.push({ k, a, b });
+  });
+  plan.linked = clientLinked(drop.id);
+  return plan;
+}
+const _MERGE_LABEL = { fullName: 'Full name', preferredName: 'Preferred name', dob: 'Date of birth', phone: 'Phone', email: 'Email', address: 'Address', gender: 'Gender', mob: 'Mob', community: 'Community', atsi: 'Aboriginal / Torres Strait Islander', riskLevel: 'Risk level', status: 'Status', keyWorker: 'Key worker', referralSource: 'Referral source', referralReason: 'Reason for referral', ifSafeContact: 'Safe to leave calls/texts?', gp: 'GP', ndis: 'NDIS number', closedDate: 'Closed date', ifServices: 'Services requested', goalPlan: 'Goals', ifHousing: 'Housing', ifEmployment: 'Employment', handbookSent: 'Handbook sent', attachments: 'Attachments', keyWorkers: 'Key workers', programHistory: 'Program history' };
+const _mergeLabel = k => _MERGE_LABEL[k] || (typeof WG_INTAKE !== 'undefined' && (WG_INTAKE.FIELDS.find(f => f.key === k) || {}).label) || k.replace(/^if/, '').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, s => s.toUpperCase());
+const _mergeShow = v => Array.isArray(v) ? v.length + ' item' + (v.length !== 1 ? 's' : '') : typeof v === 'object' ? '…' : String(v).slice(0, 80);
+
+// ---- the window ----
+let _mergePair = null;
+function openClientMergeModal(aId, bId, idx) {
+  if (!_canMergeClients()) { showToast('Only a manager can merge client files'); return; }
+  let a = clients.find(c => c.id === aId), b = null;
+  if (aId === bId) { const same = clients.filter(c => c.id === aId); a = same[0]; b = same[1]; }
+  else b = clients.find(c => c.id === bId);
+  if (!a || !b) { showToast('One of the files is no longer there'); return; }
+  const sa = clientInfoScore(a), sb = clientInfoScore(b);
+  const keepA = sa.total > sb.total || (sa.total === sb.total && String(a.created || '') <= String(b.created || ''));
+  _mergePair = { a, b, keep: keepA ? 'a' : 'b' };
+  showModal('🔗 Merge duplicate client files', `<div id="merge-body"></div>`, null, '780px', true);
+  _renderMerge();
+}
+function _mergeSetKeep(which) { if (_mergePair) { _mergePair.keep = which; _renderMerge(); } }
+function _renderMerge() {
+  const el = document.getElementById('merge-body'); if (!el || !_mergePair) return;
+  const { a, b, keep } = _mergePair, K = keep === 'a' ? a : b, D = keep === 'a' ? b : a;
+  const same = a.id === b.id;
+  const card = (c, which) => { const s = clientInfoScore(c), on = keep === which;
+    return `<label style="flex:1;min-width:240px;border:2px solid ${on ? 'var(--primary-light)' : 'var(--border)'};background:${on ? '#f0fdf4' : '#fff'};border-radius:10px;padding:12px;cursor:pointer;display:block">
+      <div style="display:flex;gap:8px;align-items:center"><input type="radio" name="merge-keep" ${on ? 'checked' : ''} onchange="_mergeSetKeep('${which}')"> <strong>${on ? 'Keep this file' : 'Merge into the other'}</strong></div>
+      <div style="font-size:15px;font-weight:700;margin-top:6px">${sanitize(c.fullName || 'Unnamed')}</div>
+      <div style="font-size:12px;color:var(--muted)">${sanitize(c.clientId || '')} · opened ${fmt(c.created) || '—'} · ${sanitize(c.status || 'active')}</div>
+      <div style="font-size:13px;margin-top:6px"><strong>${s.details}</strong> details · <strong>${s.notes}</strong> case note${s.notes !== 1 ? 's' : ''} · <strong>${s.time}</strong> time ${s.time !== 1 ? 'entries' : 'entry'} · <strong>${s.events}</strong> appointment${s.events !== 1 ? 's' : ''}</div></label>`; };
+  if (same) {
+    el.innerHTML = `<p style="font-size:13px">This is <strong>one file listed twice</strong> on this device (same record id). Merging removes the extra copy from the list — nothing else changes.</p>
+      <div style="display:flex;gap:8px;margin-top:12px"><button class="btn btn-primary" id="merge-go" onclick="mergeClientFiles()">✓ Remove the extra copy</button><button class="btn btn-outline" onclick="closeModal()">Cancel</button></div>`;
+    return;
+  }
+  const p = buildClientMerge(K, D), L = p.linked;
+  const moved = [[L.notes.length, 'case note'], [L.time.length, 'time entry'], [L.events.length, 'appointment'], [L.tasks.length, 'task'], [L.walkins.length, 'walk-in'], [L.forms.length, 'intake form'], [L.referrals.length, 'referral link']].filter(x => x[0]).map(([n, w]) => `${n} ${w}${n !== 1 ? (w.endsWith('y') ? '' : 's') : ''}`.replace(/entrys$/, 'entries'));
+  el.innerHTML = `<p style="font-size:13px;margin:0 0 10px">These look like the same person. The file with the most information is chosen to keep — change it if you need to.</p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">${card(a, 'a')}${card(b, 'b')}</div>
+    <div style="margin-top:14px;font-size:13px;line-height:1.6">
+      <div>📦 <strong>Moved to the kept file:</strong> ${moved.length ? moved.join(', ') : 'nothing linked to the other file'}</div>
+      <div>➕ <strong>Filled in from the other file</strong> (blank on the kept file): ${p.filled.length ? sanitize(p.filled.map(_mergeLabel).join(', ')) : 'none'}</div>
+      <div>🔀 <strong>Lists combined</strong> (nothing dropped): ${p.combined.length ? sanitize(p.combined.map(_mergeLabel).join(', ')) : 'none'}</div>
+      ${p.auto.length ? `<div>🛡️ <strong>Chosen automatically:</strong> ${p.auto.map(([k, v]) => sanitize(_mergeLabel(k)) + ' → ' + sanitize(_mergeShow(v))).join(', ')} <span style="color:var(--muted)">(earliest date, higher risk, restricted access and an open file always win)</span></div>` : ''}
+    </div>
+    ${p.conflicts.length ? `<div style="margin-top:12px"><div style="font-size:12px;font-weight:700;color:#92400e;text-transform:uppercase">Different on each file — choose (${p.conflicts.length})</div>
+      ${p.conflicts.map((c, i) => `<div style="display:grid;grid-template-columns:minmax(120px,170px) 1fr;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px"><span>${sanitize(_mergeLabel(c.k))}</span>
+        <select class="merge-choice" data-key="${sanitize(c.k)}"><option value="keep">${sanitize(_mergeShow(c.a))} (kept file)</option><option value="drop">${sanitize(_mergeShow(c.b))} (other file)</option></select></div>`).join('')}</div>` : ''}
+    <div class="alert alert-warning" style="font-size:12px;margin-top:12px">The other file (${sanitize(D.clientId || D.id)}) is then removed for everyone. This is recorded in the audit log.</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px"><button class="btn btn-primary" id="merge-go" onclick="mergeClientFiles()">🔗 Merge into ${sanitize(K.fullName || 'the kept file')}</button><button class="btn btn-outline" onclick="closeModal()">Cancel</button></div>`;
+}
+
+// ---- do it ----
+async function mergeClientFiles() {
+  if (!_mergePair || !_canMergeClients()) return;
+  const { a, b, keep } = _mergePair, K = keep === 'a' ? a : b, D = keep === 'a' ? b : a;
+  if (K.id === D.id) {                                   // one record listed twice: drop the extra entry only
+    const i = clients.lastIndexOf(D); if (i >= 0) clients.splice(i, 1);
+    saveAll(); audit('Removed a client listed twice', K.fullName || '', K.id);
+    showToast('Extra copy removed'); _mergePair = null; closeModal(); showPage(currentPage); return;
+  }
+  if (!confirm(`Merge ${D.fullName} (${D.clientId || 'other file'}) into ${K.fullName} (${K.clientId || 'kept file'})?\n\nEverything on the other file moves to the kept one, and the other file is removed for everyone.`)) return;
+  const plan = buildClientMerge(K, D);
+  const choose = new Map([...document.querySelectorAll('.merge-choice')].map(s => [s.dataset.key, s.value]));
+  plan.filled.forEach(k => { K[k] = JSON.parse(JSON.stringify(D[k])); });
+  plan.combined.forEach(k => {
+    if (Array.isArray(K[k])) K[k] = _mergeArrays(K[k], D[k]).out;
+    else { const o = Object.assign({}, K[k]); Object.keys(D[k]).forEach(s => { if (_isEmptyVal(o[s]) && !_isEmptyVal(D[k][s])) o[s] = D[k][s]; }); K[k] = o; }
+  });
+  plan.auto.forEach(([k, v]) => { K[k] = v; });
+  if (K.accessRestricted) K.allowedWorkers = [...new Set([...(K.allowedWorkers || []), ...(D.allowedWorkers || [])])];
+  plan.conflicts.forEach(c => { if (choose.get(c.k) === 'drop') K[c.k] = D[c.k]; });
+  // Automatic handbook texts recorded against the other file stay visible on the kept one.
+  const autoSent = (typeof outboxFor === 'function' ? outboxFor(D.id) : []).filter(o => o.status === 'sent').map(o => ({ at: o.sentAt || o.processedAt, by: o.requestedByName || '', channel: 'sms', auto: true, to: o.to, toFull: o.toFull }));
+  if (autoSent.length) K.handbookSent = _mergeArrays(K.handbookSent || [], autoSent).out;
+  K.mergedFrom = [...(K.mergedFrom || []), { id: D.id, clientId: D.clientId || '', fullName: D.fullName || '', at: now(), by: currentUser?.name || '' }];
+  // Move everything linked to the other file.
+  const L = plan.linked;
+  L.notes.forEach(n => { n.clientId = K.id; });
+  L.time.forEach(t => { t.clientId = K.id; });
+  L.events.forEach(e => { e.clientId = K.id; });
+  L.tasks.forEach(t => { t.clientId = K.id; if ('clientName' in t) t.clientName = K.fullName; });
+  L.walkins.forEach(w => { w.clientId = K.id; });
+  L.referrals.forEach(r => { r.convertedClientId = K.id; });
+  for (const f of L.forms) { f.clientId = K.id; try { await FSYNC.updateIntakeForm(f.id, { clientId: K.id }); } catch (e) { console.warn('intake form not moved:', e.message); } }
+  clients = clients.filter(c => c !== D);
+  try { applySewbUmbrella(K); } catch (_) {}
+  saveAll(); saveCalEvents(); saveWorkflowTasks(); try { FSYNC.pushTasks(); } catch (_) {}
+  if (L.walkins.length) saveWalkins();
+  if (L.referrals.length) saveReferrals();
+  await FSYNC.deleteDoc('clients', D.id);
+  const pl = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  const summary = `${pl(L.notes.length, 'note', 'notes')}, ${pl(L.time.length, 'time entry', 'time entries')}, ${pl(L.events.length, 'appointment', 'appointments')} moved; ${pl(plan.filled.length, 'detail', 'details')} filled in`;
+  audit('Merged duplicate client files', `${K.fullName} (${K.clientId || K.id}) ← ${D.clientId || D.id} — ${summary}`, K.id);
+  _mergePair = null; closeModal();
+  showToast(`🔗 Files merged — ${summary}`);
+  setTimeout(() => openClientProfile(K.id), 80);
+}
+// From a client file: pick the other file to merge with.
+function openMergeWithModal(id) {
+  if (!_canMergeClients()) { showToast('Only a manager can merge client files'); return; }
+  const c = clients.find(x => x.id === id); if (!c) return;
+  const likely = new Set(clientDuplicatePairs().filter(p => p[0].id === id || p[1].id === id).map(p => p[0].id === id ? p[1].id : p[0].id));
+  const others = clients.filter(x => x.id !== id && canViewClient(x)).sort((x, y) => (likely.has(y.id) - likely.has(x.id)) || String(x.fullName).localeCompare(String(y.fullName)));
+  showModal('🔗 Merge with another file', `<p style="font-size:13px">Merge <strong>${sanitize(c.fullName)}</strong> (${sanitize(c.clientId || '')}) with:</p>
+    <select id="merge-other" style="width:100%">${others.map(x => `<option value="${sanitize(x.id)}">${likely.has(x.id) ? '⭐ ' : ''}${sanitize(x.fullName)} · ${sanitize(x.clientId || '')}${x.dob ? ' · ' + sanitize(x.dob) : ''}</option>`).join('')}</select>
+    <p style="font-size:12px;color:var(--muted)">⭐ = looks like the same person. You’ll see exactly what happens before anything changes.</p>
+    <button class="btn btn-primary" onclick="const o=document.getElementById('merge-other').value; closeModal(); setTimeout(()=>openClientMergeModal('${sanitize(id)}', o), 50)">Next →</button>`, null, '560px', true);
+}
+
+// ============================================================
+// 📲 CLIENT INTAKE BY LINK — a worker sends a client a link (text, email or
+// copy) to fill in their own SEWB intake on their phone or computer
+// (intake.html). What's already on file is filled in for them; it saves as
+// they go; when they send it, the worker reviews each answer here and adds the
+// ones they choose to the client's intake. Questions in intake/intake-fields.js.
+// Security: see the intakeForms rule in firestore.rules — a random 128-bit link
+// id, plus the client's date of birth when one is on file, opens one form only
+// until it expires; the client can change only their answers, and send once.
+// ============================================================
+let intakeForms = DB.load('intakeForms', []) || [];
+let _ifSeenSubmitted = null, _ifOpenClient = '';      // which forms were already "sent back" (to announce new ones once)
+const IF_DAYS = [3, 7, 14];
+const IF_STATE = {
+  open:      ['Link sent — not started yet',        '#1e40af', '#dbeafe'],
+  draft:     ['Client is filling it in',                  '#92400e', '#fef3c7'],
+  submitted: ['Sent back by the client — review it', '#991b1b', '#fee2e2'],
+  applied:   ['Added to the intake',                      '#065f46', '#d1fae5'],
+  expired:   ['Link expired',                             '#4b5563', '#f3f4f6'],
+  cancelled: ['Link cancelled',                           '#4b5563', '#f3f4f6'],
+};
+// Plain GSM text keeps a text to one SMS (a single "—" makes it 70 characters per SMS).
+function toGsmText(t) {
+  return String(t || '').replace(/[‘’‚′]/g, "'").replace(/[“”„″]/g, '"')
+    .replace(/[–—−]/g, '-').replace(/…/g, '...').replace(/[   ]/g, ' ')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+function smsFirstName(c, max) {
+  const raw = String(c.preferredName || c.fullName || '').replace(/"[^"]*"/g, ' ').trim().split(/\s+/)[0] || '';
+  return toGsmText(raw).replace(/[^A-Za-z'\-]/g, '').slice(0, max || 20) || 'there';
+}
+function _ifB64url(bytes) { return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
+function newIntakeToken() { const b = new Uint8Array(16); crypto.getRandomValues(b); return _ifB64url(b); }
+async function _sha256hex(text) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+function intakeLinkUrl(token) { return location.origin + '/i#' + token; }
+function _ifExpMs(f) { const e = f && f.expiresAt; return e && e.toMillis ? e.toMillis() : e && e.seconds ? e.seconds * 1000 : Date.parse((f && f.expiresAtIso) || (typeof e === 'string' ? e : '')) || 0; }
+function intakeFormState(f) {
+  if (!f) return 'none';
+  if (['applied', 'cancelled', 'submitted'].includes(f.status)) return f.status;
+  if (_ifExpMs(f) <= Date.now()) return 'expired';
+  return f.status === 'draft' ? 'draft' : 'open';
+}
+function intakeFormsFor(clientId) { return (intakeForms || []).filter(f => f && f.clientId === clientId).sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''))); }
+function currentIntakeForm(clientId) { return intakeFormsFor(clientId)[0] || null; }
+function returnedIntakeForms() { return (intakeForms || []).filter(f => f && f.status === 'submitted' && (clients || []).some(c => c.id === f.clientId && canViewClient(c))); }
+function _ifChip(st) { const s = IF_STATE[st]; return s ? `<span class="idea-chip" style="color:${s[1]};background:${s[2]}">${s[0]}</span>` : ''; }
+function intakeLinkStatusText(c) {
+  const f = currentIntakeForm(c.id), st = intakeFormState(f);
+  if (st === 'none') return '';
+  const when = st === 'draft' && f.savedAt ? ` (saved ${fmtdt(f.savedAt)})` : st === 'submitted' && f.submittedAt ? ` (${fmtdt(f.submittedAt)})` : st === 'applied' && f.appliedAt ? ` (${fmt(f.appliedAt)})` : '';
+  return `📲 Intake form by link: ${IF_STATE[st][0]}${when}${['open', 'draft'].includes(st) ? ' · link works until ' + fmt(new Date(_ifExpMs(f)).toISOString()) : ''}`;
+}
+function intakeLinkMessage(c, f) {
+  const days = Math.max(1, Math.ceil((_ifExpMs(f) - Date.now()) / 864e5));
+  const url = intakeLinkUrl(f.linkId);
+  const long = toGsmText(`Hi ${smsFirstName(c)}, please fill in your Worn Gundidj SEWB intake form: ${url} (works ${days} days). Questions? ${ORG_PHONE}`);
+  return long.length <= 160 ? long : toGsmText(`Hi ${smsFirstName(c, 10)}, your Worn Gundidj intake form: ${url} (works ${days} days). Questions? ${ORG_PHONE}`);
+}
+// What the client already has on file → filled in for them.
+function _ifPrefill(c) {
+  const out = {};
+  WG_INTAKE.PREFILL.forEach(k => {
+    const v = c[k];
+    if (Array.isArray(v)) { if (v.length) out[k] = v.map(String); }
+    else if (v !== undefined && v !== null && String(v).trim() !== '') out[k] = String(v);
+  });
+  const svc = WG_INTAKE.SERVICES.map(s => s[0]).filter(k => c.ifServices && c.ifServices[k]);
+  if (svc.length) out.ifServices = svc;
+  return out;
+}
+
+// ---- the window ----
+function openIntakeLinkModal(clientId) {
+  const c = clients.find(x => x.id === clientId); if (!c) return;
+  const f = currentIntakeForm(clientId), st = intakeFormState(f);
+  if (st === 'submitted') return openIntakeReviewModal(f.id);
+  _ifOpenClient = clientId;
+  showModal('📲 Intake form by link', `<div id="if-body">${['open', 'draft'].includes(st) ? _ifLiveHTML(c, f) : _ifCreateHTML(c, st, f)}</div>`, null, '660px', true);
+}
+function _ifRefreshModal(clientId) {
+  const el = document.getElementById('if-body'); if (!el) return;
+  const c = clients.find(x => x.id === clientId), f = currentIntakeForm(clientId), st = intakeFormState(f);
+  if (!c) return;
+  if (st === 'submitted') { el.innerHTML = `<div class="alert alert-success" style="font-size:13px">${sanitize(smsFirstName(c))} has sent their form back.</div><button class="btn btn-primary" onclick="openIntakeReviewModal('${sanitize(f.id)}')">Review answers →</button>`; return; }
+  el.innerHTML = ['open', 'draft'].includes(st) ? _ifLiveHTML(c, f) : _ifCreateHTML(c, st, f);
+}
+function _ifCreateHTML(c, st, f) {
+  const pre = _ifPrefill(c), n = Object.keys(pre).length, dob = /^\d{4}-\d{2}-\d{2}$/.test(c.dob || '');
+  const labels = WG_INTAKE.FIELDS.filter(x => pre[x.key] !== undefined).map(x => x.label.replace(/\s*\(.*\)$/, '').replace(/^Contact \d — /, 'Emergency contact '));
+  return `${st === 'expired' || st === 'cancelled' ? `<div class="alert alert-warning" style="font-size:12px">The last link for ${sanitize(c.fullName)} is ${st === 'expired' ? 'out of date' : 'cancelled'}. Make a new one below.</div>` : ''}
+    <p style="font-size:13px;margin:0 0 10px">Send <strong>${sanitize(c.fullName)}</strong> a link to fill in their SEWB intake on their own phone or computer. What we already have is filled in for them, it saves as they go, and their answers come back here for you to check before anything is added to the intake.</p>
+    <div style="background:#f8fafc;border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:12px;margin-bottom:12px">
+      <strong>Filled in for them (${n}):</strong> ${n ? sanitize([...new Set(labels)].slice(0, 14).join(', ')) + (labels.length > 14 ? '…' : '') : 'nothing yet — they start with a blank form'}<br>
+      <span style="color:var(--muted)">Not on the form: self-harm, family violence, court orders and safety at home — ask those in person.</span></div>
+    <div class="grid-2">
+      <div class="form-group"><label for="if-days">Link works for</label><select id="if-days">${IF_DAYS.map(d => `<option value="${d}"${d === 7 ? ' selected' : ''}>${d} days</option>`).join('')}</select></div>
+      <div class="form-group"><label>Protection</label>
+        <label style="display:flex;gap:8px;align-items:flex-start;font-weight:400;font-size:13px"><input type="checkbox" id="if-usedob" ${dob ? 'checked' : 'disabled'} style="margin-top:3px"> <span>Ask for their date of birth before it opens${dob ? ' (recommended)' : ' — <em>no DOB on file, so the link alone opens it</em>'}</span></label></div>
+    </div>
+    <button class="btn btn-primary" id="if-create" onclick="createIntakeLink('${sanitize(c.id)}')">📲 Create the link</button>
+    ${FSYNC.isReady() ? '' : '<div class="alert alert-warning" style="font-size:12px;margin-top:10px">Cloud Sync isn’t connected on this device — the link needs it.</div>'}`;
+}
+function _ifLiveHTML(c, f) {
+  const st = intakeFormState(f), mob = auMobile(c.phone), safe = c.ifSafeContact === 'Yes', url = intakeLinkUrl(f.linkId);
+  const ob = (smsOutbox || []).filter(o => o.kind === 'intake' && o.linkId === f.linkId).sort((a, b) => String(a.requestedAt).localeCompare(String(b.requestedAt))).pop();
+  const obText = !ob ? '' : ob.status === 'sent' ? `✓ Texted automatically to ${sanitize(ob.to || '')} ${fmtdt(ob.sentAt)}` : smsPending(ob) ? (smsStuck(ob) ? '⚠️ Automatic text not picked up — send it from your phone' : 'Automatic text on its way…') : `⚠️ Automatic text not sent: ${sanitize(ob.reason || ob.status)}`;
+  const sends = (f.sends || []).map(s => `${fmtdt(s.at)} — ${sanitize(s.channel)}${s.by ? ' by ' + sanitize(s.by) : ''}`);
+  return `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">${_ifChip(st)}<span style="font-size:12px;color:var(--muted)">Made ${fmtdt(f.createdAt)}${f.createdBy ? ' by ' + sanitize(f.createdBy) : ''} · works until <strong>${fmt(new Date(_ifExpMs(f)).toISOString())}</strong>${f.needsDob ? ' · asks for date of birth' : ''}${f.savedAt ? ' · last saved ' + fmtdt(f.savedAt) : ''}</span></div>
+    <div class="form-group"><label for="if-url">Link</label><div style="display:flex;gap:6px"><input id="if-url" readonly value="${sanitize(url)}" style="font-family:monospace;font-size:12px" onfocus="this.select()"><button class="btn btn-sm btn-outline" onclick="sendIntakeLink('${sanitize(f.id)}','copy')">📋 Copy</button></div></div>
+    ${!safe && mob ? `<div class="alert alert-warning" style="font-size:12px">"Safe to leave calls/texts?" is <strong>${sanitize(c.ifSafeContact || 'not answered')}</strong>. Only text the link if they’ve agreed to texts.</div>` : ''}
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
+      ${smsAutoOn() ? `<button class="btn btn-primary" id="if-auto" ${safe && mob ? '' : 'disabled'} onclick="sendIntakeLink('${sanitize(f.id)}','auto')">📤 Text it automatically</button>` : ''}
+      <button class="btn ${smsAutoOn() ? 'btn-outline' : 'btn-primary'}" id="if-sms" ${mob ? '' : 'disabled'} onclick="sendIntakeLink('${sanitize(f.id)}','sms')">💬 Text from my phone</button>
+      ${c.email ? `<button class="btn btn-outline" onclick="sendIntakeLink('${sanitize(f.id)}','email')">✉️ Email it</button>` : ''}
+      <button class="btn btn-outline" style="color:#991b1b;border-color:#fca5a5" onclick="cancelIntakeLink('${sanitize(f.id)}')">🔒 Cancel link</button>
+    </div>
+    ${obText ? `<div style="font-size:12px;margin-top:10px">${obText}</div>` : ''}
+    ${sends.length ? `<div style="font-size:12px;color:var(--muted);margin-top:10px"><strong>Sent:</strong><br>${sends.join('<br>')}</div>` : ''}
+    <p style="font-size:11px;color:var(--muted);margin-top:12px">Texts are written to fit in one SMS. You’ll see it here, on the Intake tab and on the Dashboard when they send it back.</p>`;
+}
+
+// ---- create / send / cancel ----
+async function createIntakeLink(clientId) {
+  const c = clients.find(x => x.id === clientId); if (!c) return;
+  if (!FSYNC.isReady()) { showToast('Cloud Sync isn’t connected — the link needs it'); return; }
+  const btn = document.getElementById('if-create'); if (btn) { btn.disabled = true; btn.textContent = 'Creating…'; }
+  const days = Number(document.getElementById('if-days')?.value) || 7;
+  const useDob = !!document.getElementById('if-usedob')?.checked && /^\d{4}-\d{2}-\d{2}$/.test(c.dob || '');
+  const token = newIntakeToken(), formId = await _sha256hex(token + ':' + (useDob ? c.dob : ''));
+  const exp = new Date(Date.now() + days * 864e5), at = now();
+  const answers = _ifPrefill(c);
+  const form = { linkId: token, clientId: c.id, status: 'open', answers, prefilled: Object.keys(answers), needsDob: useDob,
+    expiresAt: exp, expiresAtIso: exp.toISOString(), days, createdAt: at, createdBy: currentUser?.name || '', sends: [] };
+  try {
+    await FSYNC.createIntakeForm(formId, form, { status: 'open', expiresAt: exp, needsDob: useDob, createdAt: at });
+    intakeForms = [Object.assign({ id: formId }, form, { expiresAt: exp.toISOString() }), ...intakeForms.filter(x => x.id !== formId)];
+    audit('Intake form link created', `${c.fullName} — works ${days} days${useDob ? ', asks for DOB' : ''}`, c.id);
+    _ifRefreshModal(c.id); showToast('Link ready — now send it to ' + smsFirstName(c));
+  } catch (e) {
+    console.warn('Intake link failed:', e);
+    showToast('⚠️ Couldn’t create the link: ' + (e.code === 'permission-denied' ? 'Firebase refused — the latest firestore.rules need publishing' : (e.message || e)));
+    if (btn) { btn.disabled = false; btn.textContent = '📲 Create the link'; }
+  }
+}
+async function sendIntakeLink(formId, channel) {
+  const f = intakeForms.find(x => x.id === formId); if (!f) return;
+  const c = clients.find(x => x.id === f.clientId); if (!c) return;
+  const url = intakeLinkUrl(f.linkId), msg = intakeLinkMessage(c, f), mob = auMobile(c.phone);
+  if (channel === 'copy') {
+    try { await navigator.clipboard.writeText(url); showToast('Link copied'); } catch (_) { document.getElementById('if-url')?.select(); showToast('Select the link and copy it'); }
+    return _ifRecordSend(f, c, 'link copied');
+  }
+  if (channel === 'auto') {
+    if (!smsAutoOn()) { showToast('Automatic texts are off'); return; }
+    if (c.ifSafeContact !== 'Yes' || !mob) { showToast('Needs a mobile number and "Safe to leave calls/texts?" = Yes'); return; }
+    try { await FSYNC.queueSms(c.id, 'intake', f.linkId); audit('Intake form link text requested (automatic)', `${c.fullName} — to ${_maskPhone(mob)}`, c.id); showToast('📤 Text queued — Worn Gundidj will send it'); }
+    catch (e) { showToast('⚠️ Couldn’t queue the text: ' + (e.message || e)); }
+    return _ifRefreshModal(c.id);
+  }
+  if (channel === 'sms') {
+    if (c.ifSafeContact !== 'Yes' && !confirm(`"Safe to leave calls/texts?" is ${c.ifSafeContact || 'not answered'} for ${c.fullName}.\n\nOnly text the link if they have agreed to texts. Send anyway?`)) return;
+    openExternalLink(`sms:${mob || String(c.phone || '').replace(/[^\d+]/g, '')}?&body=${encodeURIComponent(msg)}`);
+    return _ifRecordSend(f, c, 'text from ' + (currentUser?.name ? currentUser.name.split(' ')[0] + '’s' : 'worker’s') + ' phone to ' + _maskPhone(mob));
+  }
+  if (channel === 'email') {
+    openExternalLink(`mailto:${encodeURIComponent(c.email)}?subject=${encodeURIComponent('Your Worn Gundidj SEWB intake form')}&body=${encodeURIComponent(msg.replace(/ Questions\?/, '\n\nQuestions?'))}`);
+    return _ifRecordSend(f, c, 'email');
+  }
+}
+async function _ifRecordSend(f, c, channel) {
+  const sends = [...(f.sends || []), { at: now(), channel, by: currentUser?.name || '' }].slice(-20);
+  f.sends = sends;
+  try { await FSYNC.updateIntakeForm(f.id, { sends }); } catch (e) { console.warn('send record not saved:', e.message); }
+  audit('Intake form link sent', `${c.fullName} — ${channel}`, c.id);
+  _ifRefreshModal(c.id);
+}
+async function cancelIntakeLink(formId) {
+  const f = intakeForms.find(x => x.id === formId); if (!f) return;
+  const c = clients.find(x => x.id === f.clientId);
+  if (!confirm('Cancel this link?\n\nIt will stop working straight away. Anything the client has saved stays here.')) return;
+  try {
+    await FSYNC.cancelIntakeForm(f.id, f.linkId);
+    f.status = 'cancelled'; audit('Intake form link cancelled', c ? c.fullName : '', f.clientId); showToast('Link cancelled');
+    if (c) _ifRefreshModal(c.id);
+  } catch (e) { showToast('⚠️ Couldn’t cancel: ' + (e.message || e)); }
+}
+
+// ---- review & apply ----
+const _ifShow = (f, v) => {
+  if (Array.isArray(v)) return (f.type === 'services' ? v.map(k => (WG_INTAKE.SERVICES.find(s => s[0] === k) || [k, k])[1]) : v).join(', ');
+  if (f.type === 'date' && v) return fmt(v);
+  return v == null ? '' : String(v);
+};
+function _ifRows(c, form) {
+  const a = form.answers || {};
+  return WG_INTAKE.FIELDS.map(f => {
+    let cur = c[f.key], ans = a[f.key];
+    if (f.type === 'services') {
+      cur = WG_INTAKE.SERVICES.map(s => s[0]).filter(k => c.ifServices && c.ifServices[k]);
+      const add = (Array.isArray(ans) ? ans : []).filter(k => !cur.includes(k));
+      return { f, cur, ans: add, changed: add.length > 0, add: true };
+    }
+    if (f.type === 'checks') { cur = Array.isArray(cur) ? cur : []; ans = Array.isArray(ans) ? ans : (ans === undefined ? undefined : []); }
+    if (ans === undefined) return { f, cur, ans, changed: false };
+    const norm = v => Array.isArray(v) ? v.slice().sort().join('|') : String(v == null ? '' : v).trim();
+    return { f, cur, ans, changed: norm(cur) !== norm(ans), cleared: norm(ans) === '' && norm(cur) !== '' };
+  });
+}
+function openIntakeReviewModal(formId) {
+  const form = intakeForms.find(x => x.id === formId); if (!form) return;
+  const c = clients.find(x => x.id === form.clientId); if (!c) return;
+  const rows = _ifRows(c, form), changed = rows.filter(r => r.changed), same = rows.filter(r => !r.changed && r.ans !== undefined && _ifShow(r.f, r.ans) !== '');
+  const byStep = WG_INTAKE.STEPS.map(S => ({ S, rows: changed.filter(r => S.fields.includes(r.f)) })).filter(x => x.rows.length);
+  const done = form.status === 'applied';
+  const html = `<p style="font-size:13px;margin:0 0 10px"><strong>${sanitize(c.fullName)}</strong> filled in their intake form${form.submittedAt ? ' on ' + fmtdt(form.submittedAt) : ''}${form.answers && form.answers.declaration ? ' and confirmed it is true to the best of their knowledge' : ''}. ${done ? `<span class="idea-chip" style="background:#d1fae5;color:#065f46">Added to the intake ${fmt(form.appliedAt)}${form.appliedBy ? ' by ' + sanitize(form.appliedBy) : ''}</span>` : 'Tick the answers to add to the intake, then go through them with the client.'}</p>
+    ${changed.length ? byStep.map(({ S, rows }) => `<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin:12px 0 6px">${sanitize(S.title)}</div>
+      ${rows.map(r => `<label class="if-rev-row" style="display:grid;grid-template-columns:24px 1fr;gap:8px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;cursor:pointer;background:#fff">
+        <input type="checkbox" class="if-use" data-key="${sanitize(r.f.key)}" ${done ? 'disabled' : ''} ${!r.cleared ? 'checked' : ''} style="margin-top:3px">
+        <span><span style="font-size:12px;color:var(--muted)">${sanitize(r.f.label)}</span><br>
+          ${r.add ? `<strong>Add:</strong> ${sanitize(_ifShow(r.f, r.ans))}` : `<strong>${r.cleared ? '<em>(left blank)</em>' : sanitize(_ifShow(r.f, r.ans))}</strong>${_ifShow(r.f, r.cur) ? `<br><span style="font-size:12px;color:var(--muted)">On file now: ${sanitize(_ifShow(r.f, r.cur))}</span>` : ''}`}</span></label>`).join('')}`).join('')
+      : '<div class="alert alert-success" style="font-size:13px">Everything they sent matches what’s already on file.</div>'}
+    ${same.length ? `<details style="margin-top:10px;font-size:12px"><summary style="cursor:pointer">${same.length} answer${same.length !== 1 ? 's' : ''} already match the file</summary><div style="padding:6px 0;color:var(--muted)">${same.map(r => sanitize(r.f.label) + ': ' + sanitize(_ifShow(r.f, r.ans))).join('<br>')}</div></details>` : ''}
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px">
+      ${done ? `<button class="btn btn-primary" onclick="closeModal();openClientProfile('${sanitize(c.id)}','intake')">Open the intake</button>` :
+        `<button class="btn btn-primary" id="if-apply" onclick="applyIntakeForm('${sanitize(form.id)}')">${changed.length ? '✓ Add the ticked answers to the intake' : '✓ Mark as reviewed'}</button>`}
+      <button class="btn btn-outline" onclick="closeModal()">Close</button></div>`;
+  showModal('📲 Intake form from ' + sanitize(smsFirstName(c)), html, null, '700px', true);
+}
+async function applyIntakeForm(formId) {
+  const form = intakeForms.find(x => x.id === formId); if (!form) return;
+  const c = clients.find(x => x.id === form.clientId); if (!c) return;
+  const use = new Set([...document.querySelectorAll('.if-use:checked')].map(el => el.dataset.key));
+  const rows = _ifRows(c, form).filter(r => r.changed && use.has(r.f.key));
+  rows.forEach(r => {
+    if (r.add) { c.ifServices = Object.assign({}, c.ifServices || {}); r.ans.forEach(k => { c.ifServices[k] = true; }); }
+    else c[r.f.key] = Array.isArray(r.ans) ? r.ans.slice() : r.ans;
+  });
+  const at = now(), keys = rows.map(r => r.f.key);
+  c.intakeByClient = { formId, submittedAt: form.submittedAt || '', appliedAt: at, appliedBy: currentUser?.name || '', answers: keys.length, declaration: !!(form.answers && form.answers.declaration) };
+  try { if (typeof applySewbUmbrella === 'function') applySewbUmbrella(c); } catch (_) {}
+  saveAll();
+  try { await FSYNC.updateIntakeForm(formId, { status: 'applied', appliedAt: at, appliedBy: currentUser?.name || '', appliedKeys: keys }, form.linkId); }
+  catch (e) { console.warn('form status not updated:', e.message); }
+  form.status = 'applied'; form.appliedAt = at; form.appliedBy = currentUser?.name || '';
+  audit('Client intake form added to file', `${c.fullName} — ${keys.length} answer${keys.length !== 1 ? 's' : ''}`, c.id);
+  showToast(keys.length ? `${keys.length} answer${keys.length !== 1 ? 's' : ''} added — check the intake with ${smsFirstName(c)} and Save` : 'Marked as reviewed');
+  closeModal(); setTimeout(() => openClientProfile(c.id, 'intake'), 60);
+}
+
+// ---- where it shows up ----
+function returnedIntakeFormsCardHTML() {
+  const list = returnedIntakeForms(); if (!list.length) return '';
+  return `<div class="card" id="if-returned-card" style="margin-bottom:16px;border-left:4px solid #dc2626">
+    <div class="card-header"><div class="card-title">📲 Intake forms sent back by clients (${list.length})</div></div>
+    ${list.map(f => { const c = clients.find(x => x.id === f.clientId);
+      return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)"><span style="flex:1"><strong>${sanitize(c ? c.fullName : 'Client')}</strong> <span style="font-size:12px;color:var(--muted)">· sent ${fmtdt(f.submittedAt)}</span></span>
+        <button class="btn btn-sm btn-primary" onclick="openIntakeReviewModal('${sanitize(f.id)}')">Review →</button></div>`; }).join('')}</div>`;
+}
+function _intakeFormsRefresh(prev) {
+  // Announce a form sent back since this device last looked (once each).
+  const sub = new Set(returnedIntakeForms().map(f => f.id));
+  if (_ifSeenSubmitted) [...sub].filter(id => !_ifSeenSubmitted.has(id)).forEach(id => {
+    const f = intakeForms.find(x => x.id === id), c = f && clients.find(x => x.id === f.clientId);
+    if (c) showToast(`📲 ${smsFirstName(c)} sent back their intake form — review it on the Dashboard`);
+  });
+  _ifSeenSubmitted = sub;
+  if (document.getElementById('if-body') && _ifOpenClient) _ifRefreshModal(_ifOpenClient);
+  document.querySelectorAll('.intake-link-status').forEach(el => { const c = clients.find(x => x.id === el.dataset.client); if (c) el.textContent = intakeLinkStatusText(c); });
+  if (currentPage === 'dashboard' && !document.querySelector('#modal-container .modal-overlay')) {
+    const card = document.getElementById('if-returned-card'), html = returnedIntakeFormsCardHTML();
+    if (!!card !== !!html || (card && card.outerHTML.length !== html.length)) showPage('dashboard');
+  }
+}
+
+// ---- SMS spend this month (written by the SMS Cloud Function) ----
+let smsUsageMonth = DB.load('smsUsageMonth', null);
+function smsBudgetMonth(d) { return new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Melbourne', year: 'numeric', month: '2-digit' }).format(d || new Date()).slice(0, 7); }
+function smsUsageHTML() {
+  const u = smsUsageMonth && smsUsageMonth.month === smsBudgetMonth() ? smsUsageMonth : null;
+  const budget = Number(u && u.budget) || 10, cost = Number(u && u.cost) || 0, pct = Math.min(100, Math.round(cost / budget * 100));
+  const reached = u && u.budgetReachedAt;
+  return `<div style="margin-top:10px;font-size:12px"><div style="display:flex;justify-content:space-between;gap:8px"><strong>This month’s texts</strong><span>${u ? `${u.sent || 0} sent · ${u.parts || 0} SMS · ≈ $${cost.toFixed(2)}` : 'none yet'} of a <strong>$${budget.toFixed(2)}</strong> budget</span></div>
+    <div style="height:8px;background:#e5e7eb;border-radius:4px;overflow:hidden;margin-top:5px" role="img" aria-label="${pct}% of the monthly SMS budget used"><div style="height:100%;width:${pct}%;background:${pct >= 90 ? '#dc2626' : pct >= 70 ? '#f59e0b' : '#16a34a'}"></div></div>
+    ${reached ? `<div class="alert alert-warning" style="font-size:12px;margin-top:8px">Budget reached ${fmtdt(u.budgetReachedAt)}. Until the 1st, automatic texts aren’t sent — workers are asked to send them from their own phone.</div>` : ''}
+    <div style="color:var(--muted);margin-top:4px">Every text is written to fit in one SMS (about 10c). The budget and price are set on the text service (SMS_MONTHLY_BUDGET, SMS_COST_PER_PART).</div></div>`;
+}
+
+// ============================================================
+// 💡 IDEAS — the light-globe button, bottom right of every page. Anyone can
+// send the System Manager an idea for improving the CMS. The System Manager
+// reviews them in the Ideas inbox (the globe shows how many are new), sets a
+// status and can reply; the person who sent it sees that under "My ideas".
+// Ideas live in the "ideas" collection. If Firebase refuses it (rules not yet
+// published) the idea goes to the System Manager as a chat message instead,
+// and if that fails too it waits on this device and is sent automatically.
+// ============================================================
+let ideas = DB.load('ideas', []) || [];
+let _ideaTab = 'share', _ideaFilter = 'open', _ideaDraft = null, _ideaRetryAt = 0;
+const IDEA_MAX = 2000;
+const IDEA_CATEGORIES = ['Make something easier or faster', 'Something isn’t working right', 'A new feature', 'Reports & data', 'Client experience', 'Other'];
+const IDEA_STATUS = {
+  new:         ['New',                  '#1e40af', '#dbeafe'],
+  considering: ['Thinking about it',    '#92400e', '#fef3c7'],
+  planned:     ['Planned',              '#5b21b6', '#ede9fe'],
+  done:        ['Done',                 '#065f46', '#d1fae5'],
+  notnow:      ['Not now',              '#4b5563', '#f3f4f6'],
+  chat:        ['Sent as chat message', '#1e40af', '#e0f2fe'],
+  waiting:     ['Waiting to send',      '#991b1b', '#fee2e2'],
+};
+const IDEA_BULB_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+  <g stroke="#b45309" stroke-width="1.2" stroke-linecap="round"><path d="M2.6 9.2h1.5M19.9 9.2h1.5M4.9 3.4l1.05 1.05M19.1 3.4l-1.05 1.05M12 .6v1.2"/></g>
+  <path d="M12 2.6a6.4 6.4 0 0 0-3.85 11.5c.62.5.98 1.22.98 2V17h5.74v-.9c0-.78.36-1.5.98-2A6.4 6.4 0 0 0 12 2.6z" fill="#fffbea" stroke="#92400e" stroke-width="1.25" stroke-linejoin="round"/>
+  <path d="M9.9 11.6l1.05 1.2 1.05-1.2 1.05 1.2 1.05-1.2" fill="none" stroke="#f59e0b" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M10.95 12.8V17M13.05 12.8V17" stroke="#f59e0b" stroke-width="1"/>
+  <rect x="9.05" y="17.35" width="5.9" height="1.55" rx=".6" fill="#78716c"/>
+  <rect x="9.45" y="19.3" width="5.1" height="1.45" rx=".6" fill="#57534e"/>
+  <path d="M10.7 21.35h2.6" stroke="#44403c" stroke-width="1.3" stroke-linecap="round"/>
+</svg>`;
+
+function _ideaUid() { try { return (window.firebase && firebase.apps && firebase.apps.length && firebase.auth().currentUser?.uid) || ''; } catch (_) { return ''; } }
+function _ideaOwner() { return String(currentUser?.email || currentUser?.name || '').toLowerCase(); }
+function _isSysManager() { return currentUser?.role === 'sysmanager'; }
+function newIdeasCount() { return _isSysManager() ? (ideas || []).filter(i => (i.status || 'new') === 'new').length : 0; }
+function _localIdeas() { return (DB.load('ideasLocal', []) || []).filter(i => i && i.owner === _ideaOwner()); }
+function myIdeas() {
+  const uid = _ideaUid(), me = String(currentUser?.name || '');
+  const cloud = (ideas || []).filter(i => uid ? i.submittedBy === uid : (me && i.submittedByName === me));
+  return [...cloud, ..._localIdeas()].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+}
+function _ideaPageLabel() { return (document.getElementById('page-title')?.textContent || currentPage || '').trim().slice(0, 40); }
+function _ideaChip(st) { const s = IDEA_STATUS[st || 'new'] || IDEA_STATUS.new; return `<span class="idea-chip" style="color:${s[1]};background:${s[2]}">${s[0]}</span>`; }
+
+// ---- the button ----
+function ensureIdeaFab() {
+  if (!currentUser) return removeIdeaFab();
+  let b = document.getElementById('idea-fab');
+  if (!b) {
+    b = document.createElement('button'); b.id = 'idea-fab'; b.type = 'button';
+    b.addEventListener('click', () => openIdeasModal());
+    document.body.appendChild(b); document.body.classList.add('has-idea-fab');
+  }
+  const n = newIdeasCount();
+  const label = n ? `Ideas — ${n} new idea${n !== 1 ? 's' : ''} to review` : 'Share an idea to improve the CMS';
+  b.setAttribute('aria-label', label);
+  b.innerHTML = IDEA_BULB_SVG + `<span class="idea-fab-tip">${sanitize(label)}</span>` + (n ? `<span class="idea-fab-badge">${n > 99 ? '99+' : n}</span>` : '');
+  if (Date.now() > _ideaRetryAt && _localIdeas().some(i => i.status === 'waiting')) retryIdeasWaiting();
+}
+function removeIdeaFab() { document.getElementById('idea-fab')?.remove(); document.body.classList.remove('has-idea-fab'); }
+// New data from the cloud: update the badge, and the open window — but never
+// redraw over something being typed.
+function _ideasRefresh() {
+  if (document.getElementById('idea-fab')) ensureIdeaFab();
+  if (!document.getElementById('idea-body')) return;
+  _renderIdeaTabs();
+  const a = document.activeElement;
+  if (_ideaTab === 'share' || (a && a.closest && a.closest('#idea-body') && /TEXTAREA|SELECT|INPUT/.test(a.tagName))) return;
+  _renderIdeaBody();
+}
+
+// ---- the window ----
+function openIdeasModal(tab) {
+  _ideaTab = tab || (newIdeasCount() ? 'inbox' : 'share');
+  showModal('💡 Ideas for the CMS', `<div class="idea-tabs" id="idea-tabs" role="tablist"></div><div id="idea-body"></div>`, null, '700px', true);
+  _renderIdeaTabs(); _renderIdeaBody();
+  if (_ideaTab === 'share') setTimeout(() => document.getElementById('idea-text')?.focus(), 50);
+}
+function _ideaGoTab(t) { _saveIdeaDraft(); _ideaTab = t; _renderIdeaTabs(); _renderIdeaBody(); }
+function _renderIdeaTabs() {
+  const el = document.getElementById('idea-tabs'); if (!el) return;
+  const n = newIdeasCount(), mine = myIdeas().length;
+  const tab = (id, label) => `<button type="button" role="tab" aria-selected="${_ideaTab === id}" class="btn btn-sm ${_ideaTab === id ? 'btn-primary' : 'btn-outline'}" id="idea-tab-${id}" onclick="_ideaGoTab('${id}')">${label}</button>`;
+  el.innerHTML = tab('share', '💡 Share an idea') + tab('mine', `📝 My ideas${mine ? ' (' + mine + ')' : ''}`)
+    + (_isSysManager() ? tab('inbox', `📥 Inbox${n ? ` <span class="idea-chip" style="background:#dc2626;color:#fff;margin-left:4px">${n} new</span>` : ''}`) : '');
+}
+function _renderIdeaBody() {
+  const el = document.getElementById('idea-body'); if (!el) return;
+  el.innerHTML = _ideaTab === 'inbox' && _isSysManager() ? _ideaInboxHTML() : _ideaTab === 'mine' ? _ideaMineHTML() : _ideaShareHTML();
+}
+function _saveIdeaDraft() {
+  const t = document.getElementById('idea-text'); if (!t) return;
+  _ideaDraft = { text: t.value, category: document.getElementById('idea-cat')?.value || '' };
+}
+function _ideaShareHTML() {
+  const d = _ideaDraft || { text: '', category: IDEA_CATEGORIES[0] };
+  const sms = (userProfiles || []).filter(u => u.role === 'sysmanager').map(u => u.name).filter(Boolean);
+  return `<p style="font-size:13px;margin:0 0 12px">Got an idea to make the CMS easier, quicker or better for clients? It goes straight to the System Manager${sms.length && !_isSysManager() ? ` (${sanitize(sms.join(', '))})` : ''}, who will let you know what happens with it.</p>
+    <div class="form-group"><label for="idea-cat">What kind of idea?</label>
+      <select id="idea-cat">${IDEA_CATEGORIES.map(c => `<option${c === d.category ? ' selected' : ''}>${sanitize(c)}</option>`).join('')}</select></div>
+    <div class="form-group"><label for="idea-text">Your idea *</label>
+      <textarea id="idea-text" rows="6" maxlength="${IDEA_MAX}" style="width:100%;box-sizing:border-box;font-size:14px" placeholder="e.g. It would save time if I could log time straight from a calendar appointment…" oninput="document.getElementById('idea-count').textContent=this.value.length+' / ${IDEA_MAX}'">${sanitize(d.text)}</textarea>
+      <div style="display:flex;justify-content:space-between;gap:10px;font-size:11px;color:var(--muted);margin-top:4px">
+        <span>🔒 Please don’t include client names or personal details — describe the idea, not the person.</span><span id="idea-count" style="white-space:nowrap">${d.text.length} / ${IDEA_MAX}</span></div></div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Sent from: <strong>${sanitize(_ideaPageLabel() || 'the CMS')}</strong> — so the System Manager knows which screen you mean.</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn btn-primary" id="idea-send" onclick="sendIdea()">💡 Send idea</button>
+      <button type="button" class="btn btn-outline" onclick="_saveIdeaDraft();closeModal()">Cancel</button></div>`;
+}
+function _ideaCardHTML(i, inbox) {
+  const st = i.status || 'new';
+  const who = inbox ? `From <strong>${sanitize(i.submittedByName || 'Unknown')}</strong>${i.submittedRole && ROLES[i.submittedRole] ? ' · ' + sanitize(ROLES[i.submittedRole].label) : ''} · ` : '';
+  const reply = i.response ? `<div style="font-size:13px;background:#f8fafc;border-radius:8px;padding:8px 10px;margin-top:8px"><strong>Reply${i.reviewedBy ? ' from ' + sanitize(i.reviewedBy) : ''}:</strong> ${sanitize(i.response)}</div>` : '';
+  const controls = inbox && i.id ? `<div style="display:grid;grid-template-columns:minmax(150px,200px) 1fr auto;gap:8px;align-items:start;margin-top:10px" class="idea-review">
+      <select id="idea-st-${sanitize(i.id)}" aria-label="Status">${['new', 'considering', 'planned', 'done', 'notnow'].map(k => `<option value="${k}"${k === st ? ' selected' : ''}>${IDEA_STATUS[k][0]}</option>`).join('')}</select>
+      <textarea id="idea-re-${sanitize(i.id)}" rows="1" maxlength="1000" placeholder="Reply to ${sanitize((i.submittedByName || 'them').split(' ')[0])} (optional)" style="width:100%;box-sizing:border-box;min-height:38px;font-size:13px">${sanitize(i.response || '')}</textarea>
+      <button type="button" class="btn btn-sm btn-primary" onclick="saveIdeaReview('${sanitize(i.id)}')">Save</button></div>` : '';
+  return `<div class="idea-card${inbox && st === 'new' ? ' is-new' : ''}" data-idea="${sanitize(i.id || i.localId || '')}">
+    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">${_ideaChip(st)}<span class="idea-chip" style="background:#f1f5f9;color:#334155">${sanitize(i.category || 'Idea')}</span></div>
+    <div class="idea-text">${sanitize(i.text || '')}</div>
+    <div class="idea-meta">${who}${fmtdt(i.createdAt)}${i.page ? ' · on ' + sanitize(i.page) : ''}${i.reviewedAt && inbox ? ' · updated ' + fmtdt(i.reviewedAt) : ''}</div>
+    ${reply}${controls}</div>`;
+}
+function _ideaMineHTML() {
+  const list = myIdeas();
+  if (!list.length) return `<div style="text-align:center;padding:30px 10px;color:var(--muted)"><div style="font-size:34px">💡</div><p>You haven’t sent any ideas yet.</p><button type="button" class="btn btn-primary" onclick="_ideaGoTab('share')">Share an idea</button></div>`;
+  return `<p style="font-size:12px;color:var(--muted);margin:0 0 10px">What happened to the ideas you’ve sent. The System Manager sets the status and may reply.</p>` + list.map(i => _ideaCardHTML(i, false)).join('');
+}
+function _ideaInboxHTML() {
+  const all = (ideas || []).slice().sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+  const F = { open: ['Open', i => ['new', 'considering', 'planned'].includes(i.status || 'new')], new: ['New', i => (i.status || 'new') === 'new'], closed: ['Done & not now', i => ['done', 'notnow'].includes(i.status)], all: ['All', () => true] };
+  const list = all.filter(F[_ideaFilter] ? F[_ideaFilter][1] : F.open[1]);
+  const err = window._ideasErr ? `<div class="alert alert-warning" style="font-size:12px">Firebase refused the Ideas inbox (${sanitize(window._ideasErr)}). Publish the latest <strong>firestore.rules</strong> in the Firebase console. Until then, ideas reach you as chat messages.</div>` : '';
+  return err + `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">${Object.entries(F).map(([k, [label, fn]]) => `<button type="button" class="btn btn-sm ${_ideaFilter === k ? 'btn-primary' : 'btn-outline'}" onclick="_ideaFilter='${k}';_renderIdeaBody()">${label} (${all.filter(fn).length})</button>`).join('')}</div>`
+    + (list.length ? list.map(i => _ideaCardHTML(i, true)).join('') : `<div style="text-align:center;padding:30px 10px;color:var(--muted)"><div style="font-size:34px">💡</div><p>${all.length ? 'Nothing here.' : 'No ideas yet. Staff send them with the light-globe button at the bottom right.'}</p></div>`);
+}
+
+// ---- sending ----
+// Ideas aren't client records: warn (not block) if one names a client or carries contact details.
+function _ideaPrivacyHit(text) {
+  const t = String(text || '');
+  const esc = v => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const c = (clients || []).find(c => {
+    const n = String(c && c.fullName || '').replace(/"[^"]*"/g, ' ').replace(/\s+/g, ' ').trim();
+    return n.split(' ').length >= 2 && n.length >= 5 && new RegExp('(^|[^\\p{L}])' + esc(n) + '($|[^\\p{L}])', 'iu').test(t);
+  });
+  if (c) return `a client’s name (${c.fullName})`;
+  if (/(\+?61|\b0)[2-478](?:[ -]?\d){8}\b/.test(t)) return 'a phone number';
+  if (/[^\s@]+@[^\s@]+\.[a-z]{2,}/i.test(t)) return 'an email address';
+  return '';
+}
+async function sendIdea() {
+  const text = (document.getElementById('idea-text')?.value || '').trim();
+  const category = document.getElementById('idea-cat')?.value || IDEA_CATEGORIES[0];
+  if (text.length < 5) { alert('Please describe your idea — a sentence or two is perfect.'); document.getElementById('idea-text')?.focus(); return; }
+  const hit = _ideaPrivacyHit(text);
+  if (hit && !confirm(`Your idea seems to include ${hit}.\n\nIdeas aren’t client records — please describe the idea without client details.\n\nPress Cancel to edit it, or OK to send it as it is.`)) return;
+  const btn = document.getElementById('idea-send'); if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+  const d = { text: text.slice(0, IDEA_MAX), category, page: _ideaPageLabel(), submittedByName: currentUser?.name || '', submittedRole: currentUser?.role || '' };
+  let how = 'inbox';
+  try { if (!FSYNC.isReady()) throw new Error('Not connected to the cloud'); await FSYNC.submitIdea(d); }
+  catch (e) {
+    console.warn('Idea not saved to the inbox:', e.message);
+    how = (await _ideaViaChat(d)) ? 'chat' : 'waiting';
+    _saveLocalIdea(d, how);
+  }
+  audit('Idea sent to the System Manager', category + (how === 'chat' ? ' (as a chat message)' : how === 'waiting' ? ' (waiting to send)' : ''));
+  _ideaDraft = null;
+  showToast(how === 'waiting' ? 'Saved — it couldn’t be sent just now, and will be sent automatically' : '💡 Thanks! Your idea has gone to the System Manager');
+  if (document.getElementById('idea-body')) { _ideaTab = 'mine'; _renderIdeaTabs(); _renderIdeaBody(); }
+}
+function _saveLocalIdea(d, status) {
+  const all = DB.load('ideasLocal', []) || [];
+  all.push({ localId: 'L' + Date.now().toString(36), owner: _ideaOwner(), text: d.text, category: d.category, page: d.page, createdAt: new Date().toISOString(), status });
+  DB.save('ideasLocal', all);
+}
+// Backup route while the "ideas" rules aren't published: a direct chat message to each System Manager.
+async function _ideaViaChat(d) {
+  try {
+    if (!FSYNC.isReady() || !chatCol('chatConvs')) return false;
+    const myId = currentUser?.id, targets = (userProfiles || []).filter(u => u && u.role === 'sysmanager' && u.id && u.id !== myId);
+    if (!myId || !targets.length) return false;
+    const at = new Date().toISOString(), text = `💡 Idea for the CMS — ${d.category}\n\n${d.text}\n\n(Sent from: ${d.page || 'the CMS'})`;
+    for (const t of targets) {
+      const conv = (_chatConversations || []).find(c => c.type === 'dm' && (c.members || []).includes(t.id) && c.members.includes(myId));
+      let convId = conv && conv.id;
+      if (!convId) convId = (await chatCol('chatConvs').add({ type: 'dm', members: [myId, t.id], lastMsg: '', lastAt: at, unread: {} })).id;
+      await chatCol('chatMsgs').add({ convId, senderId: myId, senderName: currentUser?.name || '', text, at });
+      await chatCol('chatConvs').doc(convId).update({ lastMsg: '💡 ' + d.text.slice(0, 80), lastAt: at, unread: { [t.id]: 1 } });
+    }
+    return true;
+  } catch (e) { console.warn('Idea chat message failed:', e.message); return false; }
+}
+// Ideas saved on this device because nothing could be reached: send them once the cloud is back.
+async function retryIdeasWaiting() {
+  _ideaRetryAt = Date.now() + 60 * 1000;
+  if (!FSYNC.isReady()) return;
+  const all = DB.load('ideasLocal', []) || [];
+  for (const i of all.filter(x => x.owner === _ideaOwner() && x.status === 'waiting')) {
+    const d = { text: i.text, category: i.category, page: i.page, submittedByName: currentUser?.name || '', submittedRole: currentUser?.role || '' };
+    try { await FSYNC.submitIdea(d); i.status = 'sent'; }
+    catch (_) { if (await _ideaViaChat(d)) i.status = 'chat'; }
+  }
+  DB.save('ideasLocal', all.filter(x => x.status !== 'sent'));
+  _ideasRefresh();
+}
+
+// ---- reviewing (System Manager) ----
+async function saveIdeaReview(id) {
+  if (!_isSysManager()) { showToast('Only the System Manager can update ideas'); return; }
+  const i = (ideas || []).find(x => x.id === id); if (!i) return;
+  const status = document.getElementById('idea-st-' + id)?.value || i.status || 'new';
+  const response = (document.getElementById('idea-re-' + id)?.value || '').trim().slice(0, 1000);
+  const patch = { status, response, reviewedBy: currentUser?.name || '', reviewedAt: new Date().toISOString() };
+  try {
+    await FSYNC.updateIdea(id, patch);
+    Object.assign(i, patch); DB.save('ideas', ideas);
+    audit('Idea reviewed', `${IDEA_STATUS[status][0]} — idea from ${i.submittedByName || 'staff'}`);
+    showToast(`Idea marked “${IDEA_STATUS[status][0]}”${response ? ' — reply sent' : ''}`);
+    document.activeElement?.blur?.(); _ideasRefresh();
+  } catch (e) { showToast('⚠️ Could not save: ' + (e.message || e)); }
+}
+
+// ============================================================
 // INTERNAL CHAT SYSTEM
 // ============================================================
 let _chatUnsubscribes = [];
@@ -12677,7 +13497,7 @@ function handleModalSave() {
 // ===== TOAST =====
 function showToast(msg) {
   const t = document.createElement('div');
-  t.style.cssText = 'position:fixed;bottom:24px;right:24px;background:var(--primary);color:#fff;padding:12px 20px;border-radius:8px;font-size:13px;font-weight:600;z-index:9999;animation:fadeIn 0.2s';
+  t.style.cssText = 'position:fixed;bottom:var(--fab-clear,92px);right:24px;max-width:calc(100vw - 48px);background:var(--primary);color:#fff;padding:12px 20px;border-radius:8px;font-size:13px;font-weight:600;z-index:9999;animation:fadeIn 0.2s';
   t.textContent = '✓ ' + msg;
   document.body.appendChild(t);
   setTimeout(()=>t.remove(), 2500);
@@ -13520,6 +14340,7 @@ function createFirstUser() {} // legacy — no longer used
 function autoSetRole() {}     // legacy — no longer used
 
 async function logout(reason) {
+  removeIdeaFab();
   // Any note form still open: save it as a draft, then close it. Previously
   // the form stayed on screen over the sign-in page after an inactivity
   // sign-out, client details and all.

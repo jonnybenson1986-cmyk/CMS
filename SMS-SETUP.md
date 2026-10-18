@@ -1,4 +1,8 @@
-# Automatic handbook texts — setup guide
+# Automatic texts (handbook + intake links) — setup guide
+
+> **Easiest route:** DEPLOY-FIREBASE.md — GitHub publishes the rules and the
+> text service for you, with the $10/month budget built in. The manual steps
+> below still work.
 
 The CMS can send the SEWB Participant Handbook text itself, from Firebase,
 with no staff phone involved. Three things are needed that only the
@@ -24,9 +28,12 @@ wording — the Firestore rules and the function enforce that.
 
 ## Cost and privacy — read first
 
-* **Cost:** the provider charges per text (check current pricing — a few cents
-  each). Firebase's Blaze plan is pay-as-you-go; this function's own usage is
-  tiny. Set a budget alert (step 1).
+* **Cost:** ClickSend is about 7.2c per SMS + GST + a carrier fee (smallest
+  tier, checked October 2026) — allow **10c**. Every text is written to fit in
+  **one SMS**. The service stops itself at **$10 a month** (SMS_MONTHLY_BUDGET)
+  and hands texts to workers' phones until the 1st. Firebase's Blaze plan is
+  pay-as-you-go; this function's own usage is free at our size. Details and
+  the three budget layers: DEPLOY-FIREBASE.md, section 2.
 * **Privacy:** the provider receives the client's mobile number and first
   name. Use an Australian provider such as **ClickSend** and confirm in its
   terms where messages and logs are stored. If a provider stores data
@@ -42,9 +49,10 @@ wording — the Firestore rules and the function enforce that.
 
 **1. Upgrade Firebase to Blaze.** Firebase Console → project
 `worn-gundidj-cms` → the plan name bottom-left → *Upgrade* → Blaze. Add a
-budget alert (e.g. $20/month) when prompted. Cloud Functions require Blaze.
+**$10/month** budget alert when prompted. Cloud Functions require Blaze.
 
-**2. Create the SMS provider account** (ClickSend shown). Sign up, add credit,
+**2. Create the SMS provider account** (ClickSend shown). Sign up, add **$20**
+credit (the minimum) and **turn auto top-up off**,
 then *Developers → API Credentials*: note the **username** and **API key**.
 Choose a sender number (or sender name) under *SMS → Settings*.
 
@@ -67,15 +75,19 @@ firebase functions:secrets:set SMS_API_KEY
 ```
 Paste each value when asked.
 
-**6. Set the three settings.** Create the file `functions-sms/.env.worn-gundidj-cms`
+**6. Set the settings.** Create the file `functions-sms/.env.worn-gundidj-cms`
 (it is git-ignored) containing:
 ```
 SMS_PROVIDER=clicksend
 SMS_FROM=<your sender number or registered name>
-HANDBOOK_URL=https://<your-cms-address>/handbook/SEWB-Participant-Handbook.pdf
+HANDBOOK_URL=https://<your-cms-address>/hb
+APP_URL=https://<your-cms-address>
+SMS_MONTHLY_BUDGET=10
+SMS_COST_PER_PART=0.10
 ```
-`HANDBOOK_URL` must be the public address of the handbook on your live site —
-open it in a browser to check it loads. (Use `twilio` instead of `clicksend`
+`HANDBOOK_URL` is the short link to the handbook (`/hb`, set up in
+netlify.toml) — open it in a browser to check it loads. The short links keep
+each text to one SMS. (Use `twilio` instead of `clicksend`
 if you chose Twilio: then SMS_USERNAME is the Account SID and SMS_API_KEY the
 Auth Token.)
 
@@ -124,6 +136,9 @@ to opening the worker's own phone. To stop the function completely:
 * **"SMS provider error … insufficient credit"** — top up the provider
   account. Failed requests can be retried with *Send automatically* on the
   client's file.
+* **"Monthly SMS budget of $10.00 reached"** — working as designed: texts go
+  from workers' phones until the 1st. Settings → Automatic texts shows the
+  month's spend. To raise the cap, change `SMS_MONTHLY_BUDGET` and redeploy.
 * **"Requested by an account that is not in the staff directory"** — the
   staff rule isn't published, or the person's profile has no email. See the
   README (Roles) and Settings → Staff Accounts.
@@ -132,5 +147,10 @@ to opening the worker's own phone. To stop the function completely:
 * Logic is in `functions-sms/lib.js` and `handler.js`; unit tests:
   `cd functions-sms && node --test` (no Firebase or network needed).
 * Hourly cap: `HOURLY_CAP` in `lib.js`.
-* Only `kind: 'handbook'` exists today. Other message types should follow the
-  same pattern: the browser asks, the function decides from the record.
+* Two kinds: `handbook`, and `intake` (with the `linkId` of a client intake
+  link — the function checks the link belongs to that client, is still open
+  and hasn't been texted already). New kinds should follow the same pattern:
+  the browser asks, the function decides from the record.
+* Cost: `smsParts()` in `lib.js` counts billed SMS parts (GSM 160 / UCS-2 70);
+  every template is fitted to one part. Spend per month is kept on
+  `teams/{team}/smsUsage/{yyyy-mm}` (staff can read it; only the function writes).
