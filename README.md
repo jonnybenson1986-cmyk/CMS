@@ -116,6 +116,28 @@ name and initial only, and carry no notes.
   connection, Microsoft access, calendar permission, appointments to sync — and
   says in plain words which one fails and what to do.
 
+## 💡 Ideas button
+
+A light-globe button floats at the bottom right of every page (above the
+phone menu bar; behind open windows, so it never covers a Save button). Any
+staff member can send the System Manager an idea for improving the CMS — a
+category, the idea (up to 2,000 characters, voice typing works) and,
+automatically, the screen they were on. It warns, without blocking, if an idea
+names a client or carries a phone number or email address.
+
+* The System Manager's globe shows how many ideas are **New**; it opens to the
+  **Inbox** (filters: Open / New / Done & not now / All), where each idea gets a
+  status — Thinking about it, Planned, Done, Not now — and an optional reply.
+* Staff see their ideas, status and any reply under **My ideas**.
+* Stored in `ideas` (publish `firestore.rules`): anyone signed in can add one,
+  only as themselves and only as New; updates can change only the review
+  fields; nothing is ever deleted. Strict rules: only the System Manager reads
+  them all and reviews; others read only their own.
+* Until the rules are published, an idea is delivered to the System Manager
+  as a chat message instead; if nothing can be reached it waits on the device
+  and sends itself later. Sending and reviewing are audited (category and
+  status only, never the idea text).
+
 ## Forgotten passwords
 
 The sign-in page has a **Forgot password?** link. Firebase emails the person a

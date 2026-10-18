@@ -168,6 +168,28 @@ service cloud.firestore {
       allow write: if isSys();
     }
 
+    // ── 💡 Ideas for improving the CMS (the light-globe button) ─────────────
+    // Anyone signed in can send one — only as themselves, only as "new", text
+    // and a few labels, nothing else. Only the System Manager reads them all and
+    // reviews them (status / reply); others read only their own. Never deleted.
+    match /teams/{teamId}/ideas/{id} {
+      allow read: if isSys() || (signedIn() && resource.data.submittedBy == request.auth.uid);
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['text', 'category', 'page', 'submittedBy', 'submittedByName', 'submittedRole', 'createdAt', 'status'])
+        && request.resource.data.submittedBy == request.auth.uid
+        && request.resource.data.status == 'new'
+        && request.resource.data.text is string
+        && request.resource.data.text.size() > 0 && request.resource.data.text.size() <= 2000
+        && request.resource.data.category is string && request.resource.data.category.size() <= 80
+        && request.resource.data.page is string && request.resource.data.page.size() <= 60
+        && request.resource.data.submittedByName is string && request.resource.data.submittedByName.size() <= 120
+        && request.resource.data.createdAt is string;
+      allow update: if isSys() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'response', 'reviewedBy', 'reviewedAt'])
+        && request.resource.data.status in ['new', 'considering', 'planned', 'done', 'notnow']
+        && (!('response' in request.resource.data) || (request.resource.data.response is string && request.resource.data.response.size() <= 1000));
+      allow delete: if false;
+    }
+
     // Role mirror: written exclusively by the Cloud Functions (Admin SDK
     // bypasses rules). Clients may read it, never write it.
     match /teams/{teamId}/roles/{uid} {

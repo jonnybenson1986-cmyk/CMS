@@ -116,6 +116,39 @@
     border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 -4px 14px rgba(0,0,0,0.08); }
   .save-bar .save-bar-note { font-size: 12px; color: var(--muted); margin-right: auto; }
   @media print { .save-bar { display: none !important; } }
+
+  /* 💡 Ideas — floating light-globe button, bottom right. Sits below open
+     windows (z 200) so it never covers a Save button; pop-up messages and the
+     sync badge sit clear of it (--fab-clear). */
+  :root { --fab-clear: 92px; }
+  #idea-fab { position: fixed; right: 20px; bottom: calc(20px + env(safe-area-inset-bottom)); z-index: 150;
+    width: 58px; height: 58px; border-radius: 50%; border: none; cursor: pointer; padding: 0;
+    background: radial-gradient(circle at 50% 38%, #fffbeb 0%, #fde68a 38%, #f59e0b 100%);
+    box-shadow: 0 0 0 3px rgba(255,255,255,.9), 0 6px 18px rgba(180,83,9,.35), 0 0 22px rgba(251,191,36,.55);
+    display: flex; align-items: center; justify-content: center; transition: transform .15s ease, box-shadow .15s ease;
+    animation: ideaGlow 3.2s ease-in-out infinite; }
+  #idea-fab:hover, #idea-fab:focus-visible { transform: translateY(-2px) scale(1.06); outline: none;
+    box-shadow: 0 0 0 3px #fff, 0 8px 22px rgba(180,83,9,.45), 0 0 34px rgba(251,191,36,.85); }
+  #idea-fab:focus-visible { box-shadow: 0 0 0 3px #fff, 0 0 0 6px var(--primary), 0 0 30px rgba(251,191,36,.8); }
+  #idea-fab svg { width: 34px; height: 34px; filter: drop-shadow(0 1px 1px rgba(120,53,15,.25)); }
+  #idea-fab .idea-fab-badge { position: absolute; top: -4px; right: -4px; min-width: 22px; height: 22px; padding: 0 6px;
+    border-radius: 11px; background: #dc2626; color: #fff; font: 700 12px/22px system-ui, sans-serif; text-align: center;
+    box-shadow: 0 0 0 2px #fff; }
+  #idea-fab .idea-fab-tip { position: absolute; right: 68px; top: 50%; transform: translateY(-50%); white-space: nowrap;
+    background: #1f2937; color: #fff; font-size: 12px; font-weight: 600; padding: 6px 10px; border-radius: 6px;
+    opacity: 0; pointer-events: none; transition: opacity .15s; }
+  #idea-fab:hover .idea-fab-tip, #idea-fab:focus-visible .idea-fab-tip { opacity: 1; }
+  @keyframes ideaGlow { 0%,100% { box-shadow: 0 0 0 3px rgba(255,255,255,.9), 0 6px 18px rgba(180,83,9,.35), 0 0 16px rgba(251,191,36,.45); }
+                        50%     { box-shadow: 0 0 0 3px rgba(255,255,255,.9), 0 6px 18px rgba(180,83,9,.35), 0 0 30px rgba(251,191,36,.8); } }
+  @media (prefers-reduced-motion: reduce) { #idea-fab { animation: none; transition: none; } }
+  @media print { #idea-fab { display: none !important; } }
+  body.has-idea-fab .save-bar { padding-right: 88px; }
+  .idea-chip { display:inline-block; font-size:11px; font-weight:700; padding:2px 9px; border-radius:10px; }
+  .idea-card { border:1px solid var(--border); border-radius:10px; padding:12px 14px; margin-bottom:10px; background:#fff; }
+  .idea-card.is-new { border-left:4px solid #f59e0b; }
+  .idea-card .idea-text { font-size:14px; white-space:pre-wrap; word-break:break-word; margin:6px 0 8px; }
+  .idea-card .idea-meta { font-size:11px; color:var(--muted); }
+  .idea-tabs { display:flex; gap:6px; margin-bottom:14px; flex-wrap:wrap; }
   .btn-accent { background: var(--accent); color: #fff; }
   .btn-accent:hover { background: var(--accent2); }
   .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text); }
@@ -337,6 +370,10 @@
 
     /* Bottom navigation bar */
     .save-bar { bottom: calc(66px + env(safe-area-inset-bottom)); }
+    :root { --fab-clear: 144px; }
+    #idea-fab { bottom: calc(72px + env(safe-area-inset-bottom)); right: 14px; width: 52px; height: 52px; }
+    #idea-fab svg { width: 30px; height: 30px; }
+    #idea-fab .idea-fab-tip { display: none; }
     #mob-bottomnav {
       display: flex; position: fixed; bottom: 0; left: 0; right: 0; height: 60px;
       background: var(--primary); z-index: 97;
@@ -741,6 +778,14 @@ const FSYNC = (() => {
     _listeners.push(col('staff').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; const l=doc.exists?doc.data().list:null; if(Array.isArray(l)&&l.length){ _mergeStaffDirectory(l); if(currentPage==='settings')setTimeout(()=>showPage('settings'),50); } }, e=>{ console.warn('staff listener:',e.message); _noteStaffSync(false,e); }));
     _listeners.push(col('policies').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; const pl=doc.exists?doc.data().list:null; if(pl){ policies=pl; DB.save('policies',policies); if(currentPage==='policies')setTimeout(()=>showPage('policies'),50); } }, e=>console.warn('policies listener:',e.message)));
     // Automatic texts: the outbox (results written back by the Cloud Function) and the on/off switch.
+    // 💡 Ideas: the System Manager reads them all; with the strict rules anyone
+    // else may read only their own, so a refused full read falls back to that.
+    const _ideasIn = snap => { ideas = snap.docs.map(d=>Object.assign({id:d.id}, d.data())); DB.save('ideas', ideas); window._ideasErr = ''; try{ _ideasRefresh(); }catch(_){} };
+    _listeners.push(col('ideas').onSnapshot(_ideasIn, e=>{
+      const u = firebase.auth().currentUser;
+      if (e.code==='permission-denied' && u) _listeners.push(col('ideas').where('submittedBy','==',u.uid).onSnapshot(_ideasIn, e2=>{ window._ideasErr=e2.code||e2.message; console.warn('ideas listener:', e2.message); }));
+      else { window._ideasErr=e.code||e.message; console.warn('ideas listener:', e.message); }
+    }));
     _listeners.push(col('smsOutbox').onSnapshot(snap=>{ smsOutbox=snap.docs.map(d=>Object.assign({id:d.id},d.data())); DB.save('smsOutbox',smsOutbox); try{ _smsRefresh(); }catch(_){} }, e=>{ window._smsListenErr=e.code||e.message; console.warn('smsOutbox listener:',e.message); }));
     // Outlook set-up: appConfig/outlook, mirrored to staff/outlookSetup (readable under the rules
     // already published, so staff get it before the newer appConfig rules are). Newest copy wins.
@@ -982,7 +1027,7 @@ const FSYNC = (() => {
 
   function _showSyncBadge(ok, err) {
     let b=document.getElementById('sync-badge');
-    if (!b) { b=document.createElement('div'); b.id='sync-badge'; b.style.cssText='position:fixed;bottom:16px;right:16px;padding:6px 14px;border-radius:20px;font-size:12px;font-weight:700;z-index:9999;box-shadow:0 2px 8px rgba(0,0,0,0.15);transition:opacity 0.5s'; document.body.appendChild(b); }
+    if (!b) { b=document.createElement('div'); b.id='sync-badge'; b.style.cssText='position:fixed;bottom:calc(var(--fab-clear,92px) - 72px);right:92px;padding:6px 14px;border-radius:20px;font-size:12px;font-weight:700;z-index:9999;box-shadow:0 2px 8px rgba(0,0,0,0.15);transition:opacity 0.5s'; document.body.appendChild(b); }
     if (ok) { b.style.background='#d1fae5';b.style.color='#065f46';b.textContent='☁️ Cloud sync active';setTimeout(()=>{b.style.opacity='0';setTimeout(()=>b.remove(),600);},3000); }
     else { b.style.background='#fee2e2';b.style.color='#991b1b';b.title=err||'';b.textContent='☁️ Sync offline'; }
   }
@@ -1050,6 +1095,15 @@ const FSYNC = (() => {
 
   // Ask the Cloud Function to text the handbook. Only the client id is sent —
   // the function reads the number from the client's file and writes the message.
+  // An idea always goes in as the signed-in person, status "new" (the rules check both).
+  async function submitIdea(d) {
+    if(!db) throw new Error('Not connected to the cloud');
+    const u = firebase.auth().currentUser; if(!u) throw new Error('Not signed in');
+    const doc = { text:String(d.text||''), category:String(d.category||''), page:String(d.page||''), submittedBy:u.uid,
+      submittedByName:String(d.submittedByName||''), submittedRole:String(d.submittedRole||''), createdAt:new Date().toISOString(), status:'new' };
+    const ref = await col('ideas').add(doc); return Object.assign({ id:ref.id }, doc);
+  }
+  async function updateIdea(id, patch) { if(!db) throw new Error('Not connected to the cloud'); await col('ideas').doc(id).update(patch); }
   async function queueSms(clientId) {
     if(!db) throw new Error('Not connected to the cloud');
     const u = firebase.auth().currentUser; if(!u) throw new Error('Not signed in');
@@ -1071,7 +1125,7 @@ const FSYNC = (() => {
 
   return { init, isReady, pushAll, pushClients, pushNotes, pushReferrals, pushWorkers, pushTasks, pushAudit, pushBrokerage, deleteDoc, getCfg, saveCfg, showSetupModal, clearConfig,
     storageReady, uploadFile, deleteStorageFile, getStorageURL, pushPolicies,
-    pushFpho, pushWalkins, pushCalEvents, pushResources, resyncAll, pushStaff, fetchStaff, staffSyncStatus, queueSms, setSmsConfig, setAppConfig };
+    pushFpho, pushWalkins, pushCalEvents, pushResources, resyncAll, pushStaff, fetchStaff, staffSyncStatus, queueSms, setSmsConfig, setAppConfig, submitIdea, updateIdea };
 })();
 
 let clients = DB.load('clients', []);
@@ -1097,7 +1151,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v85';
+const APP_VERSION = 'v86';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -1228,6 +1282,7 @@ function showPage(page) {
   // Background refreshes (e.g. sync snapshots) can fire while the login screen
   // has replaced #main — nothing to render onto yet, so bail out safely.
   if(!document.getElementById('page-title')) return;
+  ensureIdeaFab();
   setMobTab(page);
   document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
   const items = document.querySelectorAll('.nav-item');
@@ -3324,7 +3379,7 @@ function _handbookFallback(clientId, notice) {
   document.getElementById('hb-fallback')?.remove();
   const el = document.createElement('div');
   el.id = 'hb-fallback'; el.setAttribute('role', 'alert');
-  el.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:10050;max-width:min(420px,calc(100vw - 32px));background:#fff7ed;border:1px solid #fdba74;border-left:5px solid #ea580c;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.18);padding:12px 14px;font-size:13px;line-height:1.45;color:#7c2d12';
+  el.style.cssText = 'position:fixed;right:16px;bottom:var(--fab-clear,92px);z-index:10050;max-width:min(420px,calc(100vw - 32px));background:#fff7ed;border:1px solid #fdba74;border-left:5px solid #ea580c;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.18);padding:12px 14px;font-size:13px;line-height:1.45;color:#7c2d12';
   el.innerHTML = `<div style="font-weight:700;margin-bottom:4px">📘 Handbook not sent to ${sanitize(c.fullName)} yet</div>
     <div style="margin-bottom:10px">${sanitize(notice)}</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -12301,6 +12356,229 @@ function removeDemoData() {
 }
 
 // ============================================================
+// 💡 IDEAS — the light-globe button, bottom right of every page. Anyone can
+// send the System Manager an idea for improving the CMS. The System Manager
+// reviews them in the Ideas inbox (the globe shows how many are new), sets a
+// status and can reply; the person who sent it sees that under "My ideas".
+// Ideas live in the "ideas" collection. If Firebase refuses it (rules not yet
+// published) the idea goes to the System Manager as a chat message instead,
+// and if that fails too it waits on this device and is sent automatically.
+// ============================================================
+let ideas = DB.load('ideas', []) || [];
+let _ideaTab = 'share', _ideaFilter = 'open', _ideaDraft = null, _ideaRetryAt = 0;
+const IDEA_MAX = 2000;
+const IDEA_CATEGORIES = ['Make something easier or faster', 'Something isn’t working right', 'A new feature', 'Reports & data', 'Client experience', 'Other'];
+const IDEA_STATUS = {
+  new:         ['New',                  '#1e40af', '#dbeafe'],
+  considering: ['Thinking about it',    '#92400e', '#fef3c7'],
+  planned:     ['Planned',              '#5b21b6', '#ede9fe'],
+  done:        ['Done',                 '#065f46', '#d1fae5'],
+  notnow:      ['Not now',              '#4b5563', '#f3f4f6'],
+  chat:        ['Sent as chat message', '#1e40af', '#e0f2fe'],
+  waiting:     ['Waiting to send',      '#991b1b', '#fee2e2'],
+};
+const IDEA_BULB_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+  <g stroke="#b45309" stroke-width="1.2" stroke-linecap="round"><path d="M2.6 9.2h1.5M19.9 9.2h1.5M4.9 3.4l1.05 1.05M19.1 3.4l-1.05 1.05M12 .6v1.2"/></g>
+  <path d="M12 2.6a6.4 6.4 0 0 0-3.85 11.5c.62.5.98 1.22.98 2V17h5.74v-.9c0-.78.36-1.5.98-2A6.4 6.4 0 0 0 12 2.6z" fill="#fffbea" stroke="#92400e" stroke-width="1.25" stroke-linejoin="round"/>
+  <path d="M9.9 11.6l1.05 1.2 1.05-1.2 1.05 1.2 1.05-1.2" fill="none" stroke="#f59e0b" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M10.95 12.8V17M13.05 12.8V17" stroke="#f59e0b" stroke-width="1"/>
+  <rect x="9.05" y="17.35" width="5.9" height="1.55" rx=".6" fill="#78716c"/>
+  <rect x="9.45" y="19.3" width="5.1" height="1.45" rx=".6" fill="#57534e"/>
+  <path d="M10.7 21.35h2.6" stroke="#44403c" stroke-width="1.3" stroke-linecap="round"/>
+</svg>`;
+
+function _ideaUid() { try { return (window.firebase && firebase.apps && firebase.apps.length && firebase.auth().currentUser?.uid) || ''; } catch (_) { return ''; } }
+function _ideaOwner() { return String(currentUser?.email || currentUser?.name || '').toLowerCase(); }
+function _isSysManager() { return currentUser?.role === 'sysmanager'; }
+function newIdeasCount() { return _isSysManager() ? (ideas || []).filter(i => (i.status || 'new') === 'new').length : 0; }
+function _localIdeas() { return (DB.load('ideasLocal', []) || []).filter(i => i && i.owner === _ideaOwner()); }
+function myIdeas() {
+  const uid = _ideaUid(), me = String(currentUser?.name || '');
+  const cloud = (ideas || []).filter(i => uid ? i.submittedBy === uid : (me && i.submittedByName === me));
+  return [...cloud, ..._localIdeas()].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+}
+function _ideaPageLabel() { return (document.getElementById('page-title')?.textContent || currentPage || '').trim().slice(0, 40); }
+function _ideaChip(st) { const s = IDEA_STATUS[st || 'new'] || IDEA_STATUS.new; return `<span class="idea-chip" style="color:${s[1]};background:${s[2]}">${s[0]}</span>`; }
+
+// ---- the button ----
+function ensureIdeaFab() {
+  if (!currentUser) return removeIdeaFab();
+  let b = document.getElementById('idea-fab');
+  if (!b) {
+    b = document.createElement('button'); b.id = 'idea-fab'; b.type = 'button';
+    b.addEventListener('click', () => openIdeasModal());
+    document.body.appendChild(b); document.body.classList.add('has-idea-fab');
+  }
+  const n = newIdeasCount();
+  const label = n ? `Ideas — ${n} new idea${n !== 1 ? 's' : ''} to review` : 'Share an idea to improve the CMS';
+  b.setAttribute('aria-label', label);
+  b.innerHTML = IDEA_BULB_SVG + `<span class="idea-fab-tip">${sanitize(label)}</span>` + (n ? `<span class="idea-fab-badge">${n > 99 ? '99+' : n}</span>` : '');
+  if (Date.now() > _ideaRetryAt && _localIdeas().some(i => i.status === 'waiting')) retryIdeasWaiting();
+}
+function removeIdeaFab() { document.getElementById('idea-fab')?.remove(); document.body.classList.remove('has-idea-fab'); }
+// New data from the cloud: update the badge, and the open window — but never
+// redraw over something being typed.
+function _ideasRefresh() {
+  if (document.getElementById('idea-fab')) ensureIdeaFab();
+  if (!document.getElementById('idea-body')) return;
+  _renderIdeaTabs();
+  const a = document.activeElement;
+  if (_ideaTab === 'share' || (a && a.closest && a.closest('#idea-body') && /TEXTAREA|SELECT|INPUT/.test(a.tagName))) return;
+  _renderIdeaBody();
+}
+
+// ---- the window ----
+function openIdeasModal(tab) {
+  _ideaTab = tab || (newIdeasCount() ? 'inbox' : 'share');
+  showModal('💡 Ideas for the CMS', `<div class="idea-tabs" id="idea-tabs" role="tablist"></div><div id="idea-body"></div>`, null, '700px', true);
+  _renderIdeaTabs(); _renderIdeaBody();
+  if (_ideaTab === 'share') setTimeout(() => document.getElementById('idea-text')?.focus(), 50);
+}
+function _ideaGoTab(t) { _saveIdeaDraft(); _ideaTab = t; _renderIdeaTabs(); _renderIdeaBody(); }
+function _renderIdeaTabs() {
+  const el = document.getElementById('idea-tabs'); if (!el) return;
+  const n = newIdeasCount(), mine = myIdeas().length;
+  const tab = (id, label) => `<button type="button" role="tab" aria-selected="${_ideaTab === id}" class="btn btn-sm ${_ideaTab === id ? 'btn-primary' : 'btn-outline'}" id="idea-tab-${id}" onclick="_ideaGoTab('${id}')">${label}</button>`;
+  el.innerHTML = tab('share', '💡 Share an idea') + tab('mine', `📝 My ideas${mine ? ' (' + mine + ')' : ''}`)
+    + (_isSysManager() ? tab('inbox', `📥 Inbox${n ? ` <span class="idea-chip" style="background:#dc2626;color:#fff;margin-left:4px">${n} new</span>` : ''}`) : '');
+}
+function _renderIdeaBody() {
+  const el = document.getElementById('idea-body'); if (!el) return;
+  el.innerHTML = _ideaTab === 'inbox' && _isSysManager() ? _ideaInboxHTML() : _ideaTab === 'mine' ? _ideaMineHTML() : _ideaShareHTML();
+}
+function _saveIdeaDraft() {
+  const t = document.getElementById('idea-text'); if (!t) return;
+  _ideaDraft = { text: t.value, category: document.getElementById('idea-cat')?.value || '' };
+}
+function _ideaShareHTML() {
+  const d = _ideaDraft || { text: '', category: IDEA_CATEGORIES[0] };
+  const sms = (userProfiles || []).filter(u => u.role === 'sysmanager').map(u => u.name).filter(Boolean);
+  return `<p style="font-size:13px;margin:0 0 12px">Got an idea to make the CMS easier, quicker or better for clients? It goes straight to the System Manager${sms.length && !_isSysManager() ? ` (${sanitize(sms.join(', '))})` : ''}, who will let you know what happens with it.</p>
+    <div class="form-group"><label for="idea-cat">What kind of idea?</label>
+      <select id="idea-cat">${IDEA_CATEGORIES.map(c => `<option${c === d.category ? ' selected' : ''}>${sanitize(c)}</option>`).join('')}</select></div>
+    <div class="form-group"><label for="idea-text">Your idea *</label>
+      <textarea id="idea-text" rows="6" maxlength="${IDEA_MAX}" style="width:100%;box-sizing:border-box;font-size:14px" placeholder="e.g. It would save time if I could log time straight from a calendar appointment…" oninput="document.getElementById('idea-count').textContent=this.value.length+' / ${IDEA_MAX}'">${sanitize(d.text)}</textarea>
+      <div style="display:flex;justify-content:space-between;gap:10px;font-size:11px;color:var(--muted);margin-top:4px">
+        <span>🔒 Please don’t include client names or personal details — describe the idea, not the person.</span><span id="idea-count" style="white-space:nowrap">${d.text.length} / ${IDEA_MAX}</span></div></div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Sent from: <strong>${sanitize(_ideaPageLabel() || 'the CMS')}</strong> — so the System Manager knows which screen you mean.</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn btn-primary" id="idea-send" onclick="sendIdea()">💡 Send idea</button>
+      <button type="button" class="btn btn-outline" onclick="_saveIdeaDraft();closeModal()">Cancel</button></div>`;
+}
+function _ideaCardHTML(i, inbox) {
+  const st = i.status || 'new';
+  const who = inbox ? `From <strong>${sanitize(i.submittedByName || 'Unknown')}</strong>${i.submittedRole && ROLES[i.submittedRole] ? ' · ' + sanitize(ROLES[i.submittedRole].label) : ''} · ` : '';
+  const reply = i.response ? `<div style="font-size:13px;background:#f8fafc;border-radius:8px;padding:8px 10px;margin-top:8px"><strong>Reply${i.reviewedBy ? ' from ' + sanitize(i.reviewedBy) : ''}:</strong> ${sanitize(i.response)}</div>` : '';
+  const controls = inbox && i.id ? `<div style="display:grid;grid-template-columns:minmax(150px,200px) 1fr auto;gap:8px;align-items:start;margin-top:10px" class="idea-review">
+      <select id="idea-st-${sanitize(i.id)}" aria-label="Status">${['new', 'considering', 'planned', 'done', 'notnow'].map(k => `<option value="${k}"${k === st ? ' selected' : ''}>${IDEA_STATUS[k][0]}</option>`).join('')}</select>
+      <textarea id="idea-re-${sanitize(i.id)}" rows="1" maxlength="1000" placeholder="Reply to ${sanitize((i.submittedByName || 'them').split(' ')[0])} (optional)" style="width:100%;box-sizing:border-box;min-height:38px;font-size:13px">${sanitize(i.response || '')}</textarea>
+      <button type="button" class="btn btn-sm btn-primary" onclick="saveIdeaReview('${sanitize(i.id)}')">Save</button></div>` : '';
+  return `<div class="idea-card${inbox && st === 'new' ? ' is-new' : ''}" data-idea="${sanitize(i.id || i.localId || '')}">
+    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">${_ideaChip(st)}<span class="idea-chip" style="background:#f1f5f9;color:#334155">${sanitize(i.category || 'Idea')}</span></div>
+    <div class="idea-text">${sanitize(i.text || '')}</div>
+    <div class="idea-meta">${who}${fmtdt(i.createdAt)}${i.page ? ' · on ' + sanitize(i.page) : ''}${i.reviewedAt && inbox ? ' · updated ' + fmtdt(i.reviewedAt) : ''}</div>
+    ${reply}${controls}</div>`;
+}
+function _ideaMineHTML() {
+  const list = myIdeas();
+  if (!list.length) return `<div style="text-align:center;padding:30px 10px;color:var(--muted)"><div style="font-size:34px">💡</div><p>You haven’t sent any ideas yet.</p><button type="button" class="btn btn-primary" onclick="_ideaGoTab('share')">Share an idea</button></div>`;
+  return `<p style="font-size:12px;color:var(--muted);margin:0 0 10px">What happened to the ideas you’ve sent. The System Manager sets the status and may reply.</p>` + list.map(i => _ideaCardHTML(i, false)).join('');
+}
+function _ideaInboxHTML() {
+  const all = (ideas || []).slice().sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+  const F = { open: ['Open', i => ['new', 'considering', 'planned'].includes(i.status || 'new')], new: ['New', i => (i.status || 'new') === 'new'], closed: ['Done & not now', i => ['done', 'notnow'].includes(i.status)], all: ['All', () => true] };
+  const list = all.filter(F[_ideaFilter] ? F[_ideaFilter][1] : F.open[1]);
+  const err = window._ideasErr ? `<div class="alert alert-warning" style="font-size:12px">Firebase refused the Ideas inbox (${sanitize(window._ideasErr)}). Publish the latest <strong>firestore.rules</strong> in the Firebase console. Until then, ideas reach you as chat messages.</div>` : '';
+  return err + `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">${Object.entries(F).map(([k, [label, fn]]) => `<button type="button" class="btn btn-sm ${_ideaFilter === k ? 'btn-primary' : 'btn-outline'}" onclick="_ideaFilter='${k}';_renderIdeaBody()">${label} (${all.filter(fn).length})</button>`).join('')}</div>`
+    + (list.length ? list.map(i => _ideaCardHTML(i, true)).join('') : `<div style="text-align:center;padding:30px 10px;color:var(--muted)"><div style="font-size:34px">💡</div><p>${all.length ? 'Nothing here.' : 'No ideas yet. Staff send them with the light-globe button at the bottom right.'}</p></div>`);
+}
+
+// ---- sending ----
+// Ideas aren't client records: warn (not block) if one names a client or carries contact details.
+function _ideaPrivacyHit(text) {
+  const t = String(text || '');
+  const esc = v => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const c = (clients || []).find(c => {
+    const n = String(c && c.fullName || '').replace(/"[^"]*"/g, ' ').replace(/\s+/g, ' ').trim();
+    return n.split(' ').length >= 2 && n.length >= 5 && new RegExp('(^|[^\\p{L}])' + esc(n) + '($|[^\\p{L}])', 'iu').test(t);
+  });
+  if (c) return `a client’s name (${c.fullName})`;
+  if (/(\+?61|\b0)[2-478](?:[ -]?\d){8}\b/.test(t)) return 'a phone number';
+  if (/[^\s@]+@[^\s@]+\.[a-z]{2,}/i.test(t)) return 'an email address';
+  return '';
+}
+async function sendIdea() {
+  const text = (document.getElementById('idea-text')?.value || '').trim();
+  const category = document.getElementById('idea-cat')?.value || IDEA_CATEGORIES[0];
+  if (text.length < 5) { alert('Please describe your idea — a sentence or two is perfect.'); document.getElementById('idea-text')?.focus(); return; }
+  const hit = _ideaPrivacyHit(text);
+  if (hit && !confirm(`Your idea seems to include ${hit}.\n\nIdeas aren’t client records — please describe the idea without client details.\n\nPress Cancel to edit it, or OK to send it as it is.`)) return;
+  const btn = document.getElementById('idea-send'); if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+  const d = { text: text.slice(0, IDEA_MAX), category, page: _ideaPageLabel(), submittedByName: currentUser?.name || '', submittedRole: currentUser?.role || '' };
+  let how = 'inbox';
+  try { if (!FSYNC.isReady()) throw new Error('Not connected to the cloud'); await FSYNC.submitIdea(d); }
+  catch (e) {
+    console.warn('Idea not saved to the inbox:', e.message);
+    how = (await _ideaViaChat(d)) ? 'chat' : 'waiting';
+    _saveLocalIdea(d, how);
+  }
+  audit('Idea sent to the System Manager', category + (how === 'chat' ? ' (as a chat message)' : how === 'waiting' ? ' (waiting to send)' : ''));
+  _ideaDraft = null;
+  showToast(how === 'waiting' ? 'Saved — it couldn’t be sent just now, and will be sent automatically' : '💡 Thanks! Your idea has gone to the System Manager');
+  if (document.getElementById('idea-body')) { _ideaTab = 'mine'; _renderIdeaTabs(); _renderIdeaBody(); }
+}
+function _saveLocalIdea(d, status) {
+  const all = DB.load('ideasLocal', []) || [];
+  all.push({ localId: 'L' + Date.now().toString(36), owner: _ideaOwner(), text: d.text, category: d.category, page: d.page, createdAt: new Date().toISOString(), status });
+  DB.save('ideasLocal', all);
+}
+// Backup route while the "ideas" rules aren't published: a direct chat message to each System Manager.
+async function _ideaViaChat(d) {
+  try {
+    if (!FSYNC.isReady() || !chatCol('chatConvs')) return false;
+    const myId = currentUser?.id, targets = (userProfiles || []).filter(u => u && u.role === 'sysmanager' && u.id && u.id !== myId);
+    if (!myId || !targets.length) return false;
+    const at = new Date().toISOString(), text = `💡 Idea for the CMS — ${d.category}\n\n${d.text}\n\n(Sent from: ${d.page || 'the CMS'})`;
+    for (const t of targets) {
+      const conv = (_chatConversations || []).find(c => c.type === 'dm' && (c.members || []).includes(t.id) && c.members.includes(myId));
+      let convId = conv && conv.id;
+      if (!convId) convId = (await chatCol('chatConvs').add({ type: 'dm', members: [myId, t.id], lastMsg: '', lastAt: at, unread: {} })).id;
+      await chatCol('chatMsgs').add({ convId, senderId: myId, senderName: currentUser?.name || '', text, at });
+      await chatCol('chatConvs').doc(convId).update({ lastMsg: '💡 ' + d.text.slice(0, 80), lastAt: at, unread: { [t.id]: 1 } });
+    }
+    return true;
+  } catch (e) { console.warn('Idea chat message failed:', e.message); return false; }
+}
+// Ideas saved on this device because nothing could be reached: send them once the cloud is back.
+async function retryIdeasWaiting() {
+  _ideaRetryAt = Date.now() + 60 * 1000;
+  if (!FSYNC.isReady()) return;
+  const all = DB.load('ideasLocal', []) || [];
+  for (const i of all.filter(x => x.owner === _ideaOwner() && x.status === 'waiting')) {
+    const d = { text: i.text, category: i.category, page: i.page, submittedByName: currentUser?.name || '', submittedRole: currentUser?.role || '' };
+    try { await FSYNC.submitIdea(d); i.status = 'sent'; }
+    catch (_) { if (await _ideaViaChat(d)) i.status = 'chat'; }
+  }
+  DB.save('ideasLocal', all.filter(x => x.status !== 'sent'));
+  _ideasRefresh();
+}
+
+// ---- reviewing (System Manager) ----
+async function saveIdeaReview(id) {
+  if (!_isSysManager()) { showToast('Only the System Manager can update ideas'); return; }
+  const i = (ideas || []).find(x => x.id === id); if (!i) return;
+  const status = document.getElementById('idea-st-' + id)?.value || i.status || 'new';
+  const response = (document.getElementById('idea-re-' + id)?.value || '').trim().slice(0, 1000);
+  const patch = { status, response, reviewedBy: currentUser?.name || '', reviewedAt: new Date().toISOString() };
+  try {
+    await FSYNC.updateIdea(id, patch);
+    Object.assign(i, patch); DB.save('ideas', ideas);
+    audit('Idea reviewed', `${IDEA_STATUS[status][0]} — idea from ${i.submittedByName || 'staff'}`);
+    showToast(`Idea marked “${IDEA_STATUS[status][0]}”${response ? ' — reply sent' : ''}`);
+    document.activeElement?.blur?.(); _ideasRefresh();
+  } catch (e) { showToast('⚠️ Could not save: ' + (e.message || e)); }
+}
+
+// ============================================================
 // INTERNAL CHAT SYSTEM
 // ============================================================
 let _chatUnsubscribes = [];
@@ -12677,7 +12955,7 @@ function handleModalSave() {
 // ===== TOAST =====
 function showToast(msg) {
   const t = document.createElement('div');
-  t.style.cssText = 'position:fixed;bottom:24px;right:24px;background:var(--primary);color:#fff;padding:12px 20px;border-radius:8px;font-size:13px;font-weight:600;z-index:9999;animation:fadeIn 0.2s';
+  t.style.cssText = 'position:fixed;bottom:var(--fab-clear,92px);right:24px;max-width:calc(100vw - 48px);background:var(--primary);color:#fff;padding:12px 20px;border-radius:8px;font-size:13px;font-weight:600;z-index:9999;animation:fadeIn 0.2s';
   t.textContent = '✓ ' + msg;
   document.body.appendChild(t);
   setTimeout(()=>t.remove(), 2500);
@@ -13520,6 +13798,7 @@ function createFirstUser() {} // legacy — no longer used
 function autoSetRole() {}     // legacy — no longer used
 
 async function logout(reason) {
+  removeIdeaFab();
   // Any note form still open: save it as a draft, then close it. Previously
   // the form stayed on screen over the sign-in page after an inactivity
   // sign-out, client details and all.
