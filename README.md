@@ -116,6 +116,27 @@ name and initial only, and carry no notes.
   connection, Microsoft access, calendar permission, appointments to sync — and
   says in plain words which one fails and what to do.
 
+## 🔗 Merging duplicate client files
+
+Managers see **possible duplicate client files** at the top of the Clients page
+(same REF number, a file listed twice, or the same name with the same — or a
+missing — date of birth), or use a file's **Actions → Merge with another file**.
+
+* The file with the most information (details plus case notes, time and
+  appointments) is chosen to keep — you can pick the other one.
+* The preview shows exactly what happens: everything linked to the other file
+  (case notes, time entries, appointments, tasks, walk-ins, intake forms, the
+  referral link, automatic handbook texts) **moves** to the kept file; blank
+  details are **filled in**; lists (services, goals, attachments…) are
+  **combined**; the earliest start date, the higher risk level, restricted
+  access and an open file win automatically; any other real difference (e.g.
+  two phone numbers) is yours to choose.
+* The other file is then removed for everyone (a tracked delete) and the kept
+  file records `mergedFrom`. Audited. "Not the same person" stops a pair being
+  suggested again.
+* Cause of the duplicates: converting the same referral twice made a second
+  file with the same REF number. Converting again now opens the existing file.
+
 ## 📲 Client intake form by link
 
 A worker can send a client a link to fill in their own SEWB intake on their

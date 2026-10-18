@@ -1173,7 +1173,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v87';
+const APP_VERSION = 'v88';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -1438,7 +1438,7 @@ function renderClients() {
     .filter(canViewClient)
     .filter(c=>(c.status||'active')!=='closed')
     .filter(c=>!search||c.fullName?.toLowerCase().includes(search)||c.clientId?.toLowerCase().includes(search)||c.community?.toLowerCase().includes(search));
-  return `
+  return `${duplicateClientsBannerHTML()}
   <div class="card" style="padding:0;overflow:hidden">
     <div class="table-wrap">
       <table>
@@ -1593,6 +1593,7 @@ function profileHeaderHTML(c) {
         <div class="pf-menu-list" role="menu">
           <button class="pf-menu-item" role="menuitem" onclick="openEditClientModal('${id}')"><span>✏️</span><span>Edit details<small>Name, contact, programs, risk</small></span></button>
           ${['sysmanager', 'admin', 'supervisor'].includes(role) ? `<button class="pf-menu-item" role="menuitem" onclick="openAssignWorkersModal('${id}')"><span>👥</span><span>Assign workers<small>Key worker and team</small></span></button>` : ''}
+          ${_canMergeClients() ? `<button class="pf-menu-item" role="menuitem" id="pf-merge" onclick="openMergeWithModal('${id}')"><span>🔗</span><span>Merge with another file<small>Combine a duplicate file into this one</small></span></button>` : ''}
           ${role === 'sysmanager' ? `<button class="pf-menu-item" role="menuitem" onclick="openRestrictAccessModal('${id}')"><span>${c.accessRestricted ? '🔒' : '🔓'}</span><span>${c.accessRestricted ? 'Access is restricted' : 'Restrict access'}<small>${c.accessRestricted ? 'Restricted to ' + (c.allowedWorkers || []).length + ' worker' + ((c.allowedWorkers || []).length !== 1 ? 's' : '') + ' + managers' : 'Limit who can open this file'}</small></span></button>` : ''}
           ${closed ? `<button class="pf-menu-item" role="menuitem" onclick="reopenClient('${id}')"><span>🔓</span><span>Reopen file<small>Starts a new episode</small></span></button>`
                    : `<div class="pf-menu-sep"></div><button class="pf-menu-item danger" role="menuitem" onclick="closeClient('${id}')"><span>🔒</span><span>Close client file<small>Opens the end-of-episode review</small></span></button>`}
@@ -8426,6 +8427,15 @@ function openReferralStatusModal(id) {
 // ---- CONVERT TO CLIENT ----
 function convertToClient(id) {
   const r = referrals.find(rf=>rf.id===id); if(!r) return;
+  // Converting twice (double-click, two staff, two devices) used to make a second
+  // file with the same REF number. Open the existing file instead.
+  const ref = 'REF-'+id.slice(-6).toUpperCase();
+  const existing = clients.find(c=>c.id===r.convertedClientId) || clients.find(c=>c.clientId===ref);
+  if (existing) {
+    if (r.status!=='converted' || r.convertedClientId!==existing.id) { r.status='converted'; r.convertedClientId=existing.id; saveReferrals(); }
+    showToast(`${existing.fullName} already has a client file — opening it`);
+    return openClientProfile(existing.id);
+  }
   if(!confirm(`Create a full client record for ${sanitize(r.name)}?\n\nAll referral information will be copied across.`)) return;
   const newClient = {
     id:uid(), created:today(), status:'active',
@@ -8435,7 +8445,7 @@ function convertToClient(id) {
     referralSource:r.referralSource||'', referralDate:r.created?.split('T')[0]||today(),
     referralReason:r.referralReason||'', keyWorker:r.allocatedTo||'',
     sewb:r.sewb||false, aod:r.aod||false, justice:r.justice||false, cultural:r.cultural||false,
-    ndis:r.ndis||false, clientId:'REF-'+id.slice(-6).toUpperCase(),
+    ndis:r.ndis||false, clientId:ref,
     attachments:[], keyWorkers: r.allocatedTo ? [{name:r.allocatedTo, role:'Key Worker', primary:true, consentShare:true, startDate:today()}] : [],
   };
   applySewbUmbrella(newClient);
@@ -12384,6 +12394,217 @@ function removeDemoData() {
   saveAll(); saveFPHOClients();
   showToast('🧹 Demo data removed');
   showPage('dashboard');
+}
+
+// ============================================================
+// 🔗 MERGING DUPLICATE CLIENT FILES
+// Two files for one person (e.g. a referral converted twice) split their notes,
+// time and appointments across two records. Merging keeps the file with the
+// most information, fills its gaps from the other, combines lists, moves every
+// linked record across, and removes the spare file (a tracked delete, so every
+// device drops it). Managers only; previewed before anything changes; audited.
+// ============================================================
+const _MERGE_SKIP = new Set(['id', 'clientId', 'mergedFrom', '_sewbUmbrella', '_demo']);
+const _RISK_ORDER = { low: 1, medium: 2, high: 3 };
+const _canMergeClients = () => ['sysmanager', 'admin', 'supervisor'].includes(currentUser?.role);
+function _isEmptyVal(v) {
+  if (v === undefined || v === null || v === false) return true;
+  if (typeof v === 'string') return v.trim() === '';
+  if (Array.isArray(v)) return v.length === 0;
+  if (typeof v === 'object') return Object.keys(v).every(k => _isEmptyVal(v[k]));
+  return false;
+}
+function _infoCount(v) {
+  if (v === undefined || v === null || v === false) return 0;
+  if (typeof v === 'string') return v.trim() ? 1 : 0;
+  if (typeof v === 'number' || v === true) return 1;
+  if (Array.isArray(v)) return v.length;
+  if (typeof v === 'object') return Object.keys(v).reduce((n, k) => n + _infoCount(v[k]), 0);
+  return 0;
+}
+// What hangs off a client file, so it can be counted and moved.
+function clientLinked(id) {
+  return {
+    notes: (notes || []).filter(n => n && n.clientId === id),
+    time: (timeLogs || []).filter(t => t && t.clientId === id),
+    events: (calEvents || []).filter(e => e && e.clientId === id),
+    tasks: (workflowTasks || []).filter(t => t && t.clientId === id),
+    walkins: (typeof walkins !== 'undefined' ? walkins || [] : []).filter(w => w && w.clientId === id),
+    referrals: (referrals || []).filter(r => r && r.convertedClientId === id),
+    forms: (typeof intakeForms !== 'undefined' ? intakeForms || [] : []).filter(f => f && f.clientId === id),
+  };
+}
+function clientInfoScore(c) {
+  const details = Object.keys(c || {}).filter(k => !_MERGE_SKIP.has(k) && !k.startsWith('_') && k !== 'created').reduce((n, k) => n + _infoCount(c[k]), 0);
+  const L = clientLinked(c.id);
+  return { details, notes: L.notes.length, time: L.time.length, events: L.events.length, total: details + 3 * (L.notes.length + L.time.length + L.events.length) + L.tasks.length + L.forms.length };
+}
+const _normName = s => String(s || '').toLowerCase().replace(/"[^"]*"/g, ' ').replace(/[^a-z]+/g, ' ').trim();
+// Pairs that look like the same person: same REF number, or same name with the same (or a missing) date of birth.
+function clientDuplicatePairs() {
+  const list = (clients || []).filter(c => c && c.id && canViewClient(c)), pairs = [], seen = new Set();
+  for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
+    const a = list[i], b = list[j];
+    if ((a.dupDismissed || []).includes(b.id) || (b.dupDismissed || []).includes(a.id)) continue;
+    const sameRef = a.clientId && a.clientId === b.clientId;
+    const sameName = _normName(a.fullName) && _normName(a.fullName) === _normName(b.fullName) && (!a.dob || !b.dob || a.dob === b.dob);
+    const key = [a.id, b.id].sort().join('|') + (a.id === b.id ? '|' + i + '|' + j : '');
+    if ((sameRef || sameName || a.id === b.id) && !seen.has(key)) { seen.add(key); pairs.push([a, b, a.id === b.id ? 'listed twice' : sameRef ? 'same ID ' + a.clientId : 'same name' + (a.dob && b.dob ? ' and date of birth' : '')]); }
+  }
+  return pairs;
+}
+function duplicateClientsBannerHTML() {
+  if (!_canMergeClients()) return '';
+  const pairs = clientDuplicatePairs(); if (!pairs.length) return '';
+  return `<div class="card" id="dup-clients-card" style="margin-bottom:14px;border-left:4px solid #f59e0b;background:#fffbeb">
+    <div class="card-header"><div class="card-title">🔗 ${pairs.length} possible duplicate client file${pairs.length !== 1 ? 's' : ''}</div></div>
+    ${pairs.map(([a, b, why], i) => `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid #fde68a;flex-wrap:wrap">
+      <span style="flex:1;min-width:220px"><strong>${sanitize(a.fullName || 'Unnamed')}</strong> × 2 <span style="font-size:12px;color:var(--muted)">· ${sanitize(why)}</span></span>
+      <button class="btn btn-sm btn-primary" onclick="openClientMergeModal('${sanitize(a.id)}','${sanitize(b.id)}',${i})">Review &amp; merge →</button>
+      <button class="btn btn-sm btn-outline" onclick="dismissDuplicatePair('${sanitize(a.id)}','${sanitize(b.id)}')" title="They are different people">Not the same person</button></div>`).join('')}</div>`;
+}
+function dismissDuplicatePair(aId, bId) {
+  const a = clients.find(c => c.id === aId), b = clients.find(c => c.id === bId); if (!a || !b || a === b) return;
+  a.dupDismissed = [...new Set([...(a.dupDismissed || []), bId])]; b.dupDismissed = [...new Set([...(b.dupDismissed || []), aId])];
+  saveAll(); audit('Marked as different people', `${a.fullName} — not a duplicate`, aId); showToast('OK — they won’t be suggested again'); showPage(currentPage);
+}
+
+// ---- plan ----
+function _mergeArrays(a, b) {
+  const out = a.slice(), keyOf = x => (x && typeof x === 'object' && x.id) ? 'id:' + x.id : 'v:' + JSON.stringify(x);
+  const have = new Set(out.map(keyOf)); let added = 0;
+  b.forEach(x => { const k = keyOf(x); if (!have.has(k)) { have.add(k); out.push(x); added++; } });
+  return { out, added };
+}
+function buildClientMerge(keep, drop) {
+  const plan = { keep, drop, filled: [], combined: [], conflicts: [], auto: [] };
+  const keys = new Set([...Object.keys(keep), ...Object.keys(drop)]);
+  keys.forEach(k => {
+    if (_MERGE_SKIP.has(k) || k === 'dupDismissed') return;
+    const a = keep[k], b = drop[k];
+    if (_isEmptyVal(b)) return;
+    if (_isEmptyVal(a)) { plan.filled.push(k); return; }
+    if (Array.isArray(a) && Array.isArray(b)) { const m = _mergeArrays(a, b); if (m.added) plan.combined.push(k); return; }
+    if (a && b && typeof a === 'object' && typeof b === 'object') { if (Object.keys(b).some(s => _isEmptyVal(a[s]) && !_isEmptyVal(b[s]))) plan.combined.push(k); return; }
+    if (String(a) === String(b)) return;
+    // Safe automatic choices: earliest start, the higher risk, restricted wins, open wins.
+    if (k === 'created' || k === 'referralDate') { plan.auto.push([k, String(a) < String(b) ? a : b]); return; }
+    if (k === 'riskLevel') { plan.auto.push([k, (_RISK_ORDER[b] || 0) > (_RISK_ORDER[a] || 0) ? b : a]); return; }
+    if (k === 'accessRestricted') { plan.auto.push([k, true]); return; }
+    if (k === 'status') { plan.auto.push([k, a === 'active' || b === 'active' ? 'active' : a]); return; }
+    if (typeof a === 'object' || typeof b === 'object') return;
+    plan.conflicts.push({ k, a, b });
+  });
+  plan.linked = clientLinked(drop.id);
+  return plan;
+}
+const _MERGE_LABEL = { fullName: 'Full name', preferredName: 'Preferred name', dob: 'Date of birth', phone: 'Phone', email: 'Email', address: 'Address', gender: 'Gender', mob: 'Mob', community: 'Community', atsi: 'Aboriginal / Torres Strait Islander', riskLevel: 'Risk level', status: 'Status', keyWorker: 'Key worker', referralSource: 'Referral source', referralReason: 'Reason for referral', ifSafeContact: 'Safe to leave calls/texts?', gp: 'GP', ndis: 'NDIS number', closedDate: 'Closed date', ifServices: 'Services requested', goalPlan: 'Goals', ifHousing: 'Housing', ifEmployment: 'Employment', handbookSent: 'Handbook sent', attachments: 'Attachments', keyWorkers: 'Key workers', programHistory: 'Program history' };
+const _mergeLabel = k => _MERGE_LABEL[k] || (typeof WG_INTAKE !== 'undefined' && (WG_INTAKE.FIELDS.find(f => f.key === k) || {}).label) || k.replace(/^if/, '').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, s => s.toUpperCase());
+const _mergeShow = v => Array.isArray(v) ? v.length + ' item' + (v.length !== 1 ? 's' : '') : typeof v === 'object' ? '…' : String(v).slice(0, 80);
+
+// ---- the window ----
+let _mergePair = null;
+function openClientMergeModal(aId, bId, idx) {
+  if (!_canMergeClients()) { showToast('Only a manager can merge client files'); return; }
+  let a = clients.find(c => c.id === aId), b = null;
+  if (aId === bId) { const same = clients.filter(c => c.id === aId); a = same[0]; b = same[1]; }
+  else b = clients.find(c => c.id === bId);
+  if (!a || !b) { showToast('One of the files is no longer there'); return; }
+  const sa = clientInfoScore(a), sb = clientInfoScore(b);
+  const keepA = sa.total > sb.total || (sa.total === sb.total && String(a.created || '') <= String(b.created || ''));
+  _mergePair = { a, b, keep: keepA ? 'a' : 'b' };
+  showModal('🔗 Merge duplicate client files', `<div id="merge-body"></div>`, null, '780px', true);
+  _renderMerge();
+}
+function _mergeSetKeep(which) { if (_mergePair) { _mergePair.keep = which; _renderMerge(); } }
+function _renderMerge() {
+  const el = document.getElementById('merge-body'); if (!el || !_mergePair) return;
+  const { a, b, keep } = _mergePair, K = keep === 'a' ? a : b, D = keep === 'a' ? b : a;
+  const same = a.id === b.id;
+  const card = (c, which) => { const s = clientInfoScore(c), on = keep === which;
+    return `<label style="flex:1;min-width:240px;border:2px solid ${on ? 'var(--primary-light)' : 'var(--border)'};background:${on ? '#f0fdf4' : '#fff'};border-radius:10px;padding:12px;cursor:pointer;display:block">
+      <div style="display:flex;gap:8px;align-items:center"><input type="radio" name="merge-keep" ${on ? 'checked' : ''} onchange="_mergeSetKeep('${which}')"> <strong>${on ? 'Keep this file' : 'Merge into the other'}</strong></div>
+      <div style="font-size:15px;font-weight:700;margin-top:6px">${sanitize(c.fullName || 'Unnamed')}</div>
+      <div style="font-size:12px;color:var(--muted)">${sanitize(c.clientId || '')} · opened ${fmt(c.created) || '—'} · ${sanitize(c.status || 'active')}</div>
+      <div style="font-size:13px;margin-top:6px"><strong>${s.details}</strong> details · <strong>${s.notes}</strong> case note${s.notes !== 1 ? 's' : ''} · <strong>${s.time}</strong> time ${s.time !== 1 ? 'entries' : 'entry'} · <strong>${s.events}</strong> appointment${s.events !== 1 ? 's' : ''}</div></label>`; };
+  if (same) {
+    el.innerHTML = `<p style="font-size:13px">This is <strong>one file listed twice</strong> on this device (same record id). Merging removes the extra copy from the list — nothing else changes.</p>
+      <div style="display:flex;gap:8px;margin-top:12px"><button class="btn btn-primary" id="merge-go" onclick="mergeClientFiles()">✓ Remove the extra copy</button><button class="btn btn-outline" onclick="closeModal()">Cancel</button></div>`;
+    return;
+  }
+  const p = buildClientMerge(K, D), L = p.linked;
+  const moved = [[L.notes.length, 'case note'], [L.time.length, 'time entry'], [L.events.length, 'appointment'], [L.tasks.length, 'task'], [L.walkins.length, 'walk-in'], [L.forms.length, 'intake form'], [L.referrals.length, 'referral link']].filter(x => x[0]).map(([n, w]) => `${n} ${w}${n !== 1 ? (w.endsWith('y') ? '' : 's') : ''}`.replace(/entrys$/, 'entries'));
+  el.innerHTML = `<p style="font-size:13px;margin:0 0 10px">These look like the same person. The file with the most information is chosen to keep — change it if you need to.</p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">${card(a, 'a')}${card(b, 'b')}</div>
+    <div style="margin-top:14px;font-size:13px;line-height:1.6">
+      <div>📦 <strong>Moved to the kept file:</strong> ${moved.length ? moved.join(', ') : 'nothing linked to the other file'}</div>
+      <div>➕ <strong>Filled in from the other file</strong> (blank on the kept file): ${p.filled.length ? sanitize(p.filled.map(_mergeLabel).join(', ')) : 'none'}</div>
+      <div>🔀 <strong>Lists combined</strong> (nothing dropped): ${p.combined.length ? sanitize(p.combined.map(_mergeLabel).join(', ')) : 'none'}</div>
+      ${p.auto.length ? `<div>🛡️ <strong>Chosen automatically:</strong> ${p.auto.map(([k, v]) => sanitize(_mergeLabel(k)) + ' → ' + sanitize(_mergeShow(v))).join(', ')} <span style="color:var(--muted)">(earliest date, higher risk, restricted access and an open file always win)</span></div>` : ''}
+    </div>
+    ${p.conflicts.length ? `<div style="margin-top:12px"><div style="font-size:12px;font-weight:700;color:#92400e;text-transform:uppercase">Different on each file — choose (${p.conflicts.length})</div>
+      ${p.conflicts.map((c, i) => `<div style="display:grid;grid-template-columns:minmax(120px,170px) 1fr;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px"><span>${sanitize(_mergeLabel(c.k))}</span>
+        <select class="merge-choice" data-key="${sanitize(c.k)}"><option value="keep">${sanitize(_mergeShow(c.a))} (kept file)</option><option value="drop">${sanitize(_mergeShow(c.b))} (other file)</option></select></div>`).join('')}</div>` : ''}
+    <div class="alert alert-warning" style="font-size:12px;margin-top:12px">The other file (${sanitize(D.clientId || D.id)}) is then removed for everyone. This is recorded in the audit log.</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px"><button class="btn btn-primary" id="merge-go" onclick="mergeClientFiles()">🔗 Merge into ${sanitize(K.fullName || 'the kept file')}</button><button class="btn btn-outline" onclick="closeModal()">Cancel</button></div>`;
+}
+
+// ---- do it ----
+async function mergeClientFiles() {
+  if (!_mergePair || !_canMergeClients()) return;
+  const { a, b, keep } = _mergePair, K = keep === 'a' ? a : b, D = keep === 'a' ? b : a;
+  if (K.id === D.id) {                                   // one record listed twice: drop the extra entry only
+    const i = clients.lastIndexOf(D); if (i >= 0) clients.splice(i, 1);
+    saveAll(); audit('Removed a client listed twice', K.fullName || '', K.id);
+    showToast('Extra copy removed'); _mergePair = null; closeModal(); showPage(currentPage); return;
+  }
+  if (!confirm(`Merge ${D.fullName} (${D.clientId || 'other file'}) into ${K.fullName} (${K.clientId || 'kept file'})?\n\nEverything on the other file moves to the kept one, and the other file is removed for everyone.`)) return;
+  const plan = buildClientMerge(K, D);
+  const choose = new Map([...document.querySelectorAll('.merge-choice')].map(s => [s.dataset.key, s.value]));
+  plan.filled.forEach(k => { K[k] = JSON.parse(JSON.stringify(D[k])); });
+  plan.combined.forEach(k => {
+    if (Array.isArray(K[k])) K[k] = _mergeArrays(K[k], D[k]).out;
+    else { const o = Object.assign({}, K[k]); Object.keys(D[k]).forEach(s => { if (_isEmptyVal(o[s]) && !_isEmptyVal(D[k][s])) o[s] = D[k][s]; }); K[k] = o; }
+  });
+  plan.auto.forEach(([k, v]) => { K[k] = v; });
+  if (K.accessRestricted) K.allowedWorkers = [...new Set([...(K.allowedWorkers || []), ...(D.allowedWorkers || [])])];
+  plan.conflicts.forEach(c => { if (choose.get(c.k) === 'drop') K[c.k] = D[c.k]; });
+  // Automatic handbook texts recorded against the other file stay visible on the kept one.
+  const autoSent = (typeof outboxFor === 'function' ? outboxFor(D.id) : []).filter(o => o.status === 'sent').map(o => ({ at: o.sentAt || o.processedAt, by: o.requestedByName || '', channel: 'sms', auto: true, to: o.to, toFull: o.toFull }));
+  if (autoSent.length) K.handbookSent = _mergeArrays(K.handbookSent || [], autoSent).out;
+  K.mergedFrom = [...(K.mergedFrom || []), { id: D.id, clientId: D.clientId || '', fullName: D.fullName || '', at: now(), by: currentUser?.name || '' }];
+  // Move everything linked to the other file.
+  const L = plan.linked;
+  L.notes.forEach(n => { n.clientId = K.id; });
+  L.time.forEach(t => { t.clientId = K.id; });
+  L.events.forEach(e => { e.clientId = K.id; });
+  L.tasks.forEach(t => { t.clientId = K.id; if ('clientName' in t) t.clientName = K.fullName; });
+  L.walkins.forEach(w => { w.clientId = K.id; });
+  L.referrals.forEach(r => { r.convertedClientId = K.id; });
+  for (const f of L.forms) { f.clientId = K.id; try { await FSYNC.updateIntakeForm(f.id, { clientId: K.id }); } catch (e) { console.warn('intake form not moved:', e.message); } }
+  clients = clients.filter(c => c !== D);
+  try { applySewbUmbrella(K); } catch (_) {}
+  saveAll(); saveCalEvents(); saveWorkflowTasks(); try { FSYNC.pushTasks(); } catch (_) {}
+  if (L.walkins.length) saveWalkins();
+  if (L.referrals.length) saveReferrals();
+  await FSYNC.deleteDoc('clients', D.id);
+  const pl = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  const summary = `${pl(L.notes.length, 'note', 'notes')}, ${pl(L.time.length, 'time entry', 'time entries')}, ${pl(L.events.length, 'appointment', 'appointments')} moved; ${pl(plan.filled.length, 'detail', 'details')} filled in`;
+  audit('Merged duplicate client files', `${K.fullName} (${K.clientId || K.id}) ← ${D.clientId || D.id} — ${summary}`, K.id);
+  _mergePair = null; closeModal();
+  showToast(`🔗 Files merged — ${summary}`);
+  setTimeout(() => openClientProfile(K.id), 80);
+}
+// From a client file: pick the other file to merge with.
+function openMergeWithModal(id) {
+  if (!_canMergeClients()) { showToast('Only a manager can merge client files'); return; }
+  const c = clients.find(x => x.id === id); if (!c) return;
+  const likely = new Set(clientDuplicatePairs().filter(p => p[0].id === id || p[1].id === id).map(p => p[0].id === id ? p[1].id : p[0].id));
+  const others = clients.filter(x => x.id !== id && canViewClient(x)).sort((x, y) => (likely.has(y.id) - likely.has(x.id)) || String(x.fullName).localeCompare(String(y.fullName)));
+  showModal('🔗 Merge with another file', `<p style="font-size:13px">Merge <strong>${sanitize(c.fullName)}</strong> (${sanitize(c.clientId || '')}) with:</p>
+    <select id="merge-other" style="width:100%">${others.map(x => `<option value="${sanitize(x.id)}">${likely.has(x.id) ? '⭐ ' : ''}${sanitize(x.fullName)} · ${sanitize(x.clientId || '')}${x.dob ? ' · ' + sanitize(x.dob) : ''}</option>`).join('')}</select>
+    <p style="font-size:12px;color:var(--muted)">⭐ = looks like the same person. You’ll see exactly what happens before anything changes.</p>
+    <button class="btn btn-primary" onclick="const o=document.getElementById('merge-other').value; closeModal(); setTimeout(()=>openClientMergeModal('${sanitize(id)}', o), 50)">Next →</button>`, null, '560px', true);
 }
 
 // ============================================================
