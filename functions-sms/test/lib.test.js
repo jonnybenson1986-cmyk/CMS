@@ -11,7 +11,7 @@ function deps(over) {
   const d = Object.assign({
     handbookUrl: URL_, getRequesterEmail: async () => 'Jon.Benson@worngundidj.org.au', getStaffEmails: async () => STAFF,
     getClient: async () => ({ fullName: 'Jordan Citizen', preferredName: 'Jordy', phone: '0491 570 156', ifSafeContact: 'Yes' }),
-    alreadySent: async () => false, sentInLastHour: async () => 0,
+    alreadySent: async () => false, sentInLastHour: async () => 0, monthSpend: async () => 0,
     send: async (to, body) => { sent.push({ to, body }); return 'MSG123'; },
   }, over || {});
   d.sent = sent; return d;
@@ -95,3 +95,31 @@ test('Twilio request and response handling', async () => {
   await assert.rejects(lib.sendViaProvider('twilio', { username: 'AC1', apiKey: 't', from: 'x' }, '+61491570156', 'hi', async () => ({ ok: false, status: 401, json: async () => ({ message: 'Authenticate' }) })), /401/);
 });
 test('unknown provider is refused', () => { assert.throws(() => lib.providerRequest('nope', {}, '+61', 'x'), /Unknown SMS_PROVIDER/); });
+
+test('every text is plain GSM and ONE SMS (160 chars) — the old dash made it 4', () => {
+  const long = 'https://candid-trifle-167698.netlify.app/handbook/SEWB-Participant-Handbook.pdf';
+  for (const url of ['https://candid-trifle-167698.netlify.app/hb', long]) {
+    for (const name of ['Jo', 'Maximiliana-Bartholomew', 'Zoë', '<b>x</b>']) {
+      const m = lib.handbookMessage({ fullName: name + ' Citizen' }, url);
+      assert.equal(lib.smsParts(m), 1, m); assert.ok(m.includes(url)); assert.equal(lib.toGsm(m), m);
+    }
+  }
+  const i = lib.intakeMessage({ fullName: 'Maximiliana-Bartholomew Smith' }, 'https://candid-trifle-167698.netlify.app/i#AbCdEfGhIjKlMnOpQrStUv', 7);
+  assert.equal(lib.smsParts(i), 1, i);
+  assert.equal(lib.smsParts('a\u2014b'), 1); assert.equal(lib.smsParts('x'.repeat(71) + '\u2014'), 2);   // UCS-2: 70 per SMS
+  assert.equal(lib.smsParts('x'.repeat(161)), 2); assert.equal(lib.toGsm('it\u2019s \u201Cok\u201D \u2014 fine\u2026'), 'it\'s "ok" - fine...');
+  assert.equal(lib.firstName({ fullName: 'Zoë Smith' }), 'Zoe');
+});
+test('monthly budget: refuses a text that would go over, says so plainly', async () => {
+  const d = deps({ monthSpend: async () => 9.95, monthlyBudget: 10, costPerPart: 0.10 });
+  const r = await lib.processRequest({ kind: 'handbook', clientId: 'c1', requestedBy: 'u1' }, d);
+  assert.equal(r.status, 'skipped'); assert.match(r.reason, /Monthly SMS budget of \$10\.00 reached \(\$9\.95 used\)/); assert.equal(d.sent.length, 0);
+  const ok = await lib.processRequest({ kind: 'handbook', clientId: 'c1', requestedBy: 'u1' }, deps({ monthSpend: async () => 9.90, monthlyBudget: 10, costPerPart: 0.10 }));
+  assert.equal(ok.status, 'sent'); assert.equal(ok.parts, 1); assert.equal(ok.cost, 0.1);
+  const def = await lib.processRequest({ kind: 'handbook', clientId: 'c1', requestedBy: 'u1' }, deps({ monthSpend: async () => 9.95 }));
+  assert.equal(def.status, 'skipped', 'defaults to a $10 budget');
+});
+test('budget month is Melbourne time', () => {
+  assert.equal(lib.budgetMonth(new Date('2026-10-31T14:30:00Z')), '2026-11');   // 1:30am 1 Nov in Melbourne
+  assert.equal(lib.budgetMonth(new Date('2026-10-31T12:00:00Z')), '2026-10');
+});

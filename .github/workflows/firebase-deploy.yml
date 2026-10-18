@@ -1,0 +1,134 @@
+# Worn Gundidj CMS — test, then publish the Firestore rules (and, when asked, the SMS text service).
+#
+#   • Every pull request that touches the rules: the rules tests run (both rule
+#     files, against the Firestore emulator) plus the text-service tests.
+#   • A merge to main that touches the rules: tests run, then firestore.rules is
+#     PUBLISHED to the live project. Nothing else is deployed automatically.
+#   • Actions → "Firebase: test & publish" → Run workflow, with "Also deploy the
+#     SMS text service" ticked: publishes the rules AND the SMS function
+#     (functions:sms only — never the other functions codebase).
+#
+# One-time set-up (DEPLOY-FIREBASE.md): add a repository secret
+# FIREBASE_SERVICE_ACCOUNT holding a Google service-account key (JSON).
+# Never paste that key anywhere else.
+
+name: "Firebase: test & publish"
+
+on:
+  pull_request:
+    paths: ['firestore.rules', 'firestore.rules.strict', 'intake/intake-fields.js', 'tests/rules/**', 'functions-sms/**', '.github/workflows/firebase-deploy.yml']
+  push:
+    branches: [main]
+    paths: ['firestore.rules', 'firestore.rules.strict', 'intake/intake-fields.js', 'tests/rules/**', '.github/workflows/firebase-deploy.yml']
+  workflow_dispatch:
+    inputs:
+      deploy_sms_function:
+        description: 'Also deploy the SMS text service (functions:sms). Needs the Blaze plan and the SMS settings first - see SMS-SETUP.md'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: firebase-publish
+  cancel-in-progress: false
+
+env:
+  FIREBASE_PROJECT: worn-gundidj-cms
+
+jobs:
+  test:
+    name: Test rules + text service
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: tests/rules/package-lock.json
+      - uses: actions/setup-java@v4          # the Firestore emulator runs on Java
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Install rules-test tools
+        working-directory: tests/rules
+        run: npm ci
+      - name: Rules tests (live + strict rules, Firestore emulator)
+        working-directory: tests/rules
+        run: npm test
+      - name: Text-service tests (no network, no Firebase)
+        working-directory: functions-sms
+        run: node --test
+
+  publish:
+    name: Publish to Firebase
+    needs: test
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production          # add required reviewers here in GitHub if you want a sign-off before each publish
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Use the deploy key
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          if [ -z "$SA" ]; then
+            echo "::error::The FIREBASE_SERVICE_ACCOUNT secret isn't set. See DEPLOY-FIREBASE.md (step 1)."
+            exit 1
+          fi
+          umask 077
+          printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/sa.json" >> "$GITHUB_ENV"
+      - name: Publish Firestore rules
+        run: npx --yes firebase-tools@13 deploy --only firestore:rules --project "$FIREBASE_PROJECT" --non-interactive
+
+      # ---- SMS text service: only when run by hand with the box ticked ----
+      - name: SMS settings for the text service
+        if: github.event_name == 'workflow_dispatch' && inputs.deploy_sms_function
+        env:
+          HANDBOOK_URL: ${{ vars.HANDBOOK_URL }}
+          APP_URL: ${{ vars.APP_URL }}
+          SMS_PROVIDER: ${{ vars.SMS_PROVIDER }}
+          SMS_FROM: ${{ vars.SMS_FROM }}
+          SMS_MONTHLY_BUDGET: ${{ vars.SMS_MONTHLY_BUDGET }}
+          SMS_COST_PER_PART: ${{ vars.SMS_COST_PER_PART }}
+        run: |
+          for v in HANDBOOK_URL APP_URL SMS_FROM; do
+            if [ -z "${!v}" ]; then echo "::error::Repository variable $v isn't set. See DEPLOY-FIREBASE.md (step 4)."; exit 1; fi
+          done
+          {
+            echo "HANDBOOK_URL=$HANDBOOK_URL"
+            echo "APP_URL=$APP_URL"
+            echo "SMS_PROVIDER=${SMS_PROVIDER:-clicksend}"
+            echo "SMS_FROM=$SMS_FROM"
+            echo "SMS_MONTHLY_BUDGET=${SMS_MONTHLY_BUDGET:-10}"
+            echo "SMS_COST_PER_PART=${SMS_COST_PER_PART:-0.10}"
+          } > "functions-sms/.env.$FIREBASE_PROJECT"
+          echo "Monthly SMS budget: \$${SMS_MONTHLY_BUDGET:-10} at \$${SMS_COST_PER_PART:-0.10} per SMS"
+      - name: SMS provider login (stored in Google Secret Manager, never in the code)
+        if: github.event_name == 'workflow_dispatch' && inputs.deploy_sms_function
+        env:
+          SMS_USERNAME: ${{ secrets.SMS_USERNAME }}
+          SMS_API_KEY: ${{ secrets.SMS_API_KEY }}
+        run: |
+          if [ -n "$SMS_USERNAME" ] && [ -n "$SMS_API_KEY" ]; then
+            printf '%s' "$SMS_USERNAME" | npx --yes firebase-tools@13 functions:secrets:set SMS_USERNAME --data-file=- --project "$FIREBASE_PROJECT" --non-interactive --force
+            printf '%s' "$SMS_API_KEY"  | npx --yes firebase-tools@13 functions:secrets:set SMS_API_KEY  --data-file=- --project "$FIREBASE_PROJECT" --non-interactive --force
+          else
+            echo "SMS_USERNAME / SMS_API_KEY not in GitHub secrets - using the ones already set in Firebase."
+          fi
+      - name: Deploy the SMS text service (functions:sms only)
+        if: github.event_name == 'workflow_dispatch' && inputs.deploy_sms_function
+        run: |
+          (cd functions-sms && npm install --omit=dev --no-audit --no-fund)
+          npx --yes firebase-tools@13 deploy --only functions:sms --project "$FIREBASE_PROJECT" --non-interactive --force
+      - name: Remove the deploy key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/sa.json" functions-sms/.env.*

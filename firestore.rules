@@ -65,14 +65,17 @@ service cloud.firestore {
     }
 
     // ── Automatic texts (SMS Cloud Function, functions-sms/) ───────────────
-    // A browser may only ASK for a text: kind + client id + its own uid. It
+    // A browser may only ASK for a text: kind (handbook / intake link) + client id
+    // (+ which intake link) + its own uid. It
     // cannot supply a number or message, and cannot change a request after
     // creating it — the Cloud Function (Admin SDK) writes the result.
     match /teams/{teamId}/smsOutbox/{id} {
       allow read: if signedIn();
       allow create: if signedIn()
-        && request.resource.data.keys().hasOnly(['kind', 'clientId', 'requestedBy', 'requestedByName', 'requestedAt'])
-        && request.resource.data.kind == 'handbook'
+        && request.resource.data.keys().hasOnly(['kind', 'clientId', 'requestedBy', 'requestedByName', 'requestedAt', 'linkId'])
+        && request.resource.data.kind in ['handbook', 'intake']
+        && (request.resource.data.kind == 'handbook'
+            || (request.resource.data.linkId is string && request.resource.data.linkId.size() >= 16 && request.resource.data.linkId.size() <= 64))
         && request.resource.data.clientId is string
         && request.resource.data.clientId.size() > 0 && request.resource.data.clientId.size() < 100
         && request.resource.data.requestedBy == request.auth.uid;
@@ -90,6 +93,44 @@ service cloud.firestore {
       allow write: if signedIn();
     }
 
+    // ── Client intake forms sent by link (intake.html) ───────────────────────
+    // Staff make a form for ONE client and text/email the client a link. The
+    // client fills it in on their own phone WITHOUT signing in, so:
+    //   • the link carries a random 128-bit id; the form's own id is
+    //     SHA-256(link id + ":" + date of birth), so when a DOB is on file the
+    //     link alone does not open it (the page asks for the DOB);
+    //   • signed-out visitors can only GET a document whose id they already
+    //     know — never list — and only before it expires;
+    //   • they can change only their answers (the keys below = intake/intake-fields.js)
+    //     and progress, and can mark it submitted once (with the declaration
+    //     ticked). After that, or once staff cancel it, it is locked.
+    // intakeLinks holds no personal details: expiry, status, whether a DOB is asked.
+    match /teams/{teamId}/intakeLinks/{linkId} {
+      allow get: if true;
+      allow list, create, update: if signedIn();
+      allow delete: if false;
+    }
+    match /teams/{teamId}/intakeForms/{formId} {
+      allow list, create: if signedIn();
+      allow get: if signedIn()
+        || (resource.data.expiresAt > request.time && resource.data.status in ['open', 'draft', 'submitted']);
+      allow update: if signedIn() || (
+           resource.data.status in ['open', 'draft']
+        && resource.data.expiresAt > request.time
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['answers', 'status', 'savedAt', 'submittedAt', 'step'])
+        && request.resource.data.status in ['draft', 'submitted']
+        && request.resource.data.answers is map
+        && request.resource.data.answers.keys().hasOnly(['fullName', 'preferredName', 'dob', 'gender', 'ifLgbtiqa', 'atsi', 'mob', 'languages', 'interpreter', 'ifMarital', 'phone', 'ifSafeContact', 'email', 'address', 'ifEc1name', 'ifEc1rel', 'ifEc1phone', 'ifEc2name', 'ifEc2rel', 'ifEc2phone', 'ifHousing', 'ifEmployment', 'ifEdu', 'ifCentrelink', 'gp', 'ndis', 'ifHasChildren', 'ifPrevAccess', 'ifReferralHow', 'ifServices', 'ifAdditionalInfo', 'ifHobbies', 'ifGoalShort', 'ifGoalMedium', 'ifGoalLong', 'declaration'])
+        && (request.resource.data.status == 'draft' || request.resource.data.answers.get('declaration', false) == true)
+        && (!('step' in request.resource.data) || request.resource.data.step is int)
+      );
+      allow delete: if false;
+    }
+    // Monthly text spend, written only by the SMS Cloud Function (Admin SDK).
+    match /teams/{teamId}/smsUsage/{month} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
     // ── 💡 Ideas for improving the CMS (the light-globe button) ─────────────
     // Anyone signed in can send one — only as themselves, only as "new", text
     // and a few labels, nothing else. Updates may touch only the review fields
