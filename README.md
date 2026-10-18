@@ -116,6 +116,17 @@ name and initial only, and carry no notes.
   connection, Microsoft access, calendar permission, appointments to sync — and
   says in plain words which one fails and what to do.
 
+## 📷 Pasting pictures
+
+* **Log Session:** paste a screenshot or copied photo (Ctrl+V / Cmd+V) into the
+  session notes or follow-up box — it is attached to the session (and the
+  client's Files) and a `[📷 Picture n: …]` marker goes into the note where you
+  pasted. Copied text still pastes normally. Attached pictures show as
+  thumbnails before you save.
+* **Files tab:** paste a picture to upload it straight to the client's files.
+* Notes show their pictures as thumbnails; a picture opens full size **over**
+  the client file (Esc closes the picture, not the file).
+
 ## 🔗 Merging duplicate client files
 
 Managers see **possible duplicate client files** at the top of the Clients page
