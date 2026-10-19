@@ -1173,7 +1173,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v88';
+const APP_VERSION = 'v89';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -2009,6 +2009,7 @@ function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
             : `<button class="btn-ghost" style="margin-left:auto;color:var(--danger);font-size:11px" onclick="deleteNote('${n.id}','${c.id}')">Delete</button>`}
         </div>
         <div class="note-text">${sanitize(n.text||'').replace(/\n/g,'<br>')}</div>
+        ${noteImageThumbsHTML(c.id, files, allFiles)}
         ${files.length?`<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">
           ${files.map(f=>{
             const i=allFiles.indexOf(f);
@@ -2511,7 +2512,7 @@ function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
         <div style="display:flex;gap:8px;align-items:center">
           <span style="font-size:12px;color:var(--muted)">${attachments.length} file${attachments.length!==1?'s':''} · ${formatBytes(attachments.reduce((a,f)=>a+(f.size||0),0))}</span>
           <button class="btn btn-primary btn-sm" onclick="document.getElementById('file-upload-${c.id}').click()">📎 Attach File</button>
-          <input type="file" id="file-upload-${c.id}" multiple accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.txt,.xlsx,.xls" style="display:none" onchange="handleFileUpload('${c.id}',this)">
+          <input type="file" id="file-upload-${c.id}" multiple accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.gif,.webp,.heic,image/*,.txt,.xlsx,.xls" style="display:none" onchange="handleFileUpload('${c.id}',this)">
         </div>
       </div>
       <div class="alert alert-info" style="margin-bottom:12px">📌 Supports PDF, Word, Excel, images, and text files. ${FSYNC.storageReady()?'☁️ Files are uploaded to <strong>Cloud Storage</strong> (Australia) — effectively unlimited and shared with all staff.':'Files are stored locally (~5 MB limit). <strong>Connect Cloud Storage</strong> for unlimited space.'}</div>
@@ -2543,8 +2544,8 @@ function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
         ondragleave="this.style.borderColor='var(--border)';this.style.background=''"
         ondrop="handleFileDrop('${c.id}',event)">
         <div style="font-size:28px;margin-bottom:8px">📂</div>
-        <p style="font-size:13px;font-weight:600">Drag &amp; drop files here, or click to browse</p>
-        <p style="font-size:12px;margin-top:4px">PDF · Word · Excel · Images · Text</p>
+        <p style="font-size:13px;font-weight:600">Drag &amp; drop files here, click to browse, or paste a picture (Ctrl+V)</p>
+        <p style="font-size:12px;margin-top:4px">PDF · Word · Excel · Pictures · Text</p>
       </div>
     </div>`;
   }
@@ -3113,7 +3114,7 @@ async function handleFileUpload(clientId, input) {
     catch(e){ console.warn('Upload failed:', e); showToast("Upload failed — the file wasn't saved. Please check your connection and try again."); }
   }
   if(ok){ saveAll(); showToast(`${ok} file${ok!==1?'s':''} attached`); }
-  openClientProfile(clientId);
+  openClientProfile(clientId, 'files');
 }
 function handleFileDrop(clientId, event) {
   event.preventDefault(); event.currentTarget.style.borderColor='var(--border)'; event.currentTarget.style.background='';
@@ -3132,7 +3133,7 @@ function previewFile(clientId, idx) {
   const c=clients.find(cl=>cl.id===clientId); if(!c) return;
   const f=c.attachments[idx]; if(!f) return;
   const src=fileSrc(f);
-  if((f.type||'').startsWith('image/')) { showModal('🖼️ '+f.name,`<img src="${src}" style="max-width:100%;border-radius:6px">`,null,'700px',true); return; }
+  if((f.type||'').startsWith('image/')) { openImageLightbox(src, f.name); return; }
   // PDFs / other: open in a new tab (avoids the frame-src CSP and blocked data: navigations)
   if(f.url){ window.open(f.url,'_blank'); return; }
   if(f.data){
@@ -8775,7 +8776,7 @@ function openSessionModal(clientId, defaultType) {
       </button>
     </label>
     <div id="sm-voice-status" style="font-size:11px;color:var(--muted);min-height:14px"></div>
-    <textarea id="sm-text" style="min-height:160px" placeholder="Client presentation, interventions used, client response, outcomes, next steps…"></textarea>
+    <textarea id="sm-text" style="min-height:160px" placeholder="Client presentation, interventions used, client response, outcomes, next steps… (paste a screenshot or photo with Ctrl+V)"></textarea>
   </div>
   <div class="form-group">
     <label style="display:flex;align-items:center;justify-content:space-between">
@@ -8800,10 +8801,10 @@ function openSessionModal(clientId, defaultType) {
       ondragleave="this.style.borderColor='var(--border)';this.style.background=''"
       ondrop="sessHandleDrop(event)">
       <div style="font-size:26px;margin-bottom:6px">📂</div>
-      <p style="font-size:13px;font-weight:600">Drag &amp; drop files here, or click to browse</p>
-      <p style="font-size:12px;margin-top:4px">PDF · Word · Excel · Images · Text — attached to this client's file</p>
+      <p style="font-size:13px;font-weight:600">Drag &amp; drop files here, click to browse, or paste a picture (Ctrl+V)</p>
+      <p style="font-size:12px;margin-top:4px">PDF · Word · Excel · Pictures · Text — attached to this client's file. Paste a screenshot straight into the notes, too.</p>
     </div>
-    <input type="file" id="sm-file-input" multiple accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.txt,.xlsx,.xls" style="display:none" onchange="sessHandleFiles(this)">
+    <input type="file" id="sm-file-input" multiple accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.gif,.webp,.heic,image/*,.txt,.xlsx,.xls" style="display:none" onchange="sessHandleFiles(this)">
   </div>
 
   <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
@@ -8922,9 +8923,11 @@ function sessRenderAttachments(){
   if(!_sessionAttachments.length){ box.innerHTML=''; return; }
   box.innerHTML = _sessionAttachments.map((f,i)=>`
     <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg)">
-      <div style="font-size:22px">${fileIcon(f.type)}</div>
+      ${(f.type||'').startsWith('image/') && fileSrc(f)
+        ? `<button type="button" class="sm-pic" title="View" onclick="openImageLightbox(fileSrc(_sessionAttachments[${i}]), _sessionAttachments[${i}].name)" style="padding:0;border:1px solid var(--border);border-radius:6px;overflow:hidden;width:56px;height:42px;flex:none;cursor:zoom-in;background:#fff"><img src="${sanitize(fileSrc(f))}" alt="" style="width:100%;height:100%;object-fit:cover;display:block"></button>`
+        : `<div style="font-size:22px">${fileIcon(f.type)}</div>`}
       <div style="flex:1;min-width:0">
-        <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${sanitize(f.name)}</div>
+        <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${(f.type||'').startsWith('image/') ? '📷 Picture ' + (i+1) + ' · ' : ''}${sanitize(f.name)}</div>
         <div style="font-size:11px;color:var(--muted)">${formatBytes(f.size)}</div>
       </div>
       <button type="button" class="btn btn-sm btn-danger" onclick="sessRemoveAttachment(${i})">✕</button>
@@ -8952,6 +8955,75 @@ function sessHandleDrop(event){
 }
 function sessRemoveAttachment(idx){
   _sessionAttachments.splice(idx,1); sessRenderAttachments();
+}
+
+// ----- Pasting pictures (screenshots, copied photos) -----
+// Ctrl+V / Cmd+V with a picture on the clipboard:
+//   • in the Log Session window — the picture is attached to the session (and so
+//     to the client's Files), and a "[📷 Picture n: …]" marker goes into the note
+//     where you pasted, so the note says what the picture is;
+//   • on a client's Files tab — the picture is uploaded straight to their files.
+// Copied text is still pasted as normal; only pictures are picked up.
+function _clipboardImages(e) {
+  const dt = e.clipboardData; if (!dt) return [];
+  const out = [];
+  [...(dt.items || [])].forEach(it => { if (it.kind === 'file' && /^image\//.test(it.type)) { const f = it.getAsFile(); if (f) out.push(f); } });
+  if (!out.length) [...(dt.files || [])].forEach(f => { if (/^image\//.test(f.type)) out.push(f); });
+  return out;
+}
+function _namePastedImage(f, n) {
+  const d = new Date(), p = x => String(x).padStart(2, '0');
+  const ext = ((f.type || 'image/png').split('/')[1] || 'png').replace('jpeg', 'jpg').replace(/[^a-z0-9]/g, '') || 'png';
+  const base = `Pasted picture ${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}.${p(d.getMinutes())}.${p(d.getSeconds())}${n ? ' (' + n + ')' : ''}`;
+  return new File([f], base + '.' + ext, { type: f.type || 'image/png', lastModified: Date.now() });
+}
+document.addEventListener('paste', async e => {
+  const imgs = _clipboardImages(e); if (!imgs.length) return;
+  const hasText = !!(e.clipboardData.getData('text/plain') || '').trim();
+  const files = imgs.map((f, i) => _namePastedImage(f, imgs.length > 1 ? i + 1 : 0));
+  if (document.getElementById('sm-attach-list')) {                         // Log Session window
+    if (!hasText) e.preventDefault();
+    const target = e.target && (e.target.id === 'sm-text' || e.target.id === 'sm-followup') ? e.target : null;
+    const before = _sessionAttachments.length;
+    await sessHandleFiles({ files });
+    const added = _sessionAttachments.slice(before);
+    if (target && added.length && document.body.contains(target)) {
+      const tags = added.map((f, i) => `[📷 Picture ${before + i + 1}: ${f.name}]`).join(' ');
+      const at = target.selectionEnd ?? target.value.length, v = target.value;
+      const pre = v.slice(0, at), post = v.slice(at);
+      target.value = pre + (pre && !/\s$/.test(pre) ? ' ' : '') + tags + (post && !/^\s/.test(post) ? ' ' : '') + post;
+      target.selectionStart = target.selectionEnd = (pre + tags).length + 1;
+      target.dispatchEvent(new Event('input', { bubbles: true }));            // keeps the unsaved-note draft up to date
+    }
+    return;
+  }
+  const up = currentClientId && document.getElementById('file-upload-' + currentClientId);
+  if (up) { e.preventDefault(); handleFileUpload(currentClientId, { files, value: '' }); }   // client's Files tab
+});
+
+// Full-size picture on top of whatever is open (the client file stays open underneath).
+function openImageLightbox(src, name) {
+  if (!src) return;
+  closeImageLightbox();
+  const el = document.createElement('div');
+  el.id = 'img-lightbox'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', name || 'Picture');
+  el.style.cssText = 'position:fixed;inset:0;z-index:400;background:rgba(15,23,42,.88);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;cursor:zoom-out';
+  el.innerHTML = `<img src="${sanitize(src)}" alt="${sanitize(name || 'Picture')}" style="max-width:94vw;max-height:84vh;border-radius:8px;box-shadow:0 10px 40px rgba(0,0,0,.5);background:#fff">
+    <div style="color:#fff;font-size:13px;margin-top:12px;max-width:90vw;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${sanitize(name || '')}</div>
+    <button type="button" aria-label="Close" style="position:absolute;top:14px;right:18px;background:rgba(255,255,255,.15);color:#fff;border:none;border-radius:50%;width:40px;height:40px;font-size:20px;cursor:pointer">✕</button>`;
+  el.addEventListener('click', closeImageLightbox);
+  document.body.appendChild(el);
+}
+function closeImageLightbox() { document.getElementById('img-lightbox')?.remove(); }
+// Esc closes the picture first — not the client file behind it.
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && document.getElementById('img-lightbox')) { closeImageLightbox(); e.stopPropagation(); e.preventDefault(); } }, true);
+// Small picture previews for a note's attached images.
+function noteImageThumbsHTML(clientId, files, allFiles) {
+  const imgs = files.filter(f => (f.type || '').startsWith('image/') && fileSrc(f));
+  if (!imgs.length) return '';
+  return `<div class="note-pics" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">${imgs.map(f => { const i = allFiles.indexOf(f);
+    return `<button type="button" class="note-pic" title="${sanitize(f.name)}" onclick="event.stopPropagation();previewFile('${sanitize(clientId)}',${i})" style="padding:0;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:#fff;cursor:zoom-in;width:96px;height:72px">
+      <img src="${sanitize(fileSrc(f))}" alt="${sanitize(f.name)}" loading="lazy" style="width:100%;height:100%;object-fit:cover;display:block"></button>`; }).join('')}</div>`;
 }
 
 // Show/hide the NDIS billing block when the session type is disability
