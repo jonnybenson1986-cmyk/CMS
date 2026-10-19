@@ -116,6 +116,16 @@ name and initial only, and carry no notes.
   connection, Microsoft access, calendar permission, appointments to sync — and
   says in plain words which one fails and what to do.
 
+## 🗄️ Archiving referrals
+
+Referral Holding Bay → **🗄️ Archive** on any referral, or **Archive finished**
+for all client-created and declined ones at once. Archived referrals leave the
+Holding Bay (and its counters and "new referral" reminders) but are kept —
+**Archived** lists them with who archived them and when, and **↩️ Restore**
+puts one back. A referral still in progress asks before archiving. Archiving
+and restoring are written to the referral's action log and the audit log. The
+red ✕ still deletes permanently.
+
 ## ✍️ Writing tools
 
 * **Session / case notes** (Log Session — also used by *Add note* and *Log time*)

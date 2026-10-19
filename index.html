@@ -1231,7 +1231,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v91';
+const APP_VERSION = 'v92';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -1946,7 +1946,7 @@ function renderDashboard() {
     </div>
   </div>
   ${highRisk > 0 ? `<div class="alert alert-warning" style="margin-top:16px">⚠️ <strong>${highRisk} client${highRisk>1?'s':''}</strong> flagged as high risk. Please review and ensure safety plans are current.</div>` : ''}
-  ${(()=>{ const nr=referrals.filter(r=>r.status==='new').length; return nr>0?`<div class="alert alert-info" style="margin-top:12px;cursor:pointer" onclick="showPage('referrals')">📥 <strong>${nr} new referral${nr>1?'s':''}</strong> waiting in the Referral Holding Bay — <u>click to review</u></div>`:''; })()}`;
+  ${(()=>{ const nr=referrals.filter(r=>r.status==='new'&&!r.archived).length; return nr>0?`<div class="alert alert-info" style="margin-top:12px;cursor:pointer" onclick="showPage('referrals')">📥 <strong>${nr} new referral${nr>1?'s':''}</strong> waiting in the Referral Holding Bay — <u>click to review</u></div>`:''; })()}`;
 }
 
 // ===== CLIENTS LIST =====
@@ -8629,14 +8629,16 @@ const REF_URGENCY = {
 
 function renderReferrals() {
   const filterStatus = window._refFilter || 'all';
-  const filtered = filterStatus==='all' ? referrals : referrals.filter(r=>r.status===filterStatus);
+  const live = referrals.filter(r=>!r.archived), archived = referrals.filter(r=>r.archived);
+  const filtered = filterStatus==='archived' ? archived : filterStatus==='all' ? live : live.filter(r=>r.status===filterStatus);
+  const tidy = live.filter(r=>r.status==='converted'||r.status==='declined');
   const sorted = [...filtered].sort((a,b)=>{
     const urgOrder={urgent:0,high:1,medium:2,low:3};
     return (urgOrder[a.urgency]??2)-(urgOrder[b.urgency]??2) || b.created?.localeCompare(a.created);
   });
 
   const counts = {};
-  Object.keys(REF_STATUSES).forEach(k=>{ counts[k]=referrals.filter(r=>r.status===k).length; });
+  Object.keys(REF_STATUSES).forEach(k=>{ counts[k]=live.filter(r=>r.status===k).length; });
   const newCount = counts.new||0;
 
   return `
@@ -8681,9 +8683,11 @@ function renderReferrals() {
   <!-- FILTER BAR -->
   <div class="ref-filter-bar">
     <span style="font-size:12px;font-weight:600;color:var(--muted)">Show:</span>
-    <button class="ref-filter-btn ${filterStatus==='all'?'active':''}" onclick="setRefFilter('all')">All (${referrals.length})</button>
+    <button class="ref-filter-btn ${filterStatus==='all'?'active':''}" onclick="setRefFilter('all')">All (${live.length})</button>
     ${Object.entries(REF_STATUSES).map(([k,v])=>`<button class="ref-filter-btn ${filterStatus===k?'active':''}" onclick="setRefFilter('${k}')">${v.icon} ${v.label} (${counts[k]||0})</button>`).join('')}
+    <button class="ref-filter-btn ${filterStatus==='archived'?'active':''}" id="ref-filter-archived" onclick="setRefFilter('archived')">🗄️ Archived (${archived.length})</button>
     <div style="flex:1"></div>
+    ${tidy.length && filterStatus!=='archived' ? `<button class="btn btn-sm btn-outline" id="ref-archive-done" onclick="archiveDoneReferrals()" title="Move finished referrals (client created or declined) out of the way — they stay in Archived">🗄️ Archive finished (${tidy.length})</button>` : ''}
     <select style="font-size:12px;padding:5px 10px;border-radius:6px;border:1px solid var(--border)" onchange="setRefSort(this.value)" id="ref-sort">
       <option value="urgency">Sort: Urgency</option>
       <option value="date">Sort: Newest</option>
@@ -8693,7 +8697,7 @@ function renderReferrals() {
 
   <!-- REFERRAL CARDS -->
   ${sorted.length===0
-    ? `<div class="empty-state"><div class="icon">📥</div><p>No referrals${filterStatus!=='all'?' in this category':' yet'}</p><button class="btn btn-primary" onclick="openReferralModal()" style="margin-top:12px">Add First Referral</button></div>`
+    ? filterStatus==='archived' ? `<div class="empty-state"><div class="icon">🗄️</div><p>No archived referrals</p></div>` : `<div class="empty-state"><div class="icon">📥</div><p>No referrals${filterStatus!=='all'?' in this category':' yet'}</p><button class="btn btn-primary" onclick="openReferralModal()" style="margin-top:12px">Add First Referral</button></div>`
     : `<div style="display:grid;gap:12px">${sorted.map(r=>renderReferralCard(r)).join('')}</div>`
   }`;
 }
@@ -8706,7 +8710,8 @@ function renderReferralCard(r) {
   const age = r.created ? Math.floor((Date.now()-new Date(r.created))/(24*3600*1000)) : 0;
   const overdue = (r.status==='new'||r.status==='reviewing') && age >= 3;
 
-  return `<div class="ref-card" style="border-left:4px solid ${sc.color}">
+  return `<div class="ref-card${r.archived?' is-archived':''}" data-ref="${sanitize(r.id)}" style="border-left:4px solid ${r.archived?'#9ca3af':sc.color}${r.archived?';background:#fafafa':''}">
+    ${r.archived?`<div style="font-size:12px;color:#4b5563;background:#f3f4f6;border-radius:6px;padding:5px 10px;margin-bottom:10px">🗄️ Archived ${fmt(r.archived.at)}${r.archived.by?' by '+sanitize(r.archived.by):''}</div>`:''}
     <div style="display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap">
       <div style="flex:1;min-width:200px">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -8715,19 +8720,19 @@ function renderReferralCard(r) {
           ${overdue?'<span style="background:#fee2e2;color:#dc2626;font-size:10px;font-weight:700;padding:2px 8px;border-radius:12px">⚠️ '+age+'d old</span>':''}
         </div>
         <div class="rc-meta">
-          ${r.dob?`DOB: ${r.dob} &bull; `:''}
-          ${r.phone?`📞 ${r.phone} &bull; `:''}
+          ${r.dob?`DOB: ${sanitize(r.dob)} &bull; `:''}
+          ${r.phone?`📞 ${sanitize(r.phone)} &bull; `:''}
           ${r.mob?`Mob: ${sanitize(r.mob)} &bull; `:''}
           ${r.community?sanitize(r.community):''}
         </div>
         <div class="rc-meta" style="margin-top:4px">
-          <strong>Referred by:</strong> ${r.referralSource||'—'} &bull;
+          <strong>Referred by:</strong> ${sanitize(r.referralSource||'—')} &bull;
           <strong>Received:</strong> ${fmt(r.created)} &bull;
           <strong>Programs:</strong> ${[r.sewb&&'SEWB',r.aod&&'AOD',r.justice&&'Justice',r.cultural&&'Cultural'].filter(Boolean).join(', ')||'TBC'}
         </div>
-        ${r.referralReason?`<div style="font-size:12px;margin-top:6px;color:var(--text);line-height:1.5">${r.referralReason.slice(0,180)}${r.referralReason.length>180?'…':''}</div>`:''}
-        ${r.allocatedTo?`<div style="margin-top:6px;font-size:12px"><span style="background:#dbeafe;color:#1e40af;padding:2px 8px;border-radius:12px;font-weight:600">👷 ${r.allocatedTo}</span></div>`:''}
-        ${latestAction?`<div class="ref-action-log" style="margin-top:8px"><strong>${latestAction.worker||'Staff'}</strong> — ${latestAction.text} <span style="color:var(--muted)">(${fmt(latestAction.date)})</span></div>`:''}
+        ${r.referralReason?`<div style="font-size:12px;margin-top:6px;color:var(--text);line-height:1.5">${sanitize(r.referralReason.slice(0,180))}${r.referralReason.length>180?'…':''}</div>`:''}
+        ${r.allocatedTo?`<div style="margin-top:6px;font-size:12px"><span style="background:#dbeafe;color:#1e40af;padding:2px 8px;border-radius:12px;font-weight:600">👷 ${sanitize(r.allocatedTo)}</span></div>`:''}
+        ${latestAction?`<div class="ref-action-log" style="margin-top:8px"><strong>${sanitize(latestAction.worker||'Staff')}</strong> — ${sanitize(latestAction.text||'')} <span style="color:var(--muted)">(${fmt(latestAction.date)})</span></div>`:''}
       </div>
       <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;flex-shrink:0">
         <span class="status-chip" style="background:${sc.bg};color:${sc.color}">${sc.icon} ${sc.label}</span>
@@ -8739,8 +8744,11 @@ function renderReferralCard(r) {
       <button class="btn btn-sm btn-outline" onclick="openAllocateModal('${r.id}')">👷 Allocate</button>
       <button class="btn btn-sm btn-outline" onclick="openReferralStatusModal('${r.id}')">🔄 Status</button>
       <button class="btn btn-sm btn-outline" onclick="openReferralModal('${r.id}')">✏️ Edit</button>
-      ${r.status!=='converted'?`<button class="btn btn-sm btn-accent" onclick="convertToClient('${r.id}')">✅ Create Client</button>`:''}
-      <button class="btn btn-sm btn-danger" onclick="deleteReferral('${r.id}')">✕</button>
+      ${r.status!=='converted'&&!r.archived?`<button class="btn btn-sm btn-accent" onclick="convertToClient('${r.id}')">✅ Create Client</button>`:''}
+      ${r.archived
+        ? `<button class="btn btn-sm btn-outline ref-restore" onclick="restoreReferral('${r.id}')" title="Put it back in the Holding Bay">↩️ Restore</button>`
+        : `<button class="btn btn-sm btn-outline ref-archive" onclick="archiveReferral('${r.id}')" title="Move it out of the Holding Bay — kept in Archived, can be restored">🗄️ Archive</button>`}
+      <button class="btn btn-sm btn-danger" onclick="deleteReferral('${r.id}')" title="Delete permanently">✕</button>
     </div>
     ${actions.length>1?`<div id="actions-${r.id}" style="display:none;margin-top:10px;border-top:1px solid var(--border);padding-top:10px">
       <div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:6px">FULL ACTION LOG</div>
@@ -8751,6 +8759,37 @@ function renderReferralCard(r) {
 }
 
 function setRefFilter(status) { window._refFilter=status; showPage('referrals'); }
+// ---- Archive: finished referrals leave the Holding Bay but are kept (and can be restored) ----
+const _REF_OPEN = ['new','reviewing','allocated','waitlist'];
+function _archiveRef(r) {
+  const at = now(), by = currentUser?.name || '';
+  r.archived = { at, by };
+  (r.actions = r.actions || []).push({ id:uid(), type:'Archived', text:'Archived — moved out of the Holding Bay', worker:by || 'Staff', date:today() });
+}
+function archiveReferral(id) {
+  const r = referrals.find(x=>x.id===id); if (!r || r.archived) return;
+  if (_REF_OPEN.includes(r.status||'new') && !confirm(`${r.name||'This referral'} is still "${(REF_STATUSES[r.status]||REF_STATUSES.new).label}".\n\nArchive it anyway? It will leave the Holding Bay (you can restore it from Archived).`)) return;
+  _archiveRef(r); saveReferrals();
+  audit('Archived referral', `${r.name||''} (${(REF_STATUSES[r.status]||{}).label||r.status||''})`);
+  showToast(`🗄️ ${r.name||'Referral'} archived — find it under Archived`); showPage('referrals');
+}
+function archiveDoneReferrals() {
+  const list = referrals.filter(r=>!r.archived && (r.status==='converted'||r.status==='declined'));
+  if (!list.length) return;
+  if (!confirm(`Archive ${list.length} finished referral${list.length!==1?'s':''} (client created or declined)?\n\nThey leave the Holding Bay and are kept under Archived.`)) return;
+  list.forEach(_archiveRef); saveReferrals();
+  audit('Archived referrals', `${list.length} finished referral${list.length!==1?'s':''}`);
+  showToast(`🗄️ ${list.length} referral${list.length!==1?'s':''} archived`); showPage('referrals');
+}
+function restoreReferral(id) {
+  const r = referrals.find(x=>x.id===id); if (!r || !r.archived) return;
+  r.archived = null;                       // (not delete: cloud saves merge fields, so a removed field would come back)
+  (r.actions = r.actions || []).push({ id:uid(), type:'Restored', text:'Restored to the Holding Bay', worker:currentUser?.name || 'Staff', date:today() });
+  saveReferrals(); audit('Restored referral', r.name||'');
+  showToast(`↩️ ${r.name||'Referral'} is back in the Holding Bay`);
+  if ((window._refFilter||'all')==='archived' && !referrals.some(x=>x.archived)) window._refFilter='all';
+  showPage('referrals');
+}
 function setRefSort(val) { window._refSort=val; showPage('referrals'); }
 function toggleActionLog(id) {
   const el=document.getElementById('actions-'+id);
@@ -16764,7 +16803,7 @@ function getWorkflowAlerts() {
   const alerts = [];
   const todayStr = today();
   // Overdue referrals
-  referrals.filter(r=>r.status==='new'&&r.created<todayStr).forEach(r=>{
+  referrals.filter(r=>r.status==='new'&&!r.archived&&r.created<todayStr).forEach(r=>{
     const age=Math.floor((Date.now()-new Date(r.created))/(24*3600*1000));
     if(age>=1) alerts.push({type:'referral',level:age>=3?'high':'medium',msg:`Referral for ${sanitize(r.name)} unactioned (${age} day${age>1?'s':''})`,link:'referrals',id:r.id});
   });
