@@ -2,7 +2,7 @@
 //
 // Deploy ONLY this codebase:   firebase deploy --only functions:sms
 // (Never plain "--only functions" — the other codebase holds role functions
-// that must not go live yet; see SECURITY-DEPLOY.md.)  Setup: SMS-SETUP.md.
+// that must not go live yet; see docs/SECURITY-DEPLOY.md.)  Setup: docs/SMS-SETUP.md.
 //
 // The app writes { kind:'handbook'|'intake', clientId, requestedBy, requestedByName,
 // requestedAt, linkId? } to teams/{team}/smsOutbox. This function claims the request,

@@ -5,7 +5,7 @@ rules_version = '2';
 // ⚠️ PREREQUISITE: deploy functions/ and run scripts/bootstrap-sysmanager.js
 // FIRST, and have every staff member sign out/in once so their token carries
 // the role claim. Publishing these rules before that will lock managers out
-// of deletes and the audit log. See SECURITY-DEPLOY.md.
+// of deletes and the audit log. See docs/SECURITY-DEPLOY.md.
 //
 // Designed against the app's actual sync behaviour:
 //   • FSYNC pushAll()/pushNotes()/pushAudit() re-write EXISTING docs verbatim

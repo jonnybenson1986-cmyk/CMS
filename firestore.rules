@@ -15,7 +15,7 @@ rules_version = '2';
 // no longer replicates to the cloud copy (the original entry is preserved).
 //
 // NEXT STEP (findings #2/#3): per-role restriction via custom claims — see
-// firestore.rules.strict and SECURITY-DEPLOY.md. Do NOT publish the strict
+// firestore.rules.strict and docs/SECURITY-DEPLOY.md. Do NOT publish the strict
 // file until the Cloud Functions are deployed and roles assigned.
 
 service cloud.firestore {

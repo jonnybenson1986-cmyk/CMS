@@ -8,7 +8,7 @@
 #     SMS text service" ticked: publishes the rules AND the SMS function
 #     (functions:sms only — never the other functions codebase).
 #
-# One-time set-up (DEPLOY-FIREBASE.md): add a repository secret
+# One-time set-up (docs/DEPLOY-FIREBASE.md): add a repository secret
 # FIREBASE_SERVICE_ACCOUNT holding a Google service-account key (JSON).
 # Never paste that key anywhere else.
 
@@ -16,14 +16,14 @@ name: "Firebase: test & publish"
 
 on:
   pull_request:
-    paths: ['firestore.rules', 'firestore.rules.strict', 'intake/intake-fields.js', 'tests/rules/**', 'functions-sms/**', '.github/workflows/firebase-deploy.yml']
+    paths: ['firestore.rules', 'firestore.rules.strict', 'site/intake/intake-fields.js', 'tests/rules/**', 'functions-sms/**', '.github/workflows/firebase-deploy.yml']
   push:
     branches: [main]
-    paths: ['firestore.rules', 'firestore.rules.strict', 'intake/intake-fields.js', 'tests/rules/**', '.github/workflows/firebase-deploy.yml']
+    paths: ['firestore.rules', 'firestore.rules.strict', 'site/intake/intake-fields.js', 'tests/rules/**', '.github/workflows/firebase-deploy.yml']
   workflow_dispatch:
     inputs:
       deploy_sms_function:
-        description: 'Also deploy the SMS text service (functions:sms). Needs the Blaze plan and the SMS settings first - see SMS-SETUP.md'
+        description: 'Also deploy the SMS text service (functions:sms). Needs the Blaze plan and the SMS settings first - see docs/SMS-SETUP.md'
         type: boolean
         default: false
 
@@ -80,7 +80,7 @@ jobs:
           SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: |
           if [ -z "$SA" ]; then
-            echo "::error::The FIREBASE_SERVICE_ACCOUNT secret isn't set. See DEPLOY-FIREBASE.md (step 1)."
+            echo "::error::The FIREBASE_SERVICE_ACCOUNT secret isn't set. See docs/DEPLOY-FIREBASE.md (step 1)."
             exit 1
           fi
           umask 077
@@ -101,7 +101,7 @@ jobs:
           SMS_COST_PER_PART: ${{ vars.SMS_COST_PER_PART }}
         run: |
           for v in HANDBOOK_URL APP_URL SMS_FROM; do
-            if [ -z "${!v}" ]; then echo "::error::Repository variable $v isn't set. See DEPLOY-FIREBASE.md (step 4)."; exit 1; fi
+            if [ -z "${!v}" ]; then echo "::error::Repository variable $v isn't set. See docs/DEPLOY-FIREBASE.md (step 4)."; exit 1; fi
           done
           {
             echo "HANDBOOK_URL=$HANDBOOK_URL"
