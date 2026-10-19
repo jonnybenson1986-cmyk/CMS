@@ -709,7 +709,15 @@ const FSYNC = (() => {
     return !!(window.firebase && firebase.firestore && firebase.auth);
   }
 
-  async function init() {
+  // One connection attempt at a time: the login screen's background retries
+  // and the sign-in itself queue up instead of overlapping.
+  let _initChain = Promise.resolve();
+  function init() {
+    const run = _initChain.then(_init, _init);
+    _initChain = run.catch(() => {});
+    return run;
+  }
+  async function _init() {
     const cfg = getCfg();
     if (!cfg?.apiKey) return false;
     const _log = [];
@@ -720,8 +728,10 @@ const FSYNC = (() => {
       }
       if (!window.firebase || !firebase.firestore || !firebase.auth) { _log.push('Firebase SDK not loaded'); throw new Error('Firebase SDK not loaded'); }
       _log.push('SDK ✓');
-      if (firebase.apps.length) { try { await firebase.app().delete(); } catch(e){} }
-      firebase.initializeApp(cfg);
+      // Reuse the running app. Deleting and re-creating it (as this used to)
+      // killed any sign-in in progress — a two-step code being waited on was
+      // lost and the button sat on "Awaiting code…" for good.
+      if (!firebase.apps.length) firebase.initializeApp(cfg);
       _log.push('App initialised ✓');
       _activateAppCheck(_log);
       db = firebase.firestore();
@@ -731,7 +741,11 @@ const FSYNC = (() => {
         const unsub = firebase.auth().onAuthStateChanged(user => { unsub(); resolve(user); });
       });
       _log.push('Auth state ✓');
-      if (!firebase.auth().currentUser) {
+      if (!firebase.auth().currentUser && window._wgSigningIn) {
+        // A staff member is part-way through signing in (e.g. waiting for
+        // their two-step code) — don't swap in an anonymous session under them.
+        throw new Error('Sign-in in progress');
+      } else if (!firebase.auth().currentUser) {
         try {
           await firebase.auth().signInAnonymously();
           _log.push('Anon sign-in ✓');
@@ -1231,7 +1245,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v92';
+const APP_VERSION = 'v93';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -14108,6 +14122,7 @@ function openNewGroupModal() {
 // ===== MODAL ENGINE =====
 function showModal(title, html, onSave, maxWidth='720px', noSave=false) {
   const mc = document.getElementById('modal-container');
+  _modalClosing(mc);
   mc.innerHTML = `
   <div class="modal-overlay" onclick="closeModalOnOverlay(event)">
     <div class="modal" style="max-width:${maxWidth}">
@@ -14127,8 +14142,10 @@ function showModal(title, html, onSave, maxWidth='720px', noSave=false) {
 }
 
 function closeModalOnOverlay(e) { if(e.target.classList.contains('modal-overlay')) closeModal(); }
+function _modalClosing(mc) { const f = mc._onClose; mc._onClose = null; if (f) { try { f(); } catch (e) { console.warn(e); } } }
 function closeModal() {
   const mc = document.getElementById('modal-container');
+  _modalClosing(mc);
   // ✕, Cancel, click outside, Esc: keep any unsaved note as a draft.
   try { mc._draft && mc._draft.flush(); } catch(e) {}
   mc._draft = null;
@@ -14546,6 +14563,11 @@ function _mfaFriendlyError(e){
     'auth/invalid-phone-number':      'That phone number doesn\'t look right. Use international format, e.g. +61412345678.',
     'auth/second-factor-already-in-use': 'That phone is already enrolled as a second factor on this account.',
     'auth/unverified-email':          'Please verify your email address first — reopen Two-step sign-in and use the "Send verification email" button.',
+    'auth/billing-not-enabled':       'Firebase can\'t send sign-in texts on this project\'s current plan. The System Manager needs to check Firebase Console → Usage and billing.',
+    'auth/quota-exceeded':            'Firebase\'s daily limit for sign-in texts has been reached — please try again later.',
+    'auth/network-request-failed':    'No internet connection — check your connection and try again.',
+    'auth/missing-verification-code': 'Enter the 6-digit code from the text message.',
+    'auth/session-expired':           'That code has expired — request a new one.',
     'auth/operation-not-allowed':     'SMS is not yet enabled for your region. The System Manager needs to allow Australia (+61) in Firebase Console → Authentication → Settings → SMS region policy.',
   };
   return m[e.code] || (e.message || 'Something went wrong. Please try again.');
@@ -14693,42 +14715,93 @@ async function removeMfa(factorUid){
   }
 }
 
-// Sign-in challenge when the account has MFA enrolled.
+// Sign-in challenge when the account has MFA enrolled. The box stays open
+// until the code is accepted: a wrong code says so and can be re-typed, a code
+// that never arrives can be re-sent, and closing the box (✕, Cancel, Esc,
+// clicking outside) ends the attempt so the Sign In button comes back —
+// nothing leaves the sign-in page waiting on "Awaiting code…".
 async function _mfaChallengeFlow(resolver, email){
   const hint = resolver.hints[0]; // one factor supported today (SMS)
+  const SLOW_MS = 30000;
   return new Promise((resolve, reject) => {
+    let done = false, verificationId = null, sending = false, slowTimer = null;
+    const mc = document.getElementById('modal-container');
+    const el = id => document.getElementById(id);
+    const say = (msg, col) => { const st = el('mfa-in-status'); if (st) { st.textContent = msg; st.style.color = col || 'var(--muted)'; } };
+    const finish = (fn, val) => { if (done) return; done = true; clearTimeout(slowTimer); mc._onClose = null; fn(val); };
     const html = `
       <p style="font-size:13px;color:var(--muted);margin-bottom:14px">This account has two-step sign-in on. We're texting a 6-digit code to <strong>${sanitize(hint.phoneNumber||'your mobile')}</strong>.</p>
-      <div class="form-group"><label>6-digit code</label>
+      <div class="form-group"><label for="mfa-in-code">6-digit code</label>
         <input id="mfa-in-code" inputmode="numeric" maxlength="6" autocomplete="one-time-code" style="font-size:16px;letter-spacing:4px;text-align:center" placeholder="123456"></div>
-      <p id="mfa-in-status" style="font-size:12px;color:var(--muted);min-height:16px"></p>
+      <p id="mfa-in-status" role="status" aria-live="polite" style="font-size:12px;color:var(--muted);min-height:16px"></p>
+      <div style="display:flex;gap:8px;justify-content:space-between;align-items:center;flex-wrap:wrap;margin-top:12px">
+        <button type="button" class="btn btn-outline btn-sm" id="mfa-in-resend" disabled>Send a new code</button>
+        <span style="display:flex;gap:8px">
+          <button type="button" class="btn btn-outline" id="mfa-in-cancel">Cancel</button>
+          <button type="button" class="btn btn-primary" id="mfa-in-verify">Verify</button>
+        </span>
+      </div>
       <div id="mfa-in-recaptcha"></div>`;
-    showModal('🔐 Enter your sign-in code', html, async ()=>{
-      const st = document.getElementById('mfa-in-status');
-      const code = document.getElementById('mfa-in-code')?.value?.trim();
-      if(!code){ st.textContent='Enter the 6-digit code.'; return false; }
+    showModal('🔐 Enter your sign-in code', html, null, '460px', true);
+    // Any way of closing the box ends this sign-in attempt.
+    mc._onClose = () => finish(reject, Object.assign(new Error('Two-step sign-in cancelled'), { code: 'auth/mfa-cancelled' }));
+
+    const send = async () => {
+      if (done || sending) return;
+      sending = true; verificationId = null;
+      const rs = el('mfa-in-resend'); if (rs) rs.disabled = true;
+      say('Sending your code…');
+      clearTimeout(slowTimer);
+      slowTimer = setTimeout(() => { if (!done && !verificationId) { say('The code is taking a while. Check your phone has signal, then tap "Send a new code".', '#92400e'); const r = el('mfa-in-resend'); if (r) r.disabled = false; } }, SLOW_MS);
       try {
-        const cred = firebase.auth.PhoneAuthProvider.credential(window._mfaInVerificationId, code);
+        const verifier = _mfaMountRecaptcha('mfa-in-recaptcha');
+        if (!verifier) throw Object.assign(new Error('The security check could not start'), { code: 'auth/recaptcha-unavailable' });
+        const provider = new firebase.auth.PhoneAuthProvider();
+        const id = await provider.verifyPhoneNumber({ multiFactorHint: hint, session: resolver.session }, verifier);
+        if (done) return;
+        verificationId = id; clearTimeout(slowTimer);
+        say('Code sent — it can take up to a minute to arrive.', '#065f46');
+        setTimeout(() => el('mfa-in-code')?.focus(), 30);
+      } catch (e) {
+        if (done) return;
+        console.warn('Two-step code not sent:', e);
+        clearTimeout(slowTimer);
+        if (e.code === 'auth/too-many-requests' || e.code === 'auth/operation-not-allowed') { say('Could not send the code: ' + _mfaFriendlyError(e), '#dc2626'); }
+        else say('Could not send the code: ' + _mfaFriendlyError(e) + ' Tap "Send a new code" to try again.', '#dc2626');
+      } finally {
+        sending = false;
+        const r = el('mfa-in-resend'); if (r && !done) r.disabled = false;
+      }
+    };
+
+    const verify = async () => {
+      if (done) return;
+      const code = (el('mfa-in-code')?.value || '').replace(/\D/g, '');
+      if (code.length !== 6) { say('Enter the 6-digit code from the text message.', '#dc2626'); return; }
+      if (!verificationId) { say(sending ? 'Still sending your code — wait for the text, then enter it.' : 'No code has been sent yet — tap "Send a new code".', '#92400e'); return; }
+      const vb = el('mfa-in-verify'); if (vb) { vb.disabled = true; vb.textContent = 'Checking…'; }
+      try {
+        const cred = firebase.auth.PhoneAuthProvider.credential(verificationId, code);
         const assertion = firebase.auth.PhoneMultiFactorGenerator.assertion(cred);
         const userCred = await resolver.resolveSignIn(assertion);
-        resolve(userCred);
-        return true;
-      } catch(e){
-        st.textContent = _mfaFriendlyError(e);
-        return false;
+        finish(resolve, userCred);
+        mc.innerHTML = '';          // close the box without the cancel hook
+      } catch (e) {
+        if (done) return;
+        console.warn('Two-step code rejected:', e);
+        say(_mfaFriendlyError(e), '#dc2626');
+        if (vb) { vb.disabled = false; vb.textContent = 'Verify'; }
+        el('mfa-in-code')?.select();
       }
-    }, '460px');
-    // Kick off the SMS send after the modal is in the DOM
-    setTimeout(async ()=>{
-      try {
-        _mfaMountRecaptcha('mfa-in-recaptcha');
-        const provider = new firebase.auth.PhoneAuthProvider();
-        window._mfaInVerificationId = await provider.verifyPhoneNumber({ multiFactorHint: hint, session: resolver.session }, _mfaRecaptcha);
-      } catch(e){
-        document.getElementById('mfa-in-status').textContent = 'Could not send code: ' + _mfaFriendlyError(e);
-        reject(e);
-      }
-    }, 60);
+    };
+
+    el('mfa-in-verify')?.addEventListener('click', verify);
+    el('mfa-in-resend')?.addEventListener('click', send);
+    el('mfa-in-cancel')?.addEventListener('click', () => closeModal());
+    el('mfa-in-code')?.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); verify(); } });
+    el('mfa-in-code')?.addEventListener('input', ev => { const v = ev.target.value.replace(/\D/g, '').slice(0, 6); if (v !== ev.target.value) ev.target.value = v; if (v.length === 6 && verificationId) verify(); });
+    // Send the first code once the box (and its reCAPTCHA spot) is on the page.
+    setTimeout(send, 60);
   });
 }
 
@@ -14798,6 +14871,7 @@ async function doLogin() {
     if (!pass)  { errEl.textContent='Please enter your password'; return; }
     if (_isLockedOut(email)) { errEl.textContent='Too many failed attempts. Try again in '+_lockoutMins(email)+' minute(s).'; return; }
     errEl.textContent=''; btn.disabled=true; btn.textContent='Signing in…';
+    window._wgSigningIn = true;   // background connecting stands aside until this finishes
     try {
       // Firebase may still be loading on a fresh page (slow/flaky CDN). Actively
       // wait and retry loading the SDK for up to ~15s before giving up, so the
@@ -14811,6 +14885,7 @@ async function doLogin() {
         waited += 1500;
       }
       if (!window.firebase || !firebase.auth) {
+        window._wgSigningIn = false;
         btn.disabled=false; btn.textContent='Sign In →';
         errEl.textContent = 'Still connecting to the secure server. Check your internet connection and tap Sign In again in a moment.';
         return;
@@ -14853,9 +14928,12 @@ async function doLogin() {
         const acc = await _accessDocRef(email)?.get();
         if (acc && acc.exists) { u.hiddenPages = acc.data().hiddenPages || []; saveUserProfiles(); }
       } catch(_) {}
+      window._wgSigningIn = false;
       _clearFailedLogins(email); saveCurrentUser(u); _auditLogin(u); _flagUnconfirmedRole(u, email); initApp();
     } catch(e) {
+      window._wgSigningIn = false;
       btn.disabled=false; btn.textContent='Sign In →';
+      if (e.code === 'auth/mfa-cancelled') { errEl.textContent = 'Sign-in cancelled — tap Sign In to get a new code.'; return; }
       const msgs = {
         'auth/user-not-found':    'No account found with that email.',
         'auth/wrong-password':    'Incorrect password.',
@@ -17017,8 +17095,12 @@ showLoginScreen();
     // refresh the small connection badge if the login screen is still up.
     const badge = document.getElementById('login-fb-badge');
     if (ok) { if (badge) badge.innerHTML = '☁️ Secure login via Firebase'; return; }
+    // Sign-in only needs the Firebase SDK. Before anyone signs in the records
+    // can't be read (the rules want a signed-in person), so once the SDK is
+    // here there's nothing more to retry — the sign-in connects the rest.
+    if (window.firebase && firebase.auth) { if (badge) badge.innerHTML = '🔒 Secure sign-in ready · Data stored in Australia'; return; }
     if (badge) badge.innerHTML = '⏳ Connecting to secure server…';
-    if (attempt < 5) setTimeout(() => autoConnectFirebase(attempt + 1), attempt * 2000);
+    if (attempt < 5 && !window._wgSigningIn) setTimeout(() => autoConnectFirebase(attempt + 1), attempt * 2000);
   });
 })();
 
