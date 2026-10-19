@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en-AU">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -149,6 +149,54 @@
   .idea-card .idea-text { font-size:14px; white-space:pre-wrap; word-break:break-word; margin:6px 0 8px; }
   .idea-card .idea-meta { font-size:11px; color:var(--muted); }
   .idea-tabs { display:flex; gap:6px; margin-bottom:14px; flex-wrap:wrap; }
+  /* ✍️ Writing tools — rich editor (case notes) and the writing-tools bar (other text boxes) */
+  .rte { border:1.5px solid var(--border); border-radius:8px; background:#fff; }
+  .rte:focus-within { border-color:var(--primary-light); box-shadow:0 0 0 3px rgba(45,106,79,.12); }
+  .rte-menubar { display:flex; gap:2px; padding:3px 6px; border-bottom:1px solid var(--border); background:#f9fafb; border-radius:7px 7px 0 0; }
+  .rte-menu { position:relative; }
+  .rte-mb { background:none; border:none; font-size:13px; padding:4px 9px; border-radius:4px; cursor:pointer; color:var(--text); font-family:inherit; }
+  .rte-mb:hover, .rte-mb[aria-expanded="true"] { background:#e8efe9; }
+  .rte-pop { position:absolute; top:100%; left:0; z-index:40; background:#fff; border:1px solid var(--border); border-radius:8px; box-shadow:0 8px 24px rgba(0,0,0,.14); min-width:220px; padding:4px; }
+  .rte-mi { display:flex; justify-content:space-between; align-items:center; gap:14px; width:100%; text-align:left; background:none; border:none; padding:7px 10px; font-size:13px; border-radius:4px; cursor:pointer; color:var(--text); font-family:inherit; }
+  .rte-mi:hover, .rte-mi:focus-visible { background:#eef5f0; outline:none; }
+  .rte-mi kbd { font-size:11px; color:var(--muted); font-family:inherit; }
+  .rte-pop hr { border:none; border-top:1px solid var(--border); margin:4px 0; }
+  .rte-note { font-size:11px; color:var(--muted); padding:3px 10px; }
+  .rte-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:2px; padding:5px 6px; border-bottom:1px solid var(--border); background:#f9fafb; }
+  .rte-b { min-width:30px; height:30px; display:inline-flex; align-items:center; justify-content:center; background:none; border:1px solid transparent; border-radius:5px; cursor:pointer; color:#374151; font-size:15px; padding:0 5px; font-family:inherit; }
+  .rte-b:hover, .rte-b:focus-visible { background:#e8efe9; border-color:var(--border); outline:none; }
+  .rte .rte-sel { height:30px; font-size:12px; padding:0 4px; border:1px solid var(--border); border-radius:5px; background:#fff; width:auto !important; max-width:130px; margin:0 2px; }
+  .rte-sep { width:1px; height:20px; background:var(--border); margin:0 4px; }
+  .rte-wrapbreak { flex-basis:100%; height:0; margin:0; background:none; }
+  .rte-area { position:relative; padding:10px 12px; outline:none; font-size:14px; line-height:1.55; overflow:auto; max-height:60vh; resize:vertical; word-break:break-word; }
+  .rte-area.is-empty::before { content:attr(data-placeholder); position:absolute; left:12px; right:12px; top:10px; color:#9ca3af; pointer-events:none; }
+  .rte-area p, .rte-view p { margin:0 0 .5em; }
+  .rte-area h1, .rte-view h1 { font-size:1.35em; margin:.3em 0; } .rte-area h2, .rte-view h2 { font-size:1.2em; margin:.3em 0; } .rte-area h3, .rte-view h3 { font-size:1.05em; margin:.3em 0; }
+  .rte-area blockquote, .rte-view blockquote { margin:.4em 0; padding:2px 0 2px 12px; border-left:3px solid var(--primary-light); color:#374151; }
+  .rte-area ul, .rte-area ol, .rte-view ul, .rte-view ol { margin:.3em 0 .5em; padding-left:24px; }
+  .rte-area table, .rte-view table { border-collapse:collapse; margin:.4em 0; max-width:100%; }
+  .rte-area td, .rte-area th, .rte-view td, .rte-view th { border:1px solid #cbd5e1; padding:4px 8px; min-width:40px; vertical-align:top; }
+  .rte-area hr, .rte-view hr { border:none; border-top:1px solid #cbd5e1; margin:.6em 0; }
+  .rte-view { line-height:1.55; }
+  .rte-status { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; font-size:11px; color:var(--muted); padding:4px 10px; border-top:1px solid var(--border); background:#f9fafb; border-radius:0 0 7px 7px; }
+  .rte-panel { border-bottom:1px solid var(--border); padding:8px 10px; background:#fff; }
+  .rte-ph { display:flex; justify-content:space-between; align-items:center; font-weight:700; font-size:12px; margin-bottom:6px; }
+  .rte-x { background:none; border:none; cursor:pointer; font-size:14px; color:var(--muted); }
+  .rte-pg { font-size:11px; color:var(--muted); margin:6px 0 3px; }
+  .rte-grid { display:flex; flex-wrap:wrap; gap:4px; }
+  .rte-ch { min-width:32px; height:32px; border:1px solid var(--border); border-radius:5px; background:#fff; cursor:pointer; font-size:16px; font-family:inherit; }
+  .rte-ch:hover { background:#eef5f0; border-color:var(--primary-light); }
+  .rte-dt { font-size:13px; padding:0 10px; margin:0 6px 6px 0; }
+  .rte-swatch { width:26px; height:26px; border-radius:5px; border:1px solid #d1d5db; cursor:pointer; }
+  .rte-tgrid { display:grid; grid-template-columns:repeat(6,22px); gap:3px; }
+  .rte-tc { width:22px; height:22px; min-width:0; } .rte-tc.on { background:#bbf7d0; border-color:#16a34a; }
+  .rte-tsize { font-size:12px; color:var(--muted); margin-top:4px; }
+  #wa-bar { position:fixed; z-index:260; display:none; align-items:center; gap:1px; background:#fff; border:1px solid var(--border); border-radius:8px; box-shadow:0 4px 14px rgba(0,0,0,.14); padding:2px 5px; max-width:calc(100vw - 16px); }
+  #wa-bar .rte-b { min-width:28px; height:28px; font-size:14px; }
+  #wa-bar .wa-count { font-size:11px; color:var(--muted); padding:0 6px; white-space:nowrap; }
+  #wa-bar .wa-panel { position:absolute; top:100%; left:0; width:min(340px, calc(100vw - 16px)); margin-top:4px; border:1px solid var(--border); border-radius:8px; box-shadow:0 8px 20px rgba(0,0,0,.14); }
+  @media print { #wa-bar, .rte-menubar, .rte-toolbar, .rte-status { display:none !important; } }
+
   .btn-accent { background: var(--accent); color: #fff; }
   .btn-accent:hover { background: var(--accent2); }
   .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text); }
@@ -331,6 +379,10 @@
     /* Grids */
     .grid-3 { grid-template-columns: 1fr; }
     .grid-2, .grid-4 { grid-template-columns: 1fr 1fr; gap: 10px; }
+  }
+  /* Forms in a window on a phone: one column, so boxes aren't squeezed (stat cards elsewhere stay two-up). */
+  @media (max-width: 520px) {
+    .modal .grid-2 { grid-template-columns: 1fr; }
 
     /* Stat cards */
     .stat-card { padding: 10px 12px; }
@@ -1173,7 +1225,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v89';
+const APP_VERSION = 'v90';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -1252,6 +1304,7 @@ function toggleVoiceInput(textareaId, btnId) {
       const t=ev.results[i][0].transcript;
       if(ev.results[i].isFinal){final+=t+' ';}else{interim+=t;}
     }
+    if(ta._rte) { if(final) rteInsertText(ta, final); if(statusEl) statusEl.textContent = interim ? `🎤 Hearing: "${interim.slice(0,60)}…"` : '🎤 Listening…'; return; }
     if(final) { baseText+=final; }
     ta.value = baseText + interim;
     ta.scrollTop = ta.scrollHeight;
@@ -1270,6 +1323,363 @@ function stopVoiceInput() {
   if(statusEl) statusEl.textContent='';
   _voiceTarget=null; _voiceBtnId=null;
 }
+
+// ============================================================
+// ✍️ WRITING TOOLS
+//  • Rich editor (rteEnhance) for case notes: Edit / Insert / Format / Table
+//    menus, undo/redo, special characters, date & time, paragraph styles, font
+//    and size, bold / italic / underline, text and highlight colour, alignment,
+//    lists, indent, quote, tables, pictures, Australian-English spell check and a
+//    word count. The original <textarea> stays in the page, hidden, and always
+//    holds a plain-text copy — so autosave drafts, validation, voice input,
+//    reports, exports and search keep working unchanged. The formatted version
+//    is saved alongside (note.html) after passing rteSanitize, and is sanitised
+//    again whenever it is shown.
+//  • Writing-tools bar for every other text box (plain text only — those boxes
+//    can't keep formatting): undo/redo, date & time, special characters,
+//    bullets, numbering, change case, spell check, word count.
+// ============================================================
+const RTE_FONTS = ['Verdana', 'Arial', 'Calibri', 'Georgia', 'Tahoma', 'Times New Roman', 'Courier New'];
+const RTE_SIZES = ['8pt', '9pt', '10pt', '11pt', '12pt', '14pt', '16pt', '18pt', '24pt'];
+const RTE_COLOURS = ['#000000', '#374151', '#6b7280', '#991b1b', '#dc2626', '#ea580c', '#d97706', '#ca8a04', '#065f46', '#16a34a', '#1e40af', '#2563eb', '#5b21b6', '#7c3aed', '#be185d', '#1a3a2a'];
+const RTE_HILITES = ['#fef08a', '#fde68a', '#fed7aa', '#fecaca', '#bbf7d0', '#a7f3d0', '#bfdbfe', '#ddd6fe', '#fbcfe8', '#e5e7eb', 'transparent'];
+// Special characters — including letters used in many Aboriginal languages.
+const RTE_SPECIAL = [
+  ['Punctuation', ['—', '–', '•', '…', '‘', '’', '“', '”', '«', '»', '§', '¶']],
+  ['Symbols', ['✓', '✗', '★', '→', '←', '↑', '↓', '°', '©', '®', '™', '@']],
+  ['Maths & money', ['½', '¼', '¾', '×', '÷', '±', '≈', '≠', '≤', '≥', '€', '£']],
+  ['Aboriginal language letters', ['ŋ', 'Ŋ', 'ṯ', 'ḏ', 'ṉ', 'ḻ', 'ṟ', 'ä', 'ï', 'ü', 'ā', 'ī', 'ū', 'ʃ']],
+];
+function _rteDates() {
+  const d = new Date(), t = d.toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' }).replace(/\s?([ap])\.?m\.?/i, ' $1m');
+  return [d.toLocaleDateString('en-AU'), d.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }), t, d.toLocaleDateString('en-AU') + ' ' + t];
+}
+
+// ---- safety: only a short list of tags and styles survive ----
+const RTE_TAGS = new Set(['P', 'BR', 'DIV', 'SPAN', 'B', 'STRONG', 'I', 'EM', 'U', 'S', 'STRIKE', 'SUB', 'SUP', 'H1', 'H2', 'H3', 'H4', 'BLOCKQUOTE', 'PRE', 'UL', 'OL', 'LI', 'TABLE', 'THEAD', 'TBODY', 'TR', 'TH', 'TD', 'HR']);
+const RTE_DROP = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'IMG', 'SVG', 'MATH', 'LINK', 'META', 'BASE', 'FORM', 'INPUT', 'BUTTON', 'TEXTAREA', 'SELECT', 'OPTION', 'VIDEO', 'AUDIO', 'SOURCE', 'CANVAS', 'TEMPLATE', 'NOSCRIPT', 'TITLE', 'HEAD', 'XML', 'O:P', 'FRAME', 'FRAMESET', 'APPLET', 'PICTURE']);
+const _rteColour = /^(#[0-9a-f]{3,8}|rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*(,\s*(0|1|0?\.\d+)\s*)?\)|transparent|[a-z]{3,20})$/i;
+const RTE_STYLE = {
+  'color': _rteColour, 'background-color': _rteColour,
+  'font-size': /^(\d{1,2}(\.\d{1,2})?(pt|px)|x{0,2}-?(small|large)|medium|smaller|larger)$/i,
+  'font-family': /^[\w\s,"'-]{1,80}$/,
+  'text-align': /^(left|right|center|justify|start|end)$/i,
+  'font-weight': /^(bold|bolder|normal|[1-9]00)$/i, 'font-style': /^(italic|normal|oblique)$/i,
+  'text-decoration': /^(none|underline|line-through)( (underline|line-through))*$/i,
+  'text-decoration-line': /^(none|underline|line-through)( (underline|line-through))*$/i,
+  'margin-left': /^\d{1,3}(px|pt|em)$/, 'padding-left': /^\d{1,3}(px|pt|em)$/,
+  'vertical-align': /^(sub|super|baseline)$/i,
+};
+function _rteCleanStyle(styleText) {
+  const out = [];
+  String(styleText || '').split(';').forEach(rule => {
+    const i = rule.indexOf(':'); if (i < 0) return;
+    const k = rule.slice(0, i).trim().toLowerCase(), v = rule.slice(i + 1).trim().replace(/\s*!important$/i, '');
+    if (RTE_STYLE[k] && RTE_STYLE[k].test(v) && !/url\(|expression|javascript:|[<>]/i.test(v)) out.push(k + ': ' + v);
+  });
+  return out.join('; ');
+}
+function rteSanitize(html) {
+  if (!html) return '';
+  const doc = new DOMParser().parseFromString('<body>' + String(html).slice(0, 300000) + '</body>', 'text/html');   // inert: nothing runs or loads
+  const walk = node => {
+    [...node.childNodes].forEach(ch => {
+      if (ch.nodeType === 3) return;
+      if (ch.nodeType !== 1) { ch.remove(); return; }                 // comments etc.
+      const tag = ch.tagName.toUpperCase();
+      if (RTE_DROP.has(tag) || tag.includes(':')) { ch.remove(); return; }
+      walk(ch);
+      if (tag === 'FONT') {                                             // old-style <font> → <span style>
+        const span = doc.createElement('span'), st = [];
+        if (ch.getAttribute('color')) st.push('color:' + ch.getAttribute('color'));
+        if (ch.getAttribute('face')) st.push('font-family:' + ch.getAttribute('face'));
+        const cs = _rteCleanStyle(st.join(';') + ';' + (ch.getAttribute('style') || '')); if (cs) span.setAttribute('style', cs);
+        while (ch.firstChild) span.appendChild(ch.firstChild); ch.replaceWith(span); return;
+      }
+      if (!RTE_TAGS.has(tag)) { ch.replaceWith(...ch.childNodes); return; }   // unknown tag: keep its text
+      const keep = {};
+      const st = _rteCleanStyle(ch.getAttribute('style')); if (st) keep.style = st;
+      if (tag === 'TD' || tag === 'TH') ['colspan', 'rowspan'].forEach(a => { const v = ch.getAttribute(a); if (/^\d{1,2}$/.test(v || '')) keep[a] = v; });
+      [...ch.attributes].forEach(a => ch.removeAttribute(a.name));
+      Object.entries(keep).forEach(([k, v]) => ch.setAttribute(k, v));
+    });
+  };
+  walk(doc.body);
+  return doc.body.innerHTML.replace(/<(span|div)>\s*<\/\1>/g, '').trim();
+}
+// Plain-text copy for reports, exports, search and texts.
+function rteToPlain(html) {
+  const doc = new DOMParser().parseFromString('<body>' + rteSanitize(html) + '</body>', 'text/html');
+  const BLOCK = /^(P|DIV|H[1-6]|BLOCKQUOTE|PRE|UL|OL|TABLE|TR|HR)$/;
+  let out = '';
+  const walk = (node, listInfo) => {
+    node.childNodes.forEach(ch => {
+      if (ch.nodeType === 3) { out += ch.nodeValue.replace(/\s+/g, ' '); return; }
+      if (ch.nodeType !== 1) return;
+      const tag = ch.tagName;
+      if (tag === 'BR') { out += '\n'; return; }
+      if (tag === 'HR') { out += '\n———\n'; return; }
+      if (BLOCK.test(tag) && out && !out.endsWith('\n')) out += '\n';
+      if (tag === 'LI') { if (out && !out.endsWith('\n')) out += '\n'; out += listInfo && listInfo.ol ? (++listInfo.n) + '. ' : '• '; }
+      if ((tag === 'TD' || tag === 'TH') && ch.previousElementSibling) out += '\t';
+      walk(ch, tag === 'OL' ? { ol: true, n: 0 } : tag === 'UL' ? { ol: false } : listInfo);
+      if (BLOCK.test(tag) && !out.endsWith('\n')) out += '\n';
+    });
+  };
+  walk(doc.body, null);
+  return out.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').replace(/^\s+|\s+$/g, '');
+}
+function rtePlainToHTML(text) {
+  const t = String(text || ''); if (!t.trim()) return '';
+  return t.split(/\n{2,}/).map(p => '<p>' + sanitize(p).replace(/\n/g, '<br>') + '</p>').join('');
+}
+// Show a note: formatted if it has a formatted version, otherwise the plain text.
+function noteBodyHTML(rec, plainKey, htmlKey) {
+  const h = rec && rec[htmlKey || 'html'];
+  if (h) return `<div class="rte-view">${rteSanitize(h)}</div>`;
+  return sanitize((rec && rec[plainKey || 'text']) || '').replace(/\n/g, '<br>');
+}
+
+// ---- the rich editor ----
+const _rteBtn = (cmd, title, label, extra) => `<button type="button" class="rte-b" data-cmd="${cmd}" title="${title}" aria-label="${title}"${extra || ''}>${label}</button>`;
+const _rteSvg = d => `<svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d="${d}" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const RTE_ICON = {
+  undo: _rteSvg('M7 5 3 9l4 4M3 9h9a5 5 0 0 1 0 10h-2'), redo: _rteSvg('m13 5 4 4-4 4M17 9H8a5 5 0 0 0 0 10h2'),
+  left: _rteSvg('M3 5h14M3 9h9M3 13h14M3 17h9'), center: _rteSvg('M3 5h14M5.5 9h9M3 13h14M5.5 17h9'), right: _rteSvg('M3 5h14M8 9h9M3 13h14M8 17h9'), justify: _rteSvg('M3 5h14M3 9h14M3 13h14M3 17h14'),
+  ul: _rteSvg('M8 5h9M8 10h9M8 15h9M3.5 5h.01M3.5 10h.01M3.5 15h.01'), ol: _rteSvg('M8 5h9M8 10h9M8 15h9M3 4h1v3M3 9.5h1.6L3 12h1.8M3 14.5h1.6v3H3M3 16h1.4'),
+  outdent: _rteSvg('M9 5h8M9 10h8M9 15h8M6 7.5 3 10l3 2.5'), indent: _rteSvg('M9 5h8M9 10h8M9 15h8M3 7.5 6 10l-3 2.5'),
+  quote: _rteSvg('M4 13c0-4 1.5-6 4-7M11 13c0-4 1.5-6 4-7M4 13h3v3H4zM11 13h3v3h-3z'), pic: _rteSvg('M3 4h14v12H3zM3 13l4-4 3 3 2-2 5 5M13 7.5h.01'),
+  table: _rteSvg('M3 4h14v12H3zM3 8h14M3 12h14M8 4v12M12.5 4v12'), clear: _rteSvg('M4 4h10M9 4l-3 12M3 17l14-14'),
+};
+let _rteMenuOpen = null;
+function rteEnhance(id, opts) {
+  const ta = document.getElementById(id); if (!ta || ta._rte) return null;
+  opts = opts || {};
+  ta.dataset.voiceAttached = '1';                       // the editor has its own voice button
+  const wrap = document.createElement('div');
+  wrap.className = 'rte'; wrap.dataset.for = id;
+  const minH = parseInt(ta.style.minHeight) || 140;
+  const menu = (name, items) => `<div class="rte-menu"><button type="button" class="rte-mb" data-menu="${name}" aria-haspopup="true" aria-expanded="false">${name} ▾</button><div class="rte-pop" role="menu" hidden>${items}</div></div>`;
+  const mi = (cmd, label, key) => `<button type="button" class="rte-mi" role="menuitem" data-cmd="${cmd}">${label}${key ? `<kbd>${key}</kbd>` : ''}</button>`;
+  wrap.innerHTML = `
+    <div class="rte-menubar">
+      ${menu('Edit', mi('undo', 'Undo', 'Ctrl+Z') + mi('redo', 'Redo', 'Ctrl+Y') + '<hr>' + mi('cut', 'Cut', 'Ctrl+X') + mi('copy', 'Copy', 'Ctrl+C') + '<div class="rte-note">Paste: Ctrl+V</div><hr>' + mi('selectAll', 'Select all', 'Ctrl+A'))}
+      ${menu('Insert', mi('special', 'Ω Special character…') + mi('datetime', '⏰ Date / time…') + mi('insertHorizontalRule', '― Horizontal line') + mi('table', '▦ Table…') + (opts.pictures ? mi('picture', '📷 Picture…') : ''))}
+      ${menu('Format', mi('bold', '<b>Bold</b>', 'Ctrl+B') + mi('italic', '<i>Italic</i>', 'Ctrl+I') + mi('underline', '<u>Underline</u>', 'Ctrl+U') + mi('strikeThrough', '<s>Strikethrough</s>') + mi('superscript', 'x<sup>2</sup> Superscript') + mi('subscript', 'x<sub>2</sub> Subscript') + '<hr>' + mi('fb:h1', 'Heading 1') + mi('fb:h2', 'Heading 2') + mi('fb:h3', 'Heading 3') + mi('fb:p', 'Paragraph') + mi('fb:blockquote', 'Quote') + '<hr>' + mi('case:upper', 'UPPER CASE') + mi('case:lower', 'lower case') + mi('case:sentence', 'Sentence case') + '<hr>' + mi('removeFormat', 'Clear formatting'))}
+      ${menu('Table', mi('table', 'Insert table…') + '<hr>' + mi('tbl:rowAfter', 'Insert row below') + mi('tbl:rowBefore', 'Insert row above') + mi('tbl:colAfter', 'Insert column right') + mi('tbl:colBefore', 'Insert column left') + '<hr>' + mi('tbl:delRow', 'Delete row') + mi('tbl:delCol', 'Delete column') + mi('tbl:delTable', 'Delete table'))}
+    </div>
+    <div class="rte-toolbar" role="toolbar" aria-label="Formatting">
+      ${_rteBtn('undo', 'Undo (Ctrl+Z)', RTE_ICON.undo)}${_rteBtn('redo', 'Redo (Ctrl+Y)', RTE_ICON.redo)}<span class="rte-sep"></span>
+      ${_rteBtn('special', 'Special character', 'Ω')}${_rteBtn('datetime', 'Insert date / time', '⏰')}<span class="rte-sep"></span>
+      <select class="rte-sel rte-format" title="Paragraph style" aria-label="Paragraph style"><option value="">Formats</option><option value="p">Paragraph</option><option value="h1">Heading 1</option><option value="h2">Heading 2</option><option value="h3">Heading 3</option><option value="blockquote">Quote</option></select>
+      <select class="rte-sel rte-size" title="Font size" aria-label="Font size"><option value="">Size</option>${RTE_SIZES.map(s => `<option>${s}</option>`).join('')}</select>
+      <select class="rte-sel rte-font" title="Font" aria-label="Font"><option value="">Font</option>${RTE_FONTS.map(f => `<option style="font-family:${f}">${f}</option>`).join('')}</select><span class="rte-sep"></span>
+      ${_rteBtn('bold', 'Bold (Ctrl+B)', '<b>B</b>')}${_rteBtn('italic', 'Italic (Ctrl+I)', '<i style="font-family:Georgia,serif">I</i>')}${_rteBtn('underline', 'Underline (Ctrl+U)', '<u>U</u>')}
+      ${_rteBtn('forecolor', 'Text colour', '<span style="border-bottom:3px solid #dc2626;line-height:1;padding:0 2px">A</span>')}${_rteBtn('hilitecolor', 'Highlight colour', '<span style="background:#fef08a;padding:0 3px">A</span>')}
+      <span class="rte-sep rte-wrapbreak"></span>
+      ${_rteBtn('justifyLeft', 'Align left', RTE_ICON.left)}${_rteBtn('justifyCenter', 'Centre', RTE_ICON.center)}${_rteBtn('justifyRight', 'Align right', RTE_ICON.right)}${_rteBtn('justifyFull', 'Justify', RTE_ICON.justify)}<span class="rte-sep"></span>
+      ${_rteBtn('insertUnorderedList', 'Bullet list', RTE_ICON.ul)}${_rteBtn('insertOrderedList', 'Numbered list', RTE_ICON.ol)}${_rteBtn('outdent', 'Decrease indent', RTE_ICON.outdent)}${_rteBtn('indent', 'Increase indent', RTE_ICON.indent)}${_rteBtn('fb:blockquote', 'Quote', RTE_ICON.quote)}
+      ${opts.pictures ? _rteBtn('picture', 'Add a picture (or paste one with Ctrl+V)', RTE_ICON.pic) : ''}${_rteBtn('table', 'Insert table', RTE_ICON.table)}${_rteBtn('removeFormat', 'Clear formatting', RTE_ICON.clear)}
+    </div>
+    <div class="rte-panel" hidden></div>
+    <div class="rte-area" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" lang="en-AU" data-for="${id}"
+      aria-label="${sanitize(ta.getAttribute('aria-label') || opts.label || 'Notes')}" data-placeholder="${sanitize(ta.placeholder || '')}" style="min-height:${minH}px"></div>
+    <div class="rte-status"><span class="rte-count">0 words</span><span>Spell check: English (Australia) — right-click a red word for suggestions</span></div>`;
+  ta.parentNode.insertBefore(wrap, ta);
+  ta.style.display = 'none'; ta.setAttribute('aria-hidden', 'true'); ta.tabIndex = -1;
+  const area = wrap.querySelector('.rte-area');
+  ta._rte = { wrap, area, opts };
+  area.innerHTML = ta.dataset.html ? rteSanitize(ta.dataset.html) : rtePlainToHTML(ta.value);
+  try { document.execCommand('styleWithCSS', false, true); document.execCommand('defaultParagraphSeparator', false, 'p'); } catch (_) {}
+  let saved = null;                                       // remember the caret when a menu/select takes focus
+  const keepSel = () => { const s = getSelection(); if (s.rangeCount && area.contains(s.anchorNode)) saved = s.getRangeAt(0).cloneRange(); };
+  const restoreSel = () => { area.focus(); if (saved) { const s = getSelection(); s.removeAllRanges(); s.addRange(saved); } };
+  ['keyup', 'mouseup', 'input', 'focus'].forEach(ev => area.addEventListener(ev, keepSel));
+  document.addEventListener('selectionchange', () => { if (document.activeElement === area) keepSel(); });
+  area.addEventListener('input', () => rteSync(ta));
+  area.addEventListener('paste', e => {                   // pasted formatting (e.g. from Word) is cleaned; pictures go to the paste-picture handler
+    const dt = e.clipboardData; if (!dt) return;
+    e.preventDefault();
+    const sel = getSelection();
+    if (document.activeElement !== area || !sel.rangeCount || !area.contains(sel.anchorNode)) {   // paste always lands in this box
+      area.focus(); const rg = document.createRange(); rg.selectNodeContents(area); rg.collapse(false); sel.removeAllRanges(); sel.addRange(rg);
+    }
+    const html = dt.getData('text/html'), text = dt.getData('text/plain');
+    if (html) document.execCommand('insertHTML', false, rteSanitize(html.replace(/<!--[\s\S]*?-->/g, '')));
+    else if (text) document.execCommand('insertText', false, text);
+    rteSync(ta);
+  });
+  wrap.addEventListener('mousedown', e => { if (e.target.closest('.rte-b, .rte-mi, .rte-mb, .rte-swatch, .rte-ch')) e.preventDefault(); });
+  wrap.addEventListener('click', e => {
+    const mb = e.target.closest('.rte-mb');
+    if (mb) { const pop = mb.nextElementSibling, open = pop.hidden; _rteCloseMenus(); if (open) { pop.hidden = false; mb.setAttribute('aria-expanded', 'true'); _rteMenuOpen = pop; } return; }
+    const b = e.target.closest('[data-cmd]'); if (!b) return;
+    _rteCloseMenus(); restoreSel(); rteCommand(ta, b.dataset.cmd, b);
+  });
+  wrap.querySelectorAll('.rte-sel').forEach(sel => {
+    sel.addEventListener('mousedown', keepSel);
+    sel.addEventListener('change', () => {
+      const v = sel.value; sel.value = ''; if (!v) return; restoreSel();
+      if (sel.classList.contains('rte-format')) rteCommand(ta, 'fb:' + v);
+      else if (sel.classList.contains('rte-font')) { document.execCommand('fontName', false, v); }
+      else if (sel.classList.contains('rte-size')) _rteFontSize(area, v);
+      rteSync(ta);
+    });
+  });
+  rteSync(ta, true);
+  return ta._rte;
+}
+function _rteCloseMenus() { document.querySelectorAll('.rte-pop:not([hidden])').forEach(p => { p.hidden = true; p.previousElementSibling?.setAttribute('aria-expanded', 'false'); }); _rteMenuOpen = null; }
+document.addEventListener('click', e => { if (_rteMenuOpen && !e.target.closest('.rte-menu')) _rteCloseMenus(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && (_rteMenuOpen || document.querySelector('.rte-panel:not([hidden])'))) { _rteCloseMenus(); document.querySelectorAll('.rte-panel').forEach(p => p.hidden = true); e.stopPropagation(); } }, true);
+function _rteFontSize(area, size) {
+  document.execCommand('fontSize', false, '7');           // the browser marks the selection; swap that for the real size
+  area.querySelectorAll('font[size="7"], span[style*="xxx-large"]').forEach(el => {
+    if (el.tagName === 'FONT') { const s = document.createElement('span'); s.style.fontSize = size; while (el.firstChild) s.appendChild(el.firstChild); el.replaceWith(s); }
+    else el.style.fontSize = size;
+  });
+}
+// Keep the hidden textarea (plain text) and the formatted copy up to date; word count.
+function rteSync(ta, quiet) {
+  const r = ta && ta._rte; if (!r) return;
+  const html = rteSanitize(r.area.innerHTML), plain = rteToPlain(html);
+  ta.dataset.html = /<(b|strong|i|em|u|s|strike|sub|sup|h\d|blockquote|ul|ol|table|hr|pre)\b|style=/i.test(html) ? html : '';
+  if (ta.value !== plain) { ta.value = plain; if (!quiet) ta.dispatchEvent(new Event('input', { bubbles: true })); }
+  r.area.classList.toggle('is-empty', !plain);
+  const words = (plain.match(/[\wÀ-ɏḀ-ỿ'’-]+/g) || []).length;
+  const c = r.wrap.querySelector('.rte-count'); if (c) c.textContent = `${words} word${words !== 1 ? 's' : ''} · ${plain.length} character${plain.length !== 1 ? 's' : ''}`;
+}
+function rteHTML(id) { const ta = document.getElementById(id); if (!ta || !ta._rte) return ''; rteSync(ta, true); return ta.dataset.html || ''; }
+function rteSetContent(id, html, plain) {
+  const ta = document.getElementById(id); if (!ta) return;
+  if (!ta._rte) { ta.value = plain != null ? plain : rteToPlain(html); return; }
+  ta._rte.area.innerHTML = html ? rteSanitize(html) : rtePlainToHTML(plain != null ? plain : ta.value);
+  rteSync(ta, true);
+}
+function rteInsertText(ta, text) {
+  const r = ta && ta._rte; if (!r) return false;
+  r.area.focus();
+  const s = getSelection();
+  if (!s.rangeCount || !r.area.contains(s.anchorNode)) { const rg = document.createRange(); rg.selectNodeContents(r.area); rg.collapse(false); s.removeAllRanges(); s.addRange(rg); }
+  document.execCommand('insertText', false, text); rteSync(ta);
+  return true;
+}
+function rteCommand(ta, cmd, btn) {
+  const r = ta._rte, area = r.area;
+  if (cmd.startsWith('fb:')) { document.execCommand('formatBlock', false, '<' + cmd.slice(3) + '>'); }
+  else if (cmd.startsWith('case:')) { const s = getSelection(), t = s.toString(); if (t) { const k = cmd.slice(5); document.execCommand('insertText', false, k === 'upper' ? t.toUpperCase() : k === 'lower' ? t.toLowerCase() : t.toLowerCase().replace(/(^\s*\w|[.!?]\s+\w)/g, m => m.toUpperCase())); } else showToast('Select some text first'); }
+  else if (cmd.startsWith('tbl:')) _rteTableOp(area, cmd.slice(4));
+  else if (cmd === 'special') _rtePanel(r, 'special', btn);
+  else if (cmd === 'datetime') _rtePanel(r, 'datetime', btn);
+  else if (cmd === 'forecolor' || cmd === 'hilitecolor') _rtePanel(r, cmd, btn);
+  else if (cmd === 'table') _rtePanel(r, 'table', btn);
+  else if (cmd === 'picture') { if (typeof r.opts.pictures === 'function') r.opts.pictures(); }
+  else if (cmd === 'removeFormat') { document.execCommand('removeFormat'); document.execCommand('formatBlock', false, '<p>'); }
+  else document.execCommand(cmd, false, null);
+  rteSync(ta);
+}
+function _rtePanel(r, kind, btn) {
+  const p = r.wrap.querySelector('.rte-panel'), ta = document.getElementById(r.wrap.dataset.for);
+  const close = () => { p.hidden = true; };
+  if (kind === 'special') p.innerHTML = `<div class="rte-ph">Special characters <button type="button" class="rte-x" aria-label="Close">✕</button></div>${RTE_SPECIAL.map(([g, chars]) => `<div class="rte-pg">${g}</div><div class="rte-grid">${chars.map(ch => `<button type="button" class="rte-ch" data-ch="${ch}" title="${ch}">${ch}</button>`).join('')}</div>`).join('')}`;
+  else if (kind === 'datetime') p.innerHTML = `<div class="rte-ph">Insert date / time <button type="button" class="rte-x" aria-label="Close">✕</button></div>${_rteDates().map(d => `<button type="button" class="rte-ch rte-dt" data-ch="${sanitize(d)}">${sanitize(d)}</button>`).join('')}`;
+  else if (kind === 'table') p.innerHTML = `<div class="rte-ph">Insert table <button type="button" class="rte-x" aria-label="Close">✕</button></div><div class="rte-tgrid">${Array.from({ length: 36 }, (_, i) => `<button type="button" class="rte-ch rte-tc" data-r="${Math.floor(i / 6) + 1}" data-c="${i % 6 + 1}" aria-label="${Math.floor(i / 6) + 1} rows by ${i % 6 + 1} columns"></button>`).join('')}</div><div class="rte-tsize">Pick a size</div>`;
+  else p.innerHTML = `<div class="rte-ph">${kind === 'forecolor' ? 'Text colour' : 'Highlight colour'} <button type="button" class="rte-x" aria-label="Close">✕</button></div><div class="rte-grid">${(kind === 'forecolor' ? RTE_COLOURS : RTE_HILITES).map(c => `<button type="button" class="rte-swatch" data-c="${c}" title="${c === 'transparent' ? 'No highlight' : c}" style="background:${c === 'transparent' ? 'repeating-linear-gradient(45deg,#fff 0 4px,#e5e7eb 4px 8px)' : c}"></button>`).join('')}</div>`;
+  p.hidden = false;
+  p.onclick = e => {
+    if (e.target.closest('.rte-x')) return close();
+    const ch = e.target.closest('.rte-ch, .rte-swatch'); if (!ch) return;
+    r.area.focus();
+    if (ch.classList.contains('rte-tc')) _rteInsertTable(r.area, +ch.dataset.r, +ch.dataset.c);
+    else if (ch.classList.contains('rte-swatch')) document.execCommand(kind === 'forecolor' ? 'foreColor' : 'hiliteColor', false, ch.dataset.c);
+    else document.execCommand('insertText', false, ch.dataset.ch);
+    if (kind !== 'special') close();
+    rteSync(ta);
+  };
+  p.onmouseover = e => { const c = e.target.closest('.rte-tc'); if (!c) return; p.querySelectorAll('.rte-tc').forEach(x => x.classList.toggle('on', +x.dataset.r <= +c.dataset.r && +x.dataset.c <= +c.dataset.c)); p.querySelector('.rte-tsize').textContent = `${c.dataset.r} × ${c.dataset.c}`; };
+}
+// A table is a block of its own: put it after the paragraph the cursor is in (or in place of an
+// empty one) — inserting it as HTML inside a paragraph makes the browser break it apart.
+function _rteInsertTable(area, rows, cols) {
+  const table = document.createElement('table'), body = document.createElement('tbody');
+  for (let i = 0; i < rows; i++) { const tr = document.createElement('tr'); for (let j = 0; j < cols; j++) { const td = document.createElement('td'); td.appendChild(document.createElement('br')); tr.appendChild(td); } body.appendChild(tr); }
+  table.appendChild(body);
+  const after = document.createElement('p'); after.appendChild(document.createElement('br'));
+  const s = getSelection(); let node = s.rangeCount ? s.getRangeAt(0).startContainer : null;
+  if (!node || !area.contains(node)) node = area.lastChild;
+  let block = node; while (block && block.parentNode !== area) block = block.parentNode;   // the top-level block holding the cursor
+  if (!block) { area.appendChild(table); area.appendChild(after); }
+  else if (block.nodeType === 1 && /^(P|DIV|H\d)$/.test(block.tagName) && !block.textContent.trim()) { block.replaceWith(table); table.after(after); }
+  else { block.after(table); table.after(after); }
+  const first = table.querySelector('td'), rg = document.createRange(); rg.setStart(first, 0); rg.collapse(true); s.removeAllRanges(); s.addRange(rg);
+}
+function _rteTableOp(area, op) {
+  const s = getSelection(); const node = s.anchorNode && (s.anchorNode.nodeType === 1 ? s.anchorNode : s.anchorNode.parentElement);
+  const cell = node && node.closest && node.closest('td,th'); if (!cell || !area.contains(cell)) { showToast('Click inside a table first'); return; }
+  const row = cell.parentElement, table = cell.closest('table'), idx = [...row.children].indexOf(cell);
+  if (op === 'rowAfter' || op === 'rowBefore') { const nr = row.cloneNode(true); nr.querySelectorAll('td,th').forEach(c => c.innerHTML = '<br>'); row.parentElement.insertBefore(nr, op === 'rowAfter' ? row.nextSibling : row); }
+  else if (op === 'colAfter' || op === 'colBefore') table.querySelectorAll('tr').forEach(tr => { const ref = tr.children[idx]; if (!ref) return; const nc = document.createElement(ref.tagName.toLowerCase()); nc.innerHTML = '<br>'; tr.insertBefore(nc, op === 'colAfter' ? ref.nextSibling : ref); });
+  else if (op === 'delRow') { row.remove(); if (!table.querySelector('tr')) table.remove(); }
+  else if (op === 'delCol') { table.querySelectorAll('tr').forEach(tr => tr.children[idx] && tr.children[idx].remove()); if (!table.querySelector('td,th')) table.remove(); }
+  else if (op === 'delTable') table.remove();
+}
+
+// ---- writing-tools bar for plain text boxes ----
+let _waTarget = null;
+function _waEligible(el) {
+  return el && el.tagName === 'TEXTAREA' && !el._rte && el.id !== 'chat-input' && !el.readOnly && !el.disabled && el.dataset.noTools === undefined && el.offsetParent !== null;
+}
+function _waBar() {
+  let bar = document.getElementById('wa-bar'); if (bar) return bar;
+  bar = document.createElement('div'); bar.id = 'wa-bar'; bar.setAttribute('role', 'toolbar'); bar.setAttribute('aria-label', 'Writing tools');
+  bar.innerHTML = `${_rteBtn('undo', 'Undo (Ctrl+Z)', RTE_ICON.undo)}${_rteBtn('redo', 'Redo (Ctrl+Y)', RTE_ICON.redo)}<span class="rte-sep"></span>
+    ${_rteBtn('wa:datetime', 'Insert date / time', '⏰')}${_rteBtn('wa:special', 'Special character', 'Ω')}${_rteBtn('wa:bullet', 'Bullet points', RTE_ICON.ul)}${_rteBtn('wa:number', 'Numbered list', RTE_ICON.ol)}
+    ${_rteBtn('wa:case', 'Change case of the selected text (Sentence / UPPER / lower)', 'Aa')}<span class="rte-sep"></span><span class="wa-count" title="Spell check: English (Australia)">✓ 0 words</span>
+    <div class="rte-panel wa-panel" hidden></div>`;
+  bar.addEventListener('mousedown', e => { if (!e.target.closest('select')) e.preventDefault(); });
+  bar.addEventListener('click', e => { const b = e.target.closest('[data-cmd],[data-ch]'); if (b && _waTarget) _waCommand(_waTarget, b); });
+  document.body.appendChild(bar);
+  return bar;
+}
+function _waInsert(ta, text) { ta.focus(); if (!document.execCommand('insertText', false, text)) { const a = ta.selectionStart, b = ta.selectionEnd; ta.setRangeText(text, a, b, 'end'); ta.dispatchEvent(new Event('input', { bubbles: true })); } }
+function _waCommand(ta, b) {
+  const cmd = b.dataset.cmd, panel = document.querySelector('#wa-bar .wa-panel');
+  if (b.dataset.ch) { _waInsert(ta, b.dataset.ch); if (!panel.dataset.keep) panel.hidden = true; _waCount(); return; }
+  ta.focus();
+  if (cmd === 'undo' || cmd === 'redo') document.execCommand(cmd);
+  else if (cmd === 'wa:datetime') { panel.dataset.keep = ''; panel.innerHTML = _rteDates().map(d => `<button type="button" class="rte-ch rte-dt" data-ch="${sanitize(d)}">${sanitize(d)}</button>`).join(''); panel.hidden = !panel.hidden; }
+  else if (cmd === 'wa:special') { panel.dataset.keep = '1'; panel.innerHTML = RTE_SPECIAL.map(([g, chars]) => `<div class="rte-pg">${g}</div><div class="rte-grid">${chars.map(ch => `<button type="button" class="rte-ch" data-ch="${ch}">${ch}</button>`).join('')}</div>`).join(''); panel.hidden = !panel.hidden; }
+  else if (cmd === 'wa:bullet' || cmd === 'wa:number') {
+    const v = ta.value, a = v.lastIndexOf('\n', ta.selectionStart - 1) + 1, e = (() => { const i = v.indexOf('\n', ta.selectionEnd); return i < 0 ? v.length : i; })();
+    let n = 0; const lines = v.slice(a, e).split('\n').map(l => { const bare = l.replace(/^(•\s|\d+\.\s)/, ''); return bare.trim() ? (cmd === 'wa:bullet' ? '• ' : (++n) + '. ') + bare : l; });
+    ta.setSelectionRange(a, e); _waInsert(ta, lines.join('\n'));
+  }
+  else if (cmd === 'wa:case') {
+    const a = ta.selectionStart, e = ta.selectionEnd, t = ta.value.slice(a, e); if (!t) { showToast('Select some text first'); return; }
+    const next = t === t.toUpperCase() ? t.toLowerCase() : t === t.toLowerCase() ? t.replace(/(^\s*\w|[.!?]\s+\w)/g, m => m.toUpperCase()) : t.toUpperCase();
+    _waInsert(ta, next); ta.setSelectionRange(a, a + next.length);
+  }
+  _waCount();
+}
+function _waCount() { const bar = document.getElementById('wa-bar'); if (!bar || !_waTarget) return; const v = _waTarget.value || '', w = (v.match(/[\wÀ-ɏḀ-ỿ'’-]+/g) || []).length; bar.querySelector('.wa-count').textContent = `✓ ${w} word${w !== 1 ? 's' : ''}`; }
+function _waPlace() {
+  const bar = document.getElementById('wa-bar'); if (!bar || !_waTarget) return;
+  const r = _waTarget.getBoundingClientRect();
+  if (!r.width || r.bottom < 0 || r.top > innerHeight) { bar.style.display = 'none'; return; }
+  bar.style.display = 'flex';
+  const h = bar.offsetHeight || 34, top = r.top - h - 4 > 4 ? r.top - h - 4 : r.bottom + 4;
+  bar.style.top = top + 'px'; bar.style.left = Math.max(8, Math.min(r.left, innerWidth - bar.offsetWidth - 8)) + 'px';
+}
+document.addEventListener('focusin', e => {
+  const el = e.target;
+  if (el && el.closest && el.closest('#wa-bar')) return;
+  if (!_waEligible(el)) { if (_waTarget && !(el && el.closest && el.closest('#wa-bar'))) { _waTarget = null; const b = document.getElementById('wa-bar'); if (b) b.style.display = 'none'; } return; }
+  el.spellcheck = true; if (!el.lang) el.lang = 'en-AU';
+  _waTarget = el; const bar = _waBar(); bar.querySelector('.wa-panel').hidden = true; _waPlace(); _waCount();
+});
+document.addEventListener('input', e => { if (e.target === _waTarget) _waCount(); });
+document.addEventListener('focusout', e => { setTimeout(() => { const a = document.activeElement; if (_waTarget && a !== _waTarget && !(a && a.closest && a.closest('#wa-bar'))) { const b = document.getElementById('wa-bar'); if (b) b.style.display = 'none'; _waTarget = null; } }, 150); });
+window.addEventListener('scroll', _waPlace, true); window.addEventListener('resize', _waPlace);
 
 function saveAll() {
   DB.save('clients', clients);
@@ -1767,7 +2177,7 @@ function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
       ${recent.length===0?'<p style="color:var(--muted);font-size:13px">No notes yet</p>':
         recent.map(n=>`<div class="note-entry ${n.type||'general'}">
           <div class="note-meta"><span class="section-badge badge-${n.type||'general'}">${n.type||'general'}</span><span>${fmtdt(n.created)}</span><span>${sanitize(n.worker||'')}</span></div>
-          <div class="note-text">${sanitize(n.text)}</div>
+          <div class="note-text">${noteBodyHTML(n)}</div>
         </div>`).join('')
       }
     </div>`;
@@ -2008,7 +2418,7 @@ function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
             ? `<span style="margin-left:auto;font-size:10px;color:var(--muted);display:flex;align-items:center;gap:3px" title="Locked after 24 hours">🔒 Locked</span>`
             : `<button class="btn-ghost" style="margin-left:auto;color:var(--danger);font-size:11px" onclick="deleteNote('${n.id}','${c.id}')">Delete</button>`}
         </div>
-        <div class="note-text">${sanitize(n.text||'').replace(/\n/g,'<br>')}</div>
+        <div class="note-text">${noteBodyHTML(n)}</div>
         ${noteImageThumbsHTML(c.id, files, allFiles)}
         ${files.length?`<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">
           ${files.map(f=>{
@@ -3750,7 +4160,7 @@ function filterNotes(clientId, type) {
   if(!filtered.length) return '<p style="color:var(--muted);font-size:13px">No notes recorded for this area yet</p>';
   return filtered.map(n=>`<div class="note-entry ${type}">
     <div class="note-meta"><span>${fmtdt(n.created)}</span><span>${sanitize(n.worker||'')}</span>${n.contactType?`<span>📍 ${sanitize(n.contactType)}</span>`:''}</div>
-    <div class="note-text">${sanitize(n.text||'').replace(/\n/g,'<br>')}</div>
+    <div class="note-text">${noteBodyHTML(n)}</div>
   </div>`).join('');
 }
 
@@ -8649,6 +9059,7 @@ function _attachSessionDraft(requestedClientId) {
   const snapshot = () => {
     const f = {};
     SESSION_DRAFT_FIELDS.forEach(id => { const el = $(id); if (!el || el.readOnly) return; f[id] = el.type==='checkbox' ? el.checked : el.value; });
+    const h = rteHTML('sm-text'); if (h) f['sm-text#html'] = h;
     return f;
   };
   const indicator = msg => { const el = $('sm-draft-status'); if (el) el.textContent = msg; };
@@ -8686,6 +9097,7 @@ function _attachSessionDraft(requestedClientId) {
   if (d && d.fields) {
     Object.entries(d.fields).forEach(([id,v]) => { const el = $(id); if (!el || el.readOnly) return;
       if (el.type==='checkbox') el.checked = !!v; else el.value = v; });
+    rteSetContent('sm-text', d.fields['sm-text#html'] || '', d.fields['sm-text'] || '');
     try { smToggleNDIS(); } catch(e) {}
     try { if ($('sm-ndis-item')?.value) smNdisPreview(); } catch(e) {}
     state.last = JSON.stringify(snapshot());
@@ -8837,6 +9249,7 @@ function openSessionModal(clientId, defaultType) {
     // Create note
     const n = { id:uid(), clientId, type, contactType:contact, location,
       created:noteDate, duration:mins, worker, text, followup, followupDate };
+    const noteHtml = rteHTML('sm-text'); if (noteHtml) n.html = noteHtml;   // formatting (bold, lists, tables…); text stays the plain copy
     notes.push(n);
 
     // Save any attached files to the client's file store, linked to this note
@@ -8913,6 +9326,7 @@ function openSessionModal(clientId, defaultType) {
     document.getElementById('modal-container')._draft?.saved();
     return true;
   }, '720px');
+  rteEnhance('sm-text', { label: 'Session notes', pictures: () => document.getElementById('sm-file-input')?.click() });
   _attachSessionDraft(clientId);
 }
 
@@ -8983,12 +9397,14 @@ document.addEventListener('paste', async e => {
   const files = imgs.map((f, i) => _namePastedImage(f, imgs.length > 1 ? i + 1 : 0));
   if (document.getElementById('sm-attach-list')) {                         // Log Session window
     if (!hasText) e.preventDefault();
-    const target = e.target && (e.target.id === 'sm-text' || e.target.id === 'sm-followup') ? e.target : null;
+    const rteArea = e.target && e.target.closest && e.target.closest('.rte-area');
+    const target = rteArea ? document.getElementById(rteArea.dataset.for) : e.target && (e.target.id === 'sm-text' || e.target.id === 'sm-followup') ? e.target : null;
     const before = _sessionAttachments.length;
     await sessHandleFiles({ files });
     const added = _sessionAttachments.slice(before);
     if (target && added.length && document.body.contains(target)) {
       const tags = added.map((f, i) => `[📷 Picture ${before + i + 1}: ${f.name}]`).join(' ');
+      if (target._rte) { rteInsertText(target, ' ' + tags + ' '); return; }
       const at = target.selectionEnd ?? target.value.length, v = target.value;
       const pre = v.slice(0, at), post = v.slice(at);
       target.value = pre + (pre && !/\s$/.test(pre) ? ' ' : '') + tags + (post && !/^\s/.test(post) ? ' ' : '') + post;
@@ -9709,7 +10125,7 @@ function renderDisabilityTab(c) {
     ${disNotes.length===0?'<p style="color:var(--muted);font-size:13px">No disability notes recorded</p>':
       disNotes.map(n=>`<div class="note-entry disability" style="border-left-color:#8b5cf6">
         <div class="note-meta"><span>${fmtdt(n.created)}</span><span>${sanitize(n.worker||'')}</span><span>${n.contactType||''}</span></div>
-        <div class="note-text">${sanitize(n.text||'').replace(/\n/g,'<br>')}</div>
+        <div class="note-text">${noteBodyHTML(n)}</div>
       </div>`).join('')
     }
   </div>
@@ -9857,7 +10273,7 @@ function renderWorkFoundationsTab(c) {
     ${wfNotes.length===0?'<p style="color:var(--muted);font-size:13px">No work foundations notes recorded</p>':
       wfNotes.map(n=>`<div class="note-entry" style="border-left:4px solid #2563eb">
         <div class="note-meta"><span>${fmtdt(n.created)}</span><span>${sanitize(n.worker||'')}</span></div>
-        <div class="note-text">${sanitize(n.text||'').replace(/\n/g,'<br>')}</div>
+        <div class="note-text">${noteBodyHTML(n)}</div>
       </div>`).join('')}
   </div>
   <div class="sticky-save-bar">
@@ -10903,7 +11319,7 @@ function renderWFNotes(c) {
     ${wfNotes.length===0?'<div class="empty-state"><div class="icon">💼</div><p>No Work Foundations notes yet</p></div>':
       wfNotes.map(n=>`<div class="note-entry workfoundations" style="border-left-color:#d97706">
         <div class="note-meta"><span class="section-badge" style="background:#fef3c7;color:#92400e">WORK FOUNDATIONS</span><span>${fmtdt(n.created)}</span><span>${sanitize(n.worker||'')}</span>${n.duration?`<span>⏱️ ${n.duration} min</span>`:''}</div>
-        <div class="note-text">${sanitize(n.text||'').replace(/\n/g,'<br>')}</div>
+        <div class="note-text">${noteBodyHTML(n)}</div>
         ${n.followup?`<div style="margin-top:6px;padding:6px 10px;background:#fef3c7;border-radius:4px;font-size:12px">📌 ${sanitize(n.followup)}</div>`:''}
       </div>`).join('')
     }
@@ -13250,7 +13666,7 @@ function _allNotesList() {
       const c = clients.find(cl=>cl.id===n.clientId);
       return `<div class="note-entry ${n.type||'general'}" style="margin-bottom:10px;cursor:pointer" onclick="openClientProfile('${n.clientId}')">
         <div class="note-meta"><span class="section-badge badge-${n.type||'general'}">${n.type||'general'}</span><span style="font-weight:600">${sanitize(c?.fullName||'Unknown client')}</span><span>${sanitize(n.worker||n.author||'Staff')}</span><span>${fmtdt(n.created)}</span></div>
-        <div class="note-text">${sanitize(n.text||'')}</div>
+        <div class="note-text">${noteBodyHTML(n)}</div>
       </div>`;
     }).join('');
   const more = filtered.length > shown
