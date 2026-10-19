@@ -139,8 +139,15 @@ name and initial only, and carry no notes.
 
 ## 📷 Pasting pictures
 
-* **Log Session:** paste a screenshot or copied photo (Ctrl+V / Cmd+V) into the
-  session notes or follow-up box — it is attached to the session (and the
+* **Session notes (editor):** paste (Ctrl+V, right-click → Paste, or the 📋
+  Paste button), drag in, or add with the 🖼 picture button (camera on a phone)
+  — the **picture appears in the notes** where the cursor is, straight away,
+  and is attached to the session / client's Files. Cut, Copy and Paste buttons
+  are on the toolbar and in Edit; copying text with pictures inside the notes
+  copies the pictures too. The saved note stores only a reference
+  (`<img data-att="…">`, no address); the picture is filled in from that
+  client's own attached file when shown, so a note can't load anything else.
+* **Follow-up box:** paste a screenshot or copied photo (Ctrl+V / Cmd+V) — it is attached to the session (and the
   client's Files) and a `[📷 Picture n: …]` marker goes into the note where you
   pasted. Copied text still pastes normally. Attached pictures show as
   thumbnails before you save.

@@ -178,6 +178,12 @@
   .rte-area td, .rte-area th, .rte-view td, .rte-view th { border:1px solid #cbd5e1; padding:4px 8px; min-width:40px; vertical-align:top; }
   .rte-area hr, .rte-view hr { border:none; border-top:1px solid #cbd5e1; margin:.6em 0; }
   .rte-view { line-height:1.55; }
+  .rte-area img, .rte-view img { max-width:100%; max-height:420px; height:auto; border-radius:6px; border:1px solid var(--border); margin:4px 2px; vertical-align:bottom; }
+  .rte-view img.rte-img { cursor:zoom-in; }
+  .rte-area img.rte-img-loading { opacity:.55; min-width:80px; min-height:60px; background:#f3f4f6; }
+  .rte-area img.rte-img-missing { display:inline-block; min-width:120px; min-height:40px; background:#f3f4f6; color:var(--muted); font-size:12px; }
+  .rte-area.rte-drop { outline:2px dashed var(--primary-light); outline-offset:-6px; background:#f0fdf4; }
+  .rte-img-gone { display:inline-block; font-size:12px; color:var(--muted); background:#f3f4f6; border-radius:6px; padding:2px 8px; }
   .rte-status { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; font-size:11px; color:var(--muted); padding:4px 10px; border-top:1px solid var(--border); background:#f9fafb; border-radius:0 0 7px 7px; }
   .rte-panel { border-bottom:1px solid var(--border); padding:8px 10px; background:#fff; }
   .rte-ph { display:flex; justify-content:space-between; align-items:center; font-weight:700; font-size:12px; margin-bottom:6px; }
@@ -1225,7 +1231,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v90';
+const APP_VERSION = 'v91';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -1357,7 +1363,7 @@ function _rteDates() {
 
 // ---- safety: only a short list of tags and styles survive ----
 const RTE_TAGS = new Set(['P', 'BR', 'DIV', 'SPAN', 'B', 'STRONG', 'I', 'EM', 'U', 'S', 'STRIKE', 'SUB', 'SUP', 'H1', 'H2', 'H3', 'H4', 'BLOCKQUOTE', 'PRE', 'UL', 'OL', 'LI', 'TABLE', 'THEAD', 'TBODY', 'TR', 'TH', 'TD', 'HR']);
-const RTE_DROP = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'IMG', 'SVG', 'MATH', 'LINK', 'META', 'BASE', 'FORM', 'INPUT', 'BUTTON', 'TEXTAREA', 'SELECT', 'OPTION', 'VIDEO', 'AUDIO', 'SOURCE', 'CANVAS', 'TEMPLATE', 'NOSCRIPT', 'TITLE', 'HEAD', 'XML', 'O:P', 'FRAME', 'FRAMESET', 'APPLET', 'PICTURE']);
+const RTE_DROP = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'SVG', 'MATH', 'LINK', 'META', 'BASE', 'FORM', 'INPUT', 'BUTTON', 'TEXTAREA', 'SELECT', 'OPTION', 'VIDEO', 'AUDIO', 'SOURCE', 'CANVAS', 'TEMPLATE', 'NOSCRIPT', 'TITLE', 'HEAD', 'XML', 'O:P', 'FRAME', 'FRAMESET', 'APPLET', 'PICTURE']);
 const _rteColour = /^(#[0-9a-f]{3,8}|rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*(,\s*(0|1|0?\.\d+)\s*)?\)|transparent|[a-z]{3,20})$/i;
 const RTE_STYLE = {
   'color': _rteColour, 'background-color': _rteColour,
@@ -1388,6 +1394,11 @@ function rteSanitize(html) {
       if (ch.nodeType !== 1) { ch.remove(); return; }                 // comments etc.
       const tag = ch.tagName.toUpperCase();
       if (RTE_DROP.has(tag) || tag.includes(':')) { ch.remove(); return; }
+      if (tag === 'IMG') {        // a picture is kept only as a reference to one of the client's attached files — its src is never stored
+        const att = ch.getAttribute('data-att') || '', alt = (ch.getAttribute('alt') || 'Picture').slice(0, 120);
+        if (!/^[A-Za-z0-9_-]{4,64}$/.test(att) || /^pending/.test(att)) { ch.remove(); return; }
+        [...ch.attributes].forEach(a => ch.removeAttribute(a.name)); ch.setAttribute('data-att', att); ch.setAttribute('alt', alt); return;
+      }
       walk(ch);
       if (tag === 'FONT') {                                             // old-style <font> → <span style>
         const span = doc.createElement('span'), st = [];
@@ -1418,6 +1429,7 @@ function rteToPlain(html) {
       if (ch.nodeType !== 1) return;
       const tag = ch.tagName;
       if (tag === 'BR') { out += '\n'; return; }
+      if (tag === 'IMG') { out += ' [\uD83D\uDCF7 ' + (ch.getAttribute('alt') || 'Picture') + '] '; return; }
       if (tag === 'HR') { out += '\n———\n'; return; }
       if (BLOCK.test(tag) && out && !out.endsWith('\n')) out += '\n';
       if (tag === 'LI') { if (out && !out.endsWith('\n')) out += '\n'; out += listInfo && listInfo.ol ? (++listInfo.n) + '. ' : '• '; }
@@ -1434,9 +1446,30 @@ function rtePlainToHTML(text) {
   return t.split(/\n{2,}/).map(p => '<p>' + sanitize(p).replace(/\n/g, '<br>') + '</p>').join('');
 }
 // Show a note: formatted if it has a formatted version, otherwise the plain text.
+// Pictures in notes: the stored note holds only data-att (an attachment id). The picture is
+// filled in from that client's own attached files — a cloud https address or a data:image —
+// so a note can never point a picture anywhere else.
+function _rteAttSrc(f) { const s = f ? fileSrc(f) : ''; return /^https:\/\//i.test(s) || /^data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=\s]+$/i.test(s) ? s : ''; }
+function _rteFindAtt(id, clientId) {
+  const c = clientId && clients.find(x => x.id === clientId);
+  return ((c && c.attachments) || []).find(a => a && a.id === id) || (typeof _sessionAttachments !== 'undefined' ? _sessionAttachments : []).find(a => a && a.id === id) || null;
+}
+function rteHydrate(root, clientId) {
+  root.querySelectorAll('img[data-att]').forEach(img => {
+    const id = img.getAttribute('data-att'); if (/^pending/.test(id)) return;
+    const src = _rteAttSrc(_rteFindAtt(id, clientId));
+    if (src) { if (img.getAttribute('src') !== src) img.setAttribute('src', src); img.classList.add('rte-img'); img.classList.remove('rte-img-missing'); }
+    else { img.removeAttribute('src'); img.classList.add('rte-img-missing'); }
+  });
+}
 function noteBodyHTML(rec, plainKey, htmlKey) {
   const h = rec && rec[htmlKey || 'html'];
-  if (h) return `<div class="rte-view">${rteSanitize(h)}</div>`;
+  if (h) {
+    const tpl = document.createElement('template'); tpl.innerHTML = rteSanitize(h);
+    rteHydrate(tpl.content, rec.clientId);
+    tpl.content.querySelectorAll('img.rte-img-missing').forEach(img => { const sp = document.createElement('span'); sp.className = 'rte-img-gone'; sp.textContent = '\uD83D\uDCF7 ' + (img.getAttribute('alt') || 'Picture') + ' (not available)'; img.replaceWith(sp); });
+    return `<div class="rte-view">${tpl.innerHTML}</div>`;
+  }
   return sanitize((rec && rec[plainKey || 'text']) || '').replace(/\n/g, '<br>');
 }
 
@@ -1450,6 +1483,7 @@ const RTE_ICON = {
   outdent: _rteSvg('M9 5h8M9 10h8M9 15h8M6 7.5 3 10l3 2.5'), indent: _rteSvg('M9 5h8M9 10h8M9 15h8M3 7.5 6 10l-3 2.5'),
   quote: _rteSvg('M4 13c0-4 1.5-6 4-7M11 13c0-4 1.5-6 4-7M4 13h3v3H4zM11 13h3v3h-3z'), pic: _rteSvg('M3 4h14v12H3zM3 13l4-4 3 3 2-2 5 5M13 7.5h.01'),
   table: _rteSvg('M3 4h14v12H3zM3 8h14M3 12h14M8 4v12M12.5 4v12'), clear: _rteSvg('M4 4h10M9 4l-3 12M3 17l14-14'),
+  cut: _rteSvg('M6 6.5a2 2 0 1 0 0-.01M6 15.5a2 2 0 1 0 0-.01M7.6 7.6 16 16M7.6 14.4 16 4'), copy: _rteSvg('M7 7h9v10H7zM4 13V3h9'), paste: _rteSvg('M6 4H4v14h12V4h-2M7 2h6v4H7zM7 10h6M7 13h6'),
 };
 let _rteMenuOpen = null;
 function rteEnhance(id, opts) {
@@ -1463,13 +1497,14 @@ function rteEnhance(id, opts) {
   const mi = (cmd, label, key) => `<button type="button" class="rte-mi" role="menuitem" data-cmd="${cmd}">${label}${key ? `<kbd>${key}</kbd>` : ''}</button>`;
   wrap.innerHTML = `
     <div class="rte-menubar">
-      ${menu('Edit', mi('undo', 'Undo', 'Ctrl+Z') + mi('redo', 'Redo', 'Ctrl+Y') + '<hr>' + mi('cut', 'Cut', 'Ctrl+X') + mi('copy', 'Copy', 'Ctrl+C') + '<div class="rte-note">Paste: Ctrl+V</div><hr>' + mi('selectAll', 'Select all', 'Ctrl+A'))}
+      ${menu('Edit', mi('undo', 'Undo', 'Ctrl+Z') + mi('redo', 'Redo', 'Ctrl+Y') + '<hr>' + mi('cut', 'Cut', 'Ctrl+X') + mi('copy', 'Copy', 'Ctrl+C') + mi('paste', 'Paste (text or picture)', 'Ctrl+V') + '<hr>' + mi('selectAll', 'Select all', 'Ctrl+A'))}
       ${menu('Insert', mi('special', 'Ω Special character…') + mi('datetime', '⏰ Date / time…') + mi('insertHorizontalRule', '― Horizontal line') + mi('table', '▦ Table…') + (opts.pictures ? mi('picture', '📷 Picture…') : ''))}
       ${menu('Format', mi('bold', '<b>Bold</b>', 'Ctrl+B') + mi('italic', '<i>Italic</i>', 'Ctrl+I') + mi('underline', '<u>Underline</u>', 'Ctrl+U') + mi('strikeThrough', '<s>Strikethrough</s>') + mi('superscript', 'x<sup>2</sup> Superscript') + mi('subscript', 'x<sub>2</sub> Subscript') + '<hr>' + mi('fb:h1', 'Heading 1') + mi('fb:h2', 'Heading 2') + mi('fb:h3', 'Heading 3') + mi('fb:p', 'Paragraph') + mi('fb:blockquote', 'Quote') + '<hr>' + mi('case:upper', 'UPPER CASE') + mi('case:lower', 'lower case') + mi('case:sentence', 'Sentence case') + '<hr>' + mi('removeFormat', 'Clear formatting'))}
       ${menu('Table', mi('table', 'Insert table…') + '<hr>' + mi('tbl:rowAfter', 'Insert row below') + mi('tbl:rowBefore', 'Insert row above') + mi('tbl:colAfter', 'Insert column right') + mi('tbl:colBefore', 'Insert column left') + '<hr>' + mi('tbl:delRow', 'Delete row') + mi('tbl:delCol', 'Delete column') + mi('tbl:delTable', 'Delete table'))}
     </div>
     <div class="rte-toolbar" role="toolbar" aria-label="Formatting">
       ${_rteBtn('undo', 'Undo (Ctrl+Z)', RTE_ICON.undo)}${_rteBtn('redo', 'Redo (Ctrl+Y)', RTE_ICON.redo)}<span class="rte-sep"></span>
+      ${_rteBtn('cut', 'Cut (Ctrl+X)', RTE_ICON.cut)}${_rteBtn('copy', 'Copy (Ctrl+C)', RTE_ICON.copy)}${_rteBtn('paste', 'Paste text or a picture (Ctrl+V)', RTE_ICON.paste)}<span class="rte-sep"></span>
       ${_rteBtn('special', 'Special character', 'Ω')}${_rteBtn('datetime', 'Insert date / time', '⏰')}<span class="rte-sep"></span>
       <select class="rte-sel rte-format" title="Paragraph style" aria-label="Paragraph style"><option value="">Formats</option><option value="p">Paragraph</option><option value="h1">Heading 1</option><option value="h2">Heading 2</option><option value="h3">Heading 3</option><option value="blockquote">Quote</option></select>
       <select class="rte-sel rte-size" title="Font size" aria-label="Font size"><option value="">Size</option>${RTE_SIZES.map(s => `<option>${s}</option>`).join('')}</select>
@@ -1488,7 +1523,7 @@ function rteEnhance(id, opts) {
   ta.parentNode.insertBefore(wrap, ta);
   ta.style.display = 'none'; ta.setAttribute('aria-hidden', 'true'); ta.tabIndex = -1;
   const area = wrap.querySelector('.rte-area');
-  ta._rte = { wrap, area, opts };
+  ta._rte = { wrap, area, opts, savedRange: () => (saved ? saved.cloneRange() : null) };
   area.innerHTML = ta.dataset.html ? rteSanitize(ta.dataset.html) : rtePlainToHTML(ta.value);
   try { document.execCommand('styleWithCSS', false, true); document.execCommand('defaultParagraphSeparator', false, 'p'); } catch (_) {}
   let saved = null;                                       // remember the caret when a menu/select takes focus
@@ -1497,6 +1532,19 @@ function rteEnhance(id, opts) {
   ['keyup', 'mouseup', 'input', 'focus'].forEach(ev => area.addEventListener(ev, keepSel));
   document.addEventListener('selectionchange', () => { if (document.activeElement === area) keepSel(); });
   area.addEventListener('input', () => rteSync(ta));
+  // Drag a photo or screenshot in: it goes where it's dropped. Other files are attached to the session.
+  area.addEventListener('dragover', e => { if ([...((e.dataTransfer && e.dataTransfer.types) || [])].includes('Files')) { e.preventDefault(); area.classList.add('rte-drop'); } });
+  area.addEventListener('dragleave', () => area.classList.remove('rte-drop'));
+  area.addEventListener('drop', e => {
+    const files = [...((e.dataTransfer && e.dataTransfer.files) || [])]; area.classList.remove('rte-drop'); if (!files.length) return;
+    e.preventDefault();
+    let rg = document.caretRangeFromPoint ? document.caretRangeFromPoint(e.clientX, e.clientY) : null; if (rg && !area.contains(rg.startContainer)) rg = null;
+    const pics = files.filter(f => /^image\//.test(f.type)), others = files.filter(f => !/^image\//.test(f.type));
+    if (pics.length) rteInsertImages(ta, pics, rg);
+    if (others.length && typeof r_attach === 'function') r_attach(others);
+  });
+  const r_attach = opts.attachFiles;
+  area.addEventListener('dblclick', e => { const img = e.target.closest && e.target.closest('img.rte-img'); if (img && img.src) openImageLightbox(img.src, img.alt); });
   area.addEventListener('paste', e => {                   // pasted formatting (e.g. from Word) is cleaned; pictures go to the paste-picture handler
     const dt = e.clipboardData; if (!dt) return;
     e.preventDefault();
@@ -1543,7 +1591,8 @@ function _rteFontSize(area, size) {
 function rteSync(ta, quiet) {
   const r = ta && ta._rte; if (!r) return;
   const html = rteSanitize(r.area.innerHTML), plain = rteToPlain(html);
-  ta.dataset.html = /<(b|strong|i|em|u|s|strike|sub|sup|h\d|blockquote|ul|ol|table|hr|pre)\b|style=/i.test(html) ? html : '';
+  ta.dataset.html = /<(b|strong|i|em|u|s|strike|sub|sup|h\d|blockquote|ul|ol|table|hr|pre|img)\b|style=/i.test(html) ? html : '';
+  rteHydrate(r.area, r.opts.clientId ? r.opts.clientId() : '');
   if (ta.value !== plain) { ta.value = plain; if (!quiet) ta.dispatchEvent(new Event('input', { bubbles: true })); }
   r.area.classList.toggle('is-empty', !plain);
   const words = (plain.match(/[\wÀ-ɏḀ-ỿ'’-]+/g) || []).length;
@@ -1564,6 +1613,59 @@ function rteInsertText(ta, text) {
   document.execCommand('insertText', false, text); rteSync(ta);
   return true;
 }
+// Put pictures into the notes at the cursor straight away (a preview shows while it uploads), then
+// swap in the uploaded file. They are attached to the session, so they also go to the client's Files.
+async function rteInsertImages(ta, files, range) {
+  const r = ta && ta._rte; if (!r || !files.length) return;
+  if (!FSYNC.storageReady()) {
+    const total = _sessionAttachments.reduce((a, f) => a + (f.size || 0), 0) + files.reduce((a, f) => a + f.size, 0);
+    if (total > 8 * 1024 * 1024) { showToast('\u26A0\uFE0F Local file limit reached \u2014 connect Cloud Storage for unlimited storage'); return; }
+  }
+  const area = r.area, s = getSelection();
+  let rg = range && area.contains(range.startContainer) ? range : (s.rangeCount && area.contains(s.anchorNode) ? s.getRangeAt(0) : null);
+  if (!rg) { rg = document.createRange(); rg.selectNodeContents(area); rg.collapse(false); }
+  rg.deleteContents();
+  const holders = files.map(f => { const img = document.createElement('img'); img.setAttribute('data-att', 'pending' + Math.random().toString(36).slice(2, 10)); img.alt = f.name || 'Picture'; img.className = 'rte-img rte-img-loading'; return img; });
+  holders.forEach(img => { rg.insertNode(img); rg.setStartAfter(img); rg.collapse(true); });
+  const sp = document.createTextNode('\u00A0'); rg.insertNode(sp); rg.setStartAfter(sp); rg.collapse(true);
+  area.focus(); s.removeAllRanges(); s.addRange(rg);
+  holders.forEach((img, i) => { const fr = new FileReader(); fr.onload = () => { if (img.classList.contains('rte-img-loading')) img.src = fr.result; }; fr.readAsDataURL(files[i]); });
+  rteSync(ta);
+  if (FSYNC.storageReady()) showToast('\u2601\uFE0F Uploading picture\u2026');
+  let ok = 0;
+  for (let i = 0; i < files.length; i++) {
+    const img = holders[i];
+    try {
+      const att = await cmsUploadAttachment('sessions', files[i]);
+      _sessionAttachments.push(att); ok++;
+      img.setAttribute('data-att', att.id); img.classList.remove('rte-img-loading');
+      const src = _rteAttSrc(att); if (src) img.src = src;
+    } catch (e) { console.warn('Picture upload failed:', e); img.remove(); showToast("Picture upload failed \u2014 it wasn't added. Check your connection and try again."); }
+  }
+  sessRenderAttachments(); rteSync(ta);
+  if (ok) showToast(`\uD83D\uDCF7 ${ok} picture${ok !== 1 ? 's' : ''} added to the notes`);
+}
+// The Paste button (and Edit \u2192 Paste): reads the clipboard, text or pictures. Browsers ask permission
+// the first time; if they say no, Ctrl+V always works.
+async function rtePasteFromClipboard(ta) {
+  const r = ta._rte, rg = r.savedRange();
+  if (!navigator.clipboard || !navigator.clipboard.read) { showToast('Press Ctrl+V (Cmd+V on a Mac) to paste'); return; }
+  try {
+    const items = await navigator.clipboard.read(), pics = []; let html = '', text = '';
+    for (const it of items) for (const type of it.types) {
+      if (/^image\//.test(type)) { const b = await it.getType(type); pics.push(new File([b], 'image.' + (type.split('/')[1] || 'png'), { type })); }
+      else if (type === 'text/html' && !html) html = await (await it.getType(type)).text();
+      else if (type === 'text/plain' && !text) text = await (await it.getType(type)).text();
+    }
+    r.area.focus();
+    if (rg) { const s = getSelection(); s.removeAllRanges(); s.addRange(rg); }
+    if (html && !pics.length) document.execCommand('insertHTML', false, rteSanitize(html));
+    else if (text && !pics.length) document.execCommand('insertText', false, text);
+    if (pics.length) { const s = getSelection(); rteInsertImages(ta, pics.map((f, i) => _namePastedImage(f, pics.length > 1 ? i + 1 : 0)), s.rangeCount ? s.getRangeAt(0).cloneRange() : null); }
+    rteSync(ta);
+    if (!html && !text && !pics.length) showToast('Nothing to paste');
+  } catch (e) { console.warn('Clipboard read:', e); showToast('The browser blocked the Paste button \u2014 press Ctrl+V (Cmd+V on a Mac) instead'); }
+}
 function rteCommand(ta, cmd, btn) {
   const r = ta._rte, area = r.area;
   if (cmd.startsWith('fb:')) { document.execCommand('formatBlock', false, '<' + cmd.slice(3) + '>'); }
@@ -1573,7 +1675,13 @@ function rteCommand(ta, cmd, btn) {
   else if (cmd === 'datetime') _rtePanel(r, 'datetime', btn);
   else if (cmd === 'forecolor' || cmd === 'hilitecolor') _rtePanel(r, cmd, btn);
   else if (cmd === 'table') _rtePanel(r, 'table', btn);
-  else if (cmd === 'picture') { if (typeof r.opts.pictures === 'function') r.opts.pictures(); }
+  else if (cmd === 'picture') {                           // pick photos (on a phone this offers the camera)
+    const rg = r.savedRange(), inp = document.createElement('input');
+    inp.type = 'file'; inp.accept = 'image/*'; inp.multiple = true; inp.className = 'rte-pic-input'; inp.style.display = 'none';
+    inp.onchange = () => { const files = [...inp.files]; inp.remove(); if (files.length) rteInsertImages(ta, files, rg); };
+    r.wrap.appendChild(inp); inp.click();
+  }
+  else if (cmd === 'paste') { rtePasteFromClipboard(ta); return; }
   else if (cmd === 'removeFormat') { document.execCommand('removeFormat'); document.execCommand('formatBlock', false, '<p>'); }
   else document.execCommand(cmd, false, null);
   rteSync(ta);
@@ -2419,7 +2527,7 @@ function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
             : `<button class="btn-ghost" style="margin-left:auto;color:var(--danger);font-size:11px" onclick="deleteNote('${n.id}','${c.id}')">Delete</button>`}
         </div>
         <div class="note-text">${noteBodyHTML(n)}</div>
-        ${noteImageThumbsHTML(c.id, files, allFiles)}
+        ${noteImageThumbsHTML(c.id, files, allFiles, n.html)}
         ${files.length?`<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">
           ${files.map(f=>{
             const i=allFiles.indexOf(f);
@@ -9188,7 +9296,7 @@ function openSessionModal(clientId, defaultType) {
       </button>
     </label>
     <div id="sm-voice-status" style="font-size:11px;color:var(--muted);min-height:14px"></div>
-    <textarea id="sm-text" style="min-height:160px" placeholder="Client presentation, interventions used, client response, outcomes, next steps… (paste a screenshot or photo with Ctrl+V)"></textarea>
+    <textarea id="sm-text" style="min-height:160px" placeholder="Client presentation, interventions used, client response, outcomes, next steps… Paste or drag a photo or screenshot straight in."></textarea>
   </div>
   <div class="form-group">
     <label style="display:flex;align-items:center;justify-content:space-between">
@@ -9225,6 +9333,7 @@ function openSessionModal(clientId, defaultType) {
   _sessionAttachments = [];
 
   showModal('📝 Log Session', html, () => {
+    if (document.querySelector('.rte[data-for="sm-text"] img[data-att^="pending"]')) { alert('A picture is still uploading \u2014 give it a moment, then press Save.'); return false; }
     const text = document.getElementById('sm-text')?.value?.trim();
     if(!text) { alert('Session notes required'); return false; }
     stopVoiceInput();
@@ -9249,7 +9358,7 @@ function openSessionModal(clientId, defaultType) {
     // Create note
     const n = { id:uid(), clientId, type, contactType:contact, location,
       created:noteDate, duration:mins, worker, text, followup, followupDate };
-    const noteHtml = rteHTML('sm-text'); if (noteHtml) n.html = noteHtml;   // formatting (bold, lists, tables…); text stays the plain copy
+    const noteHtml = rteHTML('sm-text'); if (noteHtml) n.html = noteHtml;   // pictures are stored as references to the attached files   // formatting (bold, lists, tables…); text stays the plain copy
     notes.push(n);
 
     // Save any attached files to the client's file store, linked to this note
@@ -9326,7 +9435,7 @@ function openSessionModal(clientId, defaultType) {
     document.getElementById('modal-container')._draft?.saved();
     return true;
   }, '720px');
-  rteEnhance('sm-text', { label: 'Session notes', pictures: () => document.getElementById('sm-file-input')?.click() });
+  rteEnhance('sm-text', { label: 'Session notes', pictures: true, clientId: () => document.getElementById('sm-client')?.value || '', attachFiles: files => sessHandleFiles({ files }) });
   _attachSessionDraft(clientId);
 }
 
@@ -9368,7 +9477,9 @@ function sessHandleDrop(event){
   sessHandleFiles({files:event.dataTransfer.files});
 }
 function sessRemoveAttachment(idx){
+  const gone = _sessionAttachments[idx];
   _sessionAttachments.splice(idx,1); sessRenderAttachments();
+  if (gone) { document.querySelectorAll('.rte-area img[data-att="' + gone.id + '"]').forEach(img => { const nx = img.nextSibling; if (nx && nx.nodeType === 3 && nx.nodeValue === '\u00A0') nx.remove(); img.remove(); }); const ta = document.getElementById('sm-text'); if (ta && ta._rte) rteSync(ta); }
 }
 
 // ----- Pasting pictures (screenshots, copied photos) -----
@@ -9399,6 +9510,10 @@ document.addEventListener('paste', async e => {
     if (!hasText) e.preventDefault();
     const rteArea = e.target && e.target.closest && e.target.closest('.rte-area');
     const target = rteArea ? document.getElementById(rteArea.dataset.for) : e.target && (e.target.id === 'sm-text' || e.target.id === 'sm-followup') ? e.target : null;
+    if (target && target._rte) {                                            // the notes editor: picture goes right where you pasted
+      const s = getSelection(), rg = s.rangeCount && target._rte.area.contains(s.anchorNode) ? s.getRangeAt(0).cloneRange() : null;
+      e.preventDefault(); rteInsertImages(target, files, rg); return;
+    }
     const before = _sessionAttachments.length;
     await sessHandleFiles({ files });
     const added = _sessionAttachments.slice(before);
@@ -9431,11 +9546,14 @@ function openImageLightbox(src, name) {
   document.body.appendChild(el);
 }
 function closeImageLightbox() { document.getElementById('img-lightbox')?.remove(); }
+// A picture inside a saved note opens full size.
+document.addEventListener('click', e => { const img = e.target.closest && e.target.closest('.rte-view img.rte-img'); if (img && img.src) { e.preventDefault(); e.stopPropagation(); openImageLightbox(img.src, img.alt); } });
 // Esc closes the picture first — not the client file behind it.
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && document.getElementById('img-lightbox')) { closeImageLightbox(); e.stopPropagation(); e.preventDefault(); } }, true);
 // Small picture previews for a note's attached images.
-function noteImageThumbsHTML(clientId, files, allFiles) {
-  const imgs = files.filter(f => (f.type || '').startsWith('image/') && fileSrc(f));
+function noteImageThumbsHTML(clientId, files, allFiles, inlineHtml) {
+  const inline = new Set([...String(inlineHtml || '').matchAll(/data-att="([^"]+)"/g)].map(m => m[1]));
+  const imgs = files.filter(f => (f.type || '').startsWith('image/') && fileSrc(f) && !inline.has(f.id));
   if (!imgs.length) return '';
   return `<div class="note-pics" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">${imgs.map(f => { const i = allFiles.indexOf(f);
     return `<button type="button" class="note-pic" title="${sanitize(f.name)}" onclick="event.stopPropagation();previewFile('${sanitize(clientId)}',${i})" style="padding:0;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:#fff;cursor:zoom-in;width:96px;height:72px">
