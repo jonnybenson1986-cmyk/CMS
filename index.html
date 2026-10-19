@@ -1245,7 +1245,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v93';
+const APP_VERSION = 'v94';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -2201,6 +2201,7 @@ function switchProfileTab(tab, id) {
   const clientTime = timeLogs.filter(t=>t.clientId===id);
   const sel = document.getElementById('profile-section'); if (sel && sel.value !== tab) sel.value = tab;
   document.getElementById('pf-actions')?.removeAttribute('open');
+  if (tab !== 'intake') _intakeLeaving();   // save the intake before its form is replaced
   document.getElementById('profile-tab-content').innerHTML = renderProfileTab(tab, c, clientNotes, clientTime);
   document.getElementById('profile-tab-content').scrollIntoView?.({ block: 'nearest' });
   if(tab === 'intake') {
@@ -2622,7 +2623,8 @@ function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
     const chk = (val) => val ? '✅' : '☐';
     return `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
-      <div style="font-size:13px;color:var(--muted)">WG Intake Form — mirrors the <strong>WG INTAKE FORM 16.02.26</strong></div>
+      <div style="font-size:13px;color:var(--muted)">WG Intake Form — mirrors the <strong>WG INTAKE FORM 16.02.26</strong>
+        <div id="intake-autosave-status" role="status" aria-live="polite" style="font-size:11px;color:#065f46;min-height:14px;margin-top:2px" title="The intake saves itself as you type and when you leave it. Press Save Intake when it's complete.">Saves automatically as you type and when you leave</div></div>
       <div style="display:flex;gap:8px">
         <button class="btn btn-primary btn-sm" onclick="saveIntake('${c.id}')">💾 Save Intake</button>
         <button class="btn btn-outline btn-sm" onclick="printIntake('${c.id}')">🖨️ Print / Export</button>
@@ -2639,7 +2641,7 @@ function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
     <div class="card">
       <div class="card-header"><div class="card-title">👤 Client Details</div></div>
       <div class="grid-3">
-        <div class="form-group"><label>Full Name</label><input id="if-fullName" value="${sanitize(c.fullName||'')}"></div>
+        <div class="form-group"><label>Full Name</label><input id="if-fullName" data-intake-client="${sanitize(c.id)}" value="${sanitize(c.fullName||'')}"></div>
         <div class="form-group"><label>Preferred Name</label><input id="if-preferredName" value="${sanitize(c.preferredName||'')}"></div>
         <div class="form-group"><label>Date of Birth</label><input type="date" id="if-dob" value="${sanitize(c.dob||'')}"></div>
         <div class="form-group" style="grid-column:1/-1"><label>Address</label><input id="if-address" value="${sanitize(c.address||'')}"></div>
@@ -3753,17 +3755,64 @@ function switchEducationTab(tab) {
   document.getElementById('edu-tab-'+tab).style.color = '#fff';
 }
 
-let _intakeAutoSaveInterval = null;
+// ===== INTAKE AUTOSAVE =====
+// The intake saves itself while it's open: shortly after typing stops, every
+// 30 seconds as a backstop, and whenever it's left — closing the file (✕,
+// Esc, clicking outside), changing section, opening another form over it,
+// the inactivity sign-out, or the page being closed or refreshed. Only a
+// press of "Save Intake" marks the intake as completed (and offers the
+// handbook text); autosaves just keep what was typed.
+//
+// It saves ONLY when that client's intake form is actually on screen. The old
+// timer carried on after the form was closed and, with the boxes gone, saved
+// them as blank over the client's details.
+let INTAKE_AUTOSAVE_MS = 30000, INTAKE_TYPING_MS = 1500;
+let _intakeAutoSaveInterval = null, _intakeAuto = null;   // { clientId, last, timer, audited }
+function _intakeFormOpenFor(id) { const el = document.getElementById('if-fullName'); return !!el && !!id && el.dataset.intakeClient === id; }
+function _intakeSig() {
+  const root = document.getElementById('profile-tab-content'); if (!root) return '';
+  return JSON.stringify([...root.querySelectorAll('input,select,textarea')].map(el => (el.type === 'checkbox' || el.type === 'radio') ? el.checked : el.value));
+}
+// Save the open intake if anything changed since the last save. Returns true if it saved.
+function flushIntake() {
+  const a = _intakeAuto; if (!a) return false;
+  clearTimeout(a.timer);
+  if (!_intakeFormOpenFor(a.clientId)) return false;
+  const sig = _intakeSig(); if (sig === a.last) return false;
+  saveIntake(a.clientId, true);
+  a.last = sig;
+  const st = document.getElementById('intake-autosave-status');
+  if (st) st.textContent = '💾 Autosaved ' + new Date().toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit', second: '2-digit' });
+  return true;
+}
+// Leaving the intake: save what was typed and say so.
+function _intakeLeaving() {
+  if (!_intakeAuto) return;
+  const name = clients.find(x => x.id === _intakeAuto.clientId)?.fullName || 'client';
+  if (flushIntake()) showToast('💾 Intake autosaved — ' + name);
+}
 function startIntakeAutoSave(clientId) {
-  if(_intakeAutoSaveInterval) clearInterval(_intakeAutoSaveInterval);
+  stopIntakeAutoSave();
+  _intakeAuto = { clientId, last: _intakeSig(), timer: null, audited: false };
   _intakeAutoSaveInterval = setInterval(() => {
-    const c = clients.find(x=>x.id===clientId);
-    if(c) saveIntake(clientId, true);
-  }, 30000);
+    if (!_intakeAuto || !_intakeFormOpenFor(_intakeAuto.clientId)) { stopIntakeAutoSave(); return; }
+    flushIntake();
+  }, INTAKE_AUTOSAVE_MS);
 }
 function stopIntakeAutoSave() {
-  if(_intakeAutoSaveInterval) { clearInterval(_intakeAutoSaveInterval); _intakeAutoSaveInterval=null; }
+  if (_intakeAutoSaveInterval) { clearInterval(_intakeAutoSaveInterval); _intakeAutoSaveInterval = null; }
+  if (_intakeAuto) clearTimeout(_intakeAuto.timer);
+  _intakeAuto = null;
 }
+// Typing, ticking or choosing anything in the intake saves it a moment later.
+['input', 'change'].forEach(ev => document.addEventListener(ev, e => {
+  const a = _intakeAuto;
+  if (!a || !e.target.closest?.('#profile-tab-content') || !_intakeFormOpenFor(a.clientId)) return;
+  clearTimeout(a.timer); a.timer = setTimeout(flushIntake, INTAKE_TYPING_MS);
+}, true));
+// Page closed, refreshed or put in the background (phones and tablets).
+window.addEventListener('pagehide', () => { try { flushIntake(); } catch (e) {} });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') { try { flushIntake(); } catch (e) {} } });
 
 // ===== SAVE INTAKE =====
 function saveIntake(id, quiet=false) {
@@ -3811,7 +3860,12 @@ function saveIntake(id, quiet=false) {
   c.ifServices = {};
   svcKeys.forEach(k => { c.ifServices[k] = document.getElementById(`if-svc-${k}`)?.checked||false; });
 
-  audit('Saved intake form', clients.find(cl=>cl.id===id)?.fullName||'', id);
+  if (!quiet) audit('Saved intake form', c.fullName||'', id);
+  else if (!_intakeAuto || _intakeAuto.clientId !== id || !_intakeAuto.audited) {   // once per sitting, not every keystroke pause
+    audit('Intake autosaved', c.fullName||'', id);
+    if (_intakeAuto && _intakeAuto.clientId === id) _intakeAuto.audited = true;
+  }
+  if (!quiet && _intakeAuto && _intakeAuto.clientId === id) _intakeAuto.last = _intakeSig();
   saveAll(); if(!quiet) showToast('Intake form saved ✓');
   if(!quiet) handbookAfterIntake(c);   // offer the handbook text once there's a mobile and consent to texts
   const hs = document.querySelector('.handbook-status');
@@ -14142,7 +14196,10 @@ function showModal(title, html, onSave, maxWidth='720px', noSave=false) {
 }
 
 function closeModalOnOverlay(e) { if(e.target.classList.contains('modal-overlay')) closeModal(); }
-function _modalClosing(mc) { const f = mc._onClose; mc._onClose = null; if (f) { try { f(); } catch (e) { console.warn(e); } } }
+function _modalClosing(mc) {
+  try { _intakeLeaving(); } catch (e) { console.warn('Intake autosave:', e); }   // an open intake is saved before it goes
+  const f = mc._onClose; mc._onClose = null; if (f) { try { f(); } catch (e) { console.warn(e); } }
+}
 function closeModal() {
   const mc = document.getElementById('modal-container');
   _modalClosing(mc);
@@ -15069,6 +15126,7 @@ async function logout(reason) {
   // sign-out, client details and all.
   const mc = document.getElementById('modal-container');
   try { mc && mc._draft && mc._draft.flush(); } catch(e) {}
+  try { flushIntake(); stopIntakeAutoSave(); } catch(e) {}   // an open intake is saved, not lost
   if (mc) { mc._draft = null; mc.innerHTML = ''; }
   // Unsaved note drafts: kept through an inactivity sign-out (so the note
   // isn't lost), but a deliberate Sign Out removes them from this device —
