@@ -116,6 +116,16 @@ name and initial only, and carry no notes.
   connection, Microsoft access, calendar permission, appointments to sync — and
   says in plain words which one fails and what to do.
 
+## 🗄️ Archiving referrals
+
+Referral Holding Bay → **🗄️ Archive** on any referral, or **Archive finished**
+for all client-created and declined ones at once. Archived referrals leave the
+Holding Bay (and its counters and "new referral" reminders) but are kept —
+**Archived** lists them with who archived them and when, and **↩️ Restore**
+puts one back. A referral still in progress asks before archiving. Archiving
+and restoring are written to the referral's action log and the audit log. The
+red ✕ still deletes permanently.
+
 ## ✍️ Writing tools
 
 * **Session / case notes** (Log Session — also used by *Add note* and *Log time*)
@@ -139,8 +149,15 @@ name and initial only, and carry no notes.
 
 ## 📷 Pasting pictures
 
-* **Log Session:** paste a screenshot or copied photo (Ctrl+V / Cmd+V) into the
-  session notes or follow-up box — it is attached to the session (and the
+* **Session notes (editor):** paste (Ctrl+V, right-click → Paste, or the 📋
+  Paste button), drag in, or add with the 🖼 picture button (camera on a phone)
+  — the **picture appears in the notes** where the cursor is, straight away,
+  and is attached to the session / client's Files. Cut, Copy and Paste buttons
+  are on the toolbar and in Edit; copying text with pictures inside the notes
+  copies the pictures too. The saved note stores only a reference
+  (`<img data-att="…">`, no address); the picture is filled in from that
+  client's own attached file when shown, so a note can't load anything else.
+* **Follow-up box:** paste a screenshot or copied photo (Ctrl+V / Cmd+V) — it is attached to the session (and the
   client's Files) and a `[📷 Picture n: …]` marker goes into the note where you
   pasted. Copied text still pastes normally. Attached pictures show as
   thumbnails before you save.
