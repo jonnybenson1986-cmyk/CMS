@@ -116,6 +116,27 @@ name and initial only, and carry no notes.
   connection, Microsoft access, calendar permission, appointments to sync — and
   says in plain words which one fails and what to do.
 
+## ✍️ Writing tools
+
+* **Session / case notes** (Log Session — also used by *Add note* and *Log time*)
+  have a full editor: **Edit / Insert / Format / Table** menus; undo/redo;
+  special characters (incl. letters used in Aboriginal languages, e.g. ŋ ṯ ḏ);
+  date/time stamps; paragraph styles (headings, quote); font and size; bold,
+  italic, underline, strikethrough, super/subscript; text and highlight colour;
+  alignment; bullet and numbered lists; indent; tables (insert, add/delete
+  rows and columns); pictures (attached to the session); clear formatting;
+  UPPER/lower/Sentence case; word count. Spell check is Australian English.
+* The original text box stays in the page, hidden, holding a **plain-text
+  copy** — so drafts, validation, voice input, reports, exports, search and
+  texts work unchanged. The formatted version is saved as `note.html` after
+  `rteSanitize` (a short allow-list of tags and styles; scripts, images, links
+  and event handlers are removed), and is sanitised again whenever shown.
+  Pasting from Word or a web page keeps formatting but is cleaned the same way.
+* **Every other text box** shows a small writing-tools bar when you click in:
+  undo/redo, date/time, special characters, bullets, numbering, change case
+  (Aa) and a word count, with Australian spell check. (Those boxes are plain
+  text, so only plain-text tools are offered.) Not on the chat message box.
+
 ## 📷 Pasting pictures
 
 * **Log Session:** paste a screenshot or copied photo (Ctrl+V / Cmd+V) into the
