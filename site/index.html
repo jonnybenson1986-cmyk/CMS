@@ -3736,8 +3736,8 @@ function renderChildrenList(c) {
   if(!children.length) return '<p style="font-size:13px;color:var(--muted);padding:8px 0">No children recorded</p>';
   return children.map((ch,i)=>`
     <div style="border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:8px;display:flex;gap:12px;align-items:center">
-      <div style="flex:1;font-size:13px"><strong>${ch.name||'Child '+(i+1)}</strong> &bull; DOB: ${ch.dob||'—'} &bull; ${ch.education||''} ${ch.concerns?'&bull; Concerns: '+ch.concerns:''}</div>
-      <button class="btn btn-sm btn-danger" onclick="removeChild('${c.id}',${i})">✕</button>
+      <div style="flex:1;font-size:13px"><strong>${sanitize(ch.name||'Child '+(i+1))}</strong> &bull; DOB: ${ch.dob?sanitize(fmt(ch.dob)):'—'} &bull; ${sanitize(ch.education||'')} ${ch.concerns?'&bull; Concerns: '+sanitize(ch.concerns):''}</div>
+      <button class="btn btn-sm btn-danger" onclick="removeIntakeChild('${sanitize(c.id)}',${i})" aria-label="Remove ${sanitize(ch.name||'child')}" title="Remove">✕</button>
     </div>`).join('');
 }
 
@@ -4281,35 +4281,78 @@ function removeWorker(clientId, idx) {
   c.keyWorkers.splice(idx, 1); saveAll(); openClientProfile(clientId);
 }
 
+// Small forms opened from inside a client file (Add Child, Add Contact,
+// Intake form by link) take the file's place on screen. Saving or closing them
+// used to leave the worker on the Clients list, out of the intake they were
+// part-way through. They now go back to the file — same section, same spot —
+// however they're closed (Save, Cancel, ✕, Esc, clicking outside). Anything
+// typed in the intake is autosaved as the form opens, so nothing is lost.
+function _clientFilePlace(clientId) {
+  const sel = document.getElementById('profile-section');
+  if (!sel || currentClientId !== clientId) return null;
+  return { clientId, tab: sel.value, scroll: document.querySelector('#modal-container .modal-overlay')?.scrollTop || 0 };
+}
+function _backToClientFile(place, anchorId) {
+  if (!place || !clients.some(x => x.id === place.clientId)) return;
+  renderClientProfile(place.clientId, place.tab);
+  const a = anchorId && document.getElementById(anchorId), ov = document.querySelector('#modal-container .modal-overlay');
+  if (a) a.scrollIntoView({ block: 'center' }); else if (ov) ov.scrollTop = place.scroll;
+}
+function _returnToFileOnClose(place, anchorId) {
+  if (!place) return;
+  const mc = document.getElementById('modal-container');
+  // Deferred: closeModal empties the box after this runs. If another form has
+  // taken its place instead, leave that one alone.
+  mc._onClose = () => setTimeout(() => { if (!mc.innerHTML.trim()) _backToClientFile(place, anchorId); }, 0);
+}
+
 function addChild(clientId) {
   const c = clients.find(cl=>cl.id===clientId); if(!c) return;
   if(!c.children_list) c.children_list = [];
+  const place = _clientFilePlace(clientId);
   const html = `
   <div class="grid-2">
-    <div class="form-group"><label>Child's Name</label><input id="ch-name"></div>
-    <div class="form-group"><label>Date of Birth</label><input type="date" id="ch-dob"></div>
-    <div class="form-group"><label>Education Setting</label><input id="ch-edu" placeholder="e.g. Warrnambool Primary School"></div>
-    <div class="form-group"><label>Concerns / Support Needs</label><input id="ch-concerns"></div>
-  </div>`;
-  showModal('➕ Add Child', html, () => {
+    <div class="form-group"><label for="ch-name">Child's Name *</label><input id="ch-name" autocomplete="off"></div>
+    <div class="form-group"><label for="ch-dob">Date of Birth</label><input type="date" id="ch-dob"></div>
+    <div class="form-group"><label for="ch-edu">Education Setting</label><input id="ch-edu" autocomplete="off" placeholder="e.g. Warrnambool Primary School"></div>
+    <div class="form-group"><label for="ch-concerns">Concerns / Support Needs</label><input id="ch-concerns" autocomplete="off"></div>
+  </div>
+  <p id="ch-status" role="status" style="font-size:12px;color:#dc2626;min-height:16px;margin:0"></p>`;
+  showModal('➕ Add Child — ' + sanitize(c.fullName), html, () => {
+    const name = (document.getElementById('ch-name')?.value || '').trim();
+    if (!name) { document.getElementById('ch-status').textContent = "Enter the child's name."; document.getElementById('ch-name')?.focus(); return false; }
+    // Look the client up again: a cloud refresh while this form was open
+    // replaces the client list, and a child added to the old copy was lost.
+    const c = clients.find(cl=>cl.id===clientId); if (!c) { alert('This client file is no longer available.'); return true; }
+    if (!Array.isArray(c.children_list)) c.children_list = [];
     c.children_list.push({
-      name: document.getElementById('ch-name')?.value,
-      dob: document.getElementById('ch-dob')?.value,
-      education: document.getElementById('ch-edu')?.value,
-      concerns: document.getElementById('ch-concerns')?.value,
+      name,
+      dob: document.getElementById('ch-dob')?.value || '',
+      education: (document.getElementById('ch-edu')?.value || '').trim(),
+      concerns: (document.getElementById('ch-concerns')?.value || '').trim(),
     });
-    saveAll(); return true;
-  });
+    audit('Added child to intake', c.fullName, clientId);
+    saveAll(); showToast(name + ' added'); return true;
+  }, '640px');
+  _returnToFileOnClose(place || { clientId, tab: 'intake', scroll: 0 }, 'children-list-' + clientId);
+  setTimeout(() => document.getElementById('ch-name')?.focus(), 50);
 }
 
-function removeChild(clientId, idx) {
-  const c = clients.find(cl=>cl.id===clientId); if(!c) return;
-  c.children_list.splice(idx, 1); saveAll(); openClientProfile(clientId);
+// (Not "removeChild": inside an onclick that name is the button's own DOM method.)
+function removeIntakeChild(clientId, idx) {
+  const c = clients.find(cl=>cl.id===clientId); if(!c || !c.children_list?.[idx]) return;
+  const nm = c.children_list[idx].name || 'this child';
+  if (!confirm(`Remove ${nm} from ${c.fullName}'s children list?`)) return;
+  const place = _clientFilePlace(clientId) || { clientId, tab: 'intake', scroll: 0 };
+  c.children_list.splice(idx, 1);
+  audit('Removed child from intake', c.fullName, clientId);
+  saveAll(); _backToClientFile(place);
 }
 
 function addConsentShare(clientId) {
   const c = clients.find(cl=>cl.id===clientId); if(!c) return;
   if(!c.consentShareList) c.consentShareList = [];
+  const place = _clientFilePlace(clientId);
   const html = `
   <div class="form-group"><label>Name *</label><input id="cs-name"></div>
   <div class="form-group"><label>Organisation</label><input id="cs-org"></div>
@@ -4317,14 +4360,18 @@ function addConsentShare(clientId) {
   showModal('➕ Add Consent Contact', html, () => {
     const name = document.getElementById('cs-name')?.value?.trim();
     if(!name) { alert('Name required'); return false; }
+    const c = clients.find(cl=>cl.id===clientId); if (!c) return true;   // current copy (see addChild)
+    if (!Array.isArray(c.consentShareList)) c.consentShareList = [];
     c.consentShareList.push({ name, org: document.getElementById('cs-org')?.value, phone: document.getElementById('cs-phone')?.value });
     saveAll(); return true;
   });
+  _returnToFileOnClose(place || { clientId, tab: 'intake', scroll: 0 });
 }
 
 function removeConsentShare(clientId, idx) {
   const c = clients.find(cl=>cl.id===clientId); if(!c) return;
-  c.consentShareList.splice(idx, 1); saveAll(); openClientProfile(clientId);
+  const place = _clientFilePlace(clientId) || { clientId, tab: 'intake', scroll: 0 };
+  c.consentShareList.splice(idx, 1); saveAll(); _backToClientFile(place);
 }
 
 function field(label, value) {
@@ -13400,7 +13447,9 @@ function openIntakeLinkModal(clientId) {
   const f = currentIntakeForm(clientId), st = intakeFormState(f);
   if (st === 'submitted') return openIntakeReviewModal(f.id);
   _ifOpenClient = clientId;
+  const place = _clientFilePlace(clientId);   // opened from the intake → go back to it afterwards
   showModal('📲 Intake form by link', `<div id="if-body">${['open', 'draft'].includes(st) ? _ifLiveHTML(c, f) : _ifCreateHTML(c, st, f)}</div>`, null, '660px', true);
+  _returnToFileOnClose(place);
 }
 function _ifRefreshModal(clientId) {
   const el = document.getElementById('if-body'); if (!el) return;
@@ -14216,7 +14265,10 @@ function handleModalSave() {
 // ===== TOAST =====
 function showToast(msg) {
   const t = document.createElement('div');
-  t.style.cssText = 'position:fixed;bottom:var(--fab-clear,92px);right:24px;max-width:calc(100vw - 48px);background:var(--primary);color:#fff;padding:12px 20px;border-radius:8px;font-size:13px;font-weight:600;z-index:9999;animation:fadeIn 0.2s';
+  t.className = 'wg-toast';
+  // Messages shown together stack upwards instead of covering each other.
+  const above = [...document.querySelectorAll('.wg-toast')].reduce((h, el) => h + el.offsetHeight + 8, 0);
+  t.style.cssText = `position:fixed;bottom:calc(var(--fab-clear,92px) + ${above}px);right:24px;max-width:calc(100vw - 48px);background:var(--primary);color:#fff;padding:12px 20px;border-radius:8px;font-size:13px;font-weight:600;z-index:9999;animation:fadeIn 0.2s`;
   t.textContent = '✓ ' + msg;
   document.body.appendChild(t);
   setTimeout(()=>t.remove(), 2500);
