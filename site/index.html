@@ -84,6 +84,7 @@
   .badge-aod { background: #fee2e2; color: #991b1b; }
   .badge-justice { background: #dbeafe; color: #1e40af; }
   .badge-cultural { background: #fef3c7; color: #92400e; }
+  .badge-mensgroup { background: #ccfbf1; color: #115e59; }
   .badge-general { background: #f3f4f6; color: #374151; }
 
   /* GRID */
@@ -288,6 +289,7 @@
   .note-entry.aod { border-left-color: #ef4444; }
   .note-entry.justice { border-left-color: #3b82f6; }
   .note-entry.cultural { border-left-color: #f59e0b; }
+  .note-entry.mensgroup { border-left-color: #14b8a6; }
   .note-entry.general { border-left-color: var(--muted); }
   .note-meta { font-size: 11px; color: var(--muted); margin-bottom: 6px; display: flex; gap: 10px; align-items: center; }
   .note-text { font-size: 13px; line-height: 1.6; }
@@ -506,6 +508,9 @@
     </div>
     <div class="nav-item" onclick="showPage('cultural')">
       <span class="icon">🌀</span><span>Cultural Strengthening</span>
+    </div>
+    <div class="nav-item" onclick="showPage('mensgroup')">
+      <span class="icon">🔥</span><span>Men's Group</span>
     </div>
     <div class="nav-item" onclick="showPage('disability')">
       <span class="icon">♿</span><span>Disability</span>
@@ -829,7 +834,7 @@ const FSYNC = (() => {
   function _startListeners() {
     _listeners.forEach(u=>u()); _listeners=[];
     const refresh = () => {
-      if (['clients','dashboard','sewb','aod','justice','cultural','disability','reports','sessions'].includes(currentPage))
+      if (['clients','dashboard','sewb','aod','justice','cultural','mensgroup','disability','reports','sessions'].includes(currentPage))
         setTimeout(()=>showPage(currentPage),50);
     };
     // GUARD (QA C1): never let an EMPTY snapshot overwrite good local data.
@@ -1262,7 +1267,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v96';
+const APP_VERSION = 'v97';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -1857,7 +1862,7 @@ function showPage(page) {
   setMobTab(page);
   document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
   const items = document.querySelectorAll('.nav-item');
-  const titles = { dashboard:'Dashboard', referrals:'Referral Holding Bay', clients:'Clients', sessions:'Session Log', notes:'All Case Notes', policies:'Policies & Procedures', walkins:'Walk-in Register', sewb:'SEWB Program', aod:'AOD Program', justice:'Justice Program', cultural:'Cultural Strengthening', disability:'Disability Program', reports:'Reports', calendar:'Calendar', auditlog:'Audit Log', settings:'Settings' };
+  const titles = { dashboard:'Dashboard', referrals:'Referral Holding Bay', clients:'Clients', sessions:'Session Log', notes:'All Case Notes', policies:'Policies & Procedures', walkins:'Walk-in Register', sewb:'SEWB Program', aod:'AOD Program', justice:'Justice Program', mensgroup:"Men's Group", cultural:'Cultural Strengthening', disability:'Disability Program', reports:'Reports', calendar:'Calendar', auditlog:'Audit Log', settings:'Settings' };
   document.getElementById('page-title').textContent = titles[page] || page;
   items.forEach(el => { if(el.getAttribute('onclick')?.includes(`'${page}'`)) el.classList.add('active'); });
   if (page !== 'auditlog' && page !== currentPage) audit('Page view', titles[page] || page);
@@ -1894,7 +1899,7 @@ function showPage(page) {
     btn.onclick = openNewClientModal;
   }
 
-  const pages = { dashboard: renderDashboard, referrals: renderReferrals, clients: renderClients, closedclients: renderClosedClients, sessions: renderSessions, notes: renderAllNotes, walkins: renderWalkins, sewb: renderSEWB, aod: renderAOD, justice: renderJustice, cultural: renderCultural, disability: renderDisability, workfoundations: renderWorkFoundations, homeownership: renderHomeOwnership, reports: renderReportsPage, calendar: renderCalendarPage, resources: renderResourcesPage, policies: renderPoliciesPage, auditlog: renderAuditLog, settings: renderSettings, chat: renderChatPage };
+  const pages = { dashboard: renderDashboard, referrals: renderReferrals, clients: renderClients, closedclients: renderClosedClients, sessions: renderSessions, notes: renderAllNotes, walkins: renderWalkins, sewb: renderSEWB, aod: renderAOD, justice: renderJustice, cultural: renderCultural, mensgroup: renderMensGroup, disability: renderDisability, workfoundations: renderWorkFoundations, homeownership: renderHomeOwnership, reports: renderReportsPage, calendar: renderCalendarPage, resources: renderResourcesPage, policies: renderPoliciesPage, auditlog: renderAuditLog, settings: renderSettings, chat: renderChatPage };
   const fn = pages[page];
   document.getElementById('content').innerHTML = fn ? fn() : '<div class="empty-state"><p>This page could not be opened. Please refresh, or contact your system manager if it keeps happening.</p></div>';
   attachPageEvents(page);
@@ -1969,7 +1974,7 @@ function renderDashboard() {
         recentNotes.map(n=>{
           const c = clients.find(cl=>cl.id===n.clientId);
           return `<div class="note-entry ${n.type||'general'}" style="margin-bottom:8px;cursor:pointer" onclick="openClientProfile('${n.clientId}')">
-            <div class="note-meta"><span class="section-badge badge-${n.type||'general'}">${n.type||'general'}</span><span>${sanitize(c?.fullName||'Unknown')}</span><span>${fmt(n.created)}</span></div>
+            <div class="note-meta"><span class="section-badge badge-${n.type||'general'}">${noteTypeLabel(n.type)}</span><span>${sanitize(c?.fullName||'Unknown')}</span><span>${fmt(n.created)}</span></div>
             <div class="note-text">${sanitize((n.text||'').slice(0,120))}${(n.text||'').length>120?'…':''}</div>
           </div>`;
         }).join('')
@@ -1999,7 +2004,7 @@ function renderClients() {
         ${filtered.length===0?`<tr><td colspan="8"><div class="empty-state"><div class="icon">👥</div><p>No clients found${search?' for "'+search+'"':''}</p><button class="btn btn-primary" onclick="openNewClientModal()" style="margin-top:12px">Add First Client</button></div></td></tr>`:
           filtered.map(c=>{
             const age = c.dob ? Math.floor((Date.now()-new Date(c.dob))/(365.25*24*3600*1000)) : '?';
-            const progs = [c.sewb&&'SEWB',c.aod&&'AOD',c.justice&&'Justice',c.cultural&&'Cultural'].filter(Boolean);
+            const progs = [c.sewb&&'SEWB',c.aod&&'AOD',c.justice&&'Justice',c.cultural&&'Cultural',c.mensgroup&&"Men's Group"].filter(Boolean);
             return `<tr class="client-row" data-id="${c.id}" style="cursor:pointer">
               <td><div style="display:flex;align-items:center;gap:10px"><div class="avatar">${initials(c.fullName)}</div><div><div style="font-weight:600;font-size:13px">${sanitize(c.fullName)}</div><div style="font-size:11px;color:var(--muted)">${sanitize(c.pronouns||'')}</div></div></div></td>
               <td style="font-size:12px;color:var(--muted)">${c.clientId||'—'}</td>
@@ -2038,7 +2043,7 @@ function renderClosedClients() {
       </tr></thead>
       <tbody>
         ${closed.map(c=>{
-          const progs = [c.sewb&&'SEWB',c.aod&&'AOD',c.justice&&'Justice',c.cultural&&'Cultural',c.disability&&'Disability',c.workFoundations&&'Work Foundations'].filter(Boolean);
+          const progs = [c.sewb&&'SEWB',c.aod&&'AOD',c.justice&&'Justice',c.cultural&&'Cultural',c.mensgroup&&"Men's Group",c.disability&&'Disability',c.workFoundations&&'Work Foundations'].filter(Boolean);
           return `<tr>
             <td><div style="display:flex;align-items:center;gap:10px"><div class="avatar" style="opacity:0.6">${initials(c.fullName)}</div><div style="font-weight:600;font-size:13px">${sanitize(c.fullName)}</div></div></td>
             <td style="font-size:12px;color:var(--muted)">${c.clientId||'—'}</td>
@@ -2073,19 +2078,23 @@ function reopenClient(id) {
 }
 
 // ===== CLIENT PROFILE =====
-// Programs a client can be enrolled in. SEWB is the umbrella: AOD, Justice and
-// Cultural sit under it (enrolling in one enrols the client in SEWB). NDIS and
+// Programs a client can be enrolled in. SEWB is the umbrella: AOD, Justice,
+// Cultural and Men's Group sit under it (enrolling in one enrols the client in SEWB). NDIS and
 // Home Ownership stand alone.
 const PROFILE_PROGRAMS = [
   { key:'sewb', field:'sewb', label:'SEWB', icon:'💚', tab:'sewb', bg:'#d1fae5', fg:'#065f46', blurb:'Social & Emotional Wellbeing — the umbrella program' },
   { key:'aod', field:'aod', label:'AOD', icon:'🔴', tab:'aod', sub:true, bg:'#fee2e2', fg:'#991b1b', blurb:'Alcohol & other drugs — sits under SEWB' },
   { key:'justice', field:'justice', label:'Justice', icon:'⚖️', tab:'justice', sub:true, bg:'#dbeafe', fg:'#1e40af', blurb:'Justice support — sits under SEWB' },
   { key:'cultural', field:'cultural', label:'Cultural Strengthening', icon:'🌀', tab:'cultural', sub:true, bg:'#ffedd5', fg:'#92400e', blurb:'Connection to culture & Country — sits under SEWB' },
+  { key:'mensgroup', field:'mensgroup', label:"Men's Group", icon:'🔥', tab:'mensgroup', sub:true, bg:'#ccfbf1', fg:'#115e59', blurb:"Men's yarning & support group — sits under SEWB" },
   { key:'workfoundations', field:'workFoundations', label:'Work Foundations', icon:'💼', tab:'workfoundations', bg:'#dbeafe', fg:'#1e40af', blurb:'Employment & training support' },
   { key:'disability', field:'disability', label:'NDIS / Disability', icon:'♿', tab:'disability', standalone:true, bg:'#f3e8ff', fg:'#6b21a8', blurb:'Stands alone — NDIS supports' },
   { key:'homeownership', field:'homeOwnership', label:'Home Ownership', icon:'🏠', tab:'', page:'homeownership', standalone:true, bg:'#e0f2fe', fg:'#0369a1', blurb:'Stands alone — First Peoples Home Ownership' },
 ];
 const programEnrolled = (c, p) => !!c[p.field];
+// How a note / session / time "type" key reads on screen.
+const NOTE_TYPE_LABELS = { mensgroup:"men's group", workfoundations:'work foundations' };
+function noteTypeLabel(t) { t = t || 'general'; return NOTE_TYPE_LABELS[t] || t; }
 function clientAge(c) { if (!c.dob) return ''; const d = new Date(c.dob); if (isNaN(d)) return ''; return Math.floor((Date.now() - d) / (365.25 * 24 * 3600 * 1000)); }
 
 // The "Section" dropdown — one list in place of the scrolling tab strip.
@@ -2237,6 +2246,7 @@ const TAB_SAVE_BAR = {
   aod:             { label:'Save AOD',               fn:'saveAOD' },
   justice:         { label:'Save Justice',           fn:'saveJustice' },
   cultural:        { label:'Save Cultural',          fn:'saveCultural' },
+  mensgroup:       { label:"Save Men's Group",       fn:'saveMensGroup' },
   disability:      { label:'Save Disability & NDIS', fn:'saveDisabilityTab' },
   workfoundations: { label:'Save Work Foundations',  fn:'saveWF' },
   safety:          { label:'Save Safety Plan',       fn:'saveSafety' },
@@ -2317,7 +2327,7 @@ function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
       <div class="card-header"><div class="card-title">📝 Recent notes</div><button class="btn-ghost" onclick="gotoProfileSection('notes')">All notes &amp; files →</button></div>
       ${recent.length===0?'<p style="color:var(--muted);font-size:13px">No notes yet</p>':
         recent.map(n=>`<div class="note-entry ${n.type||'general'}">
-          <div class="note-meta"><span class="section-badge badge-${n.type||'general'}">${n.type||'general'}</span><span>${fmtdt(n.created)}</span><span>${sanitize(n.worker||'')}</span></div>
+          <div class="note-meta"><span class="section-badge badge-${n.type||'general'}">${noteTypeLabel(n.type)}</span><span>${fmtdt(n.created)}</span><span>${sanitize(n.worker||'')}</span></div>
           <div class="note-text">${noteBodyHTML(n)}</div>
         </div>`).join('')
       }
@@ -2505,6 +2515,34 @@ function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
     </div>`;
   }
 
+  if(tab === 'mensgroup') {
+    const st = mensGroupStats(c);
+    return `
+    <div class="card">
+      <div class="card-header"><div class="card-title">🔥 Men's Group</div><div style="display:flex;gap:8px"><button class="btn btn-sm btn-outline" onclick="openQuickReport('mensgroup','${c.id}')">📊 Generate Report</button><button class="btn btn-sm btn-primary" onclick="saveMensGroup('${c.id}')">Save</button></div></div>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:16px">Men's Group sits under SEWB. Record each group session as a Men's Group note — that's how attendance is counted for reporting.</p>
+      <div class="grid-3" style="margin-bottom:12px">
+        <div class="stat-card"><div class="label">Sessions recorded</div><div class="value">${st.sessions}</div></div>
+        <div class="stat-card"><div class="label">Last attended</div><div class="value" style="font-size:16px">${st.last?fmt(st.last):'—'}</div></div>
+        <div class="stat-card"><div class="label">Time logged</div><div class="value" style="font-size:16px">${Math.floor(st.minutes/60)}h ${st.minutes%60}m</div></div>
+      </div>
+      <div class="grid-2">
+        <div class="form-group"><label for="mg-joined">Date joined</label><input type="date" id="mg-joined" value="${sanitize(c.mgJoined||'')}"></div>
+        <div class="form-group"><label for="mg-supports">Facilitators / Elders / mentors</label><input id="mg-supports" value="${sanitize(c.mgSupports||'')}"></div>
+      </div>
+      <div class="form-group"><label for="mg-goals">Goals for being in the group</label><textarea id="mg-goals" style="min-height:60px">${sanitize(c.mgGoals||'')}</textarea></div>
+      <div class="form-group"><label for="mg-interests">Interests / topics he'd like to yarn about</label><textarea id="mg-interests" style="min-height:60px">${sanitize(c.mgInterests||'')}</textarea></div>
+      <div class="form-group"><label for="mg-safety">Safety considerations</label><textarea id="mg-safety" style="min-height:60px">${sanitize(c.mgSafety||'')}</textarea></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-title">📝 Men's Group Notes</div><button class="btn btn-sm btn-primary" onclick="openNoteModal('${c.id}','mensgroup')">Add Men's Group Note</button></div>
+      ${filterNotes(c.id,'mensgroup')}
+    </div>
+    <div class="sticky-save-bar">
+      <button class="btn btn-primary" onclick="saveMensGroup('${c.id}')">💾 Save Men's Group</button>
+    </div>`;
+  }
+
   if(tab === 'notes') {
     const allFiles = c.attachments || [];
     const standaloneTime = clientTime.filter(t=>!t.fromNoteId); // manual Log Time entries (session time shown on the note)
@@ -2549,7 +2587,7 @@ function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
         const files=allFiles.filter(f=>f.noteId===n.id);
         return `<div class="note-entry ${n.type||'general'}" data-type="${n.type||'general'}" data-kind="note">
         <div class="note-meta">
-          <span class="section-badge badge-${n.type||'general'}">${n.type||'general'}</span>
+          <span class="section-badge badge-${n.type||'general'}">${noteTypeLabel(n.type)}</span>
           <span>${fmtdt(n.created)}</span>
           <span>${sanitize(n.worker||'')}</span>
           ${n.contactType?`<span>📍 ${sanitize(n.contactType)}</span>`:''}
@@ -2999,7 +3037,7 @@ function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
   // ===== SUMMARY TAB =====
   if(tab === 'summary') {
     const totalMins = clientTime.reduce((a,t)=>a+(t.minutes||0),0);
-    const progs = [c.sewb&&'SEWB',c.aod&&'AOD',c.justice&&'Justice',c.cultural&&'Cultural Strengthening'].filter(Boolean);
+    const progs = [c.sewb&&'SEWB',c.aod&&'AOD',c.justice&&'Justice',c.cultural&&'Cultural Strengthening',c.mensgroup&&"Men's Group"].filter(Boolean);
     const age = c.dob ? Math.floor((Date.now()-new Date(c.dob))/(365.25*24*3600*1000)) : '?';
     const recentNotes = [...clientNotes].slice(0,5);
     const sewbDomains = ['Body','Mind & Emotions','Family & Kinship','Community','Culture','Country','Spirit','Sovereignty'];
@@ -3048,7 +3086,7 @@ function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
       </div>
       <div>
         <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:8px">Recent Notes</div>
-        ${recentNotes.length===0?'<p style="font-size:13px;color:var(--muted)">No notes yet</p>':recentNotes.map(n=>`<div class="note-entry ${n.type||'general'}" style="margin-bottom:8px"><div class="note-meta"><span class="section-badge badge-${n.type||'general'}">${n.type||'general'}</span><span>${fmtdt(n.created)}</span><span>${sanitize(n.worker||'')}</span></div><div class="note-text">${sanitize((n.text||'').slice(0,200))}${(n.text||'').length>200?'…':''}</div></div>`).join('')}
+        ${recentNotes.length===0?'<p style="font-size:13px;color:var(--muted)">No notes yet</p>':recentNotes.map(n=>`<div class="note-entry ${n.type||'general'}" style="margin-bottom:8px"><div class="note-meta"><span class="section-badge badge-${n.type||'general'}">${noteTypeLabel(n.type)}</span><span>${fmtdt(n.created)}</span><span>${sanitize(n.worker||'')}</span></div><div class="note-text">${sanitize((n.text||'').slice(0,200))}${(n.text||'').length>200?'…':''}</div></div>`).join('')}
       </div>
     </div>`;
   }
@@ -3073,7 +3111,7 @@ function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
         :`<div style="display:grid;gap:10px">${attachments.map((f,i)=>{
           const srcNote = f.noteId ? notes.find(n=>n.id===f.noteId) : null;
           const srcLabel = srcNote
-            ? `🔗 From ${(srcNote.type||'general').toUpperCase()} note · ${fmtdt(srcNote.created)}${srcNote.contactType?' · '+srcNote.contactType:''}`
+            ? `🔗 From ${noteTypeLabel(srcNote.type).toUpperCase()} note · ${fmtdt(srcNote.created)}${srcNote.contactType?' · '+srcNote.contactType:''}`
             : (f.source||'');
           return `
           <div style="display:flex;align-items:center;gap:12px;padding:12px;border:1px solid var(--border);border-radius:8px;background:#fafaf8">
@@ -3712,9 +3750,9 @@ function exportClientJSON(id) {
 function copyClientSummary(id) {
   const c=clients.find(cl=>cl.id===id); if(!c) return;
   const age=c.dob?Math.floor((Date.now()-new Date(c.dob))/(365.25*24*3600*1000)):'?';
-  const progs=[c.sewb&&'SEWB',c.aod&&'AOD',c.justice&&'Justice',c.cultural&&'Cultural'].filter(Boolean).join(', ');
+  const progs=[c.sewb&&'SEWB',c.aod&&'AOD',c.justice&&'Justice',c.cultural&&'Cultural',c.mensgroup&&"Men's Group"].filter(Boolean).join(', ');
   const rn=notes.filter(n=>n.clientId===id).sort((a,b)=>b.created.localeCompare(a.created)).slice(0,3);
-  const text=['WORN GUNDIDJ — CLIENT SUMMARY',`Generated: ${new Date().toLocaleDateString('en-AU')}`,``,`CLIENT: ${sanitize(c.fullName)}`,`DOB: ${c.dob||'—'} (${age} yrs)  |  Risk: ${(c.riskLevel||'low').toUpperCase()}`,`Mob: ${sanitize(c.mob||'—')}  |  Community: ${sanitize(c.community||'—')}`,`Phone: ${c.phone||'—'}  |  Key Worker: ${sanitize(c.keyWorker||'—')}`,``,`PROGRAMS: ${progs||'None'}`,``,`GOALS:`,`  Short: ${c.ifGoalShort||c.goals||'—'}`,`  Medium: ${c.ifGoalMedium||'—'}`,`  Long: ${c.ifGoalLong||'—'}`,``,`RECENT NOTES:`,...rn.map(n=>`  [${(n.type||'general').toUpperCase()}] ${fmtdt(n.created)}: ${(n.text||'').slice(0,150)}`)].join('\n');
+  const text=['WORN GUNDIDJ — CLIENT SUMMARY',`Generated: ${new Date().toLocaleDateString('en-AU')}`,``,`CLIENT: ${sanitize(c.fullName)}`,`DOB: ${c.dob||'—'} (${age} yrs)  |  Risk: ${(c.riskLevel||'low').toUpperCase()}`,`Mob: ${sanitize(c.mob||'—')}  |  Community: ${sanitize(c.community||'—')}`,`Phone: ${c.phone||'—'}  |  Key Worker: ${sanitize(c.keyWorker||'—')}`,``,`PROGRAMS: ${progs||'None'}`,``,`GOALS:`,`  Short: ${c.ifGoalShort||c.goals||'—'}`,`  Medium: ${c.ifGoalMedium||'—'}`,`  Long: ${c.ifGoalLong||'—'}`,``,`RECENT NOTES:`,...rn.map(n=>`  [${noteTypeLabel(n.type).toUpperCase()}] ${fmtdt(n.created)}: ${(n.text||'').slice(0,150)}`)].join('\n');
   navigator.clipboard.writeText(text).then(()=>showToast('Summary copied to clipboard'));
 }
 
@@ -4635,7 +4673,7 @@ const SEWB_UMBRELLA_VERSION = '2026-09';
 function _inNdisProgram(c){ return !!c && (c.disability === true || c.ndis === true); }
 function _inHomeOwnershipProgram(c){ return !!c && c.homeOwnership === true; }
 function _inSewbFamily(c){
-  return !!c && !!(c.sewb || c.aod || c.justice || c.cultural || c.workFoundations);
+  return !!c && !!(c.sewb || c.aod || c.justice || c.cultural || c.mensgroup || c.workFoundations);
 }
 function isStandaloneOnlyClient(c){
   return (_inNdisProgram(c) || _inHomeOwnershipProgram(c)) && !_inSewbFamily(c);
@@ -4768,6 +4806,7 @@ function clientFormHTML(c) {
           <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="cf-aod" ${c.aod?'checked':''} onchange="if(this.checked)document.getElementById('cf-sewb').checked=true"> SEWB – AOD</label>
           <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="cf-justice" ${c.justice?'checked':''} onchange="if(this.checked)document.getElementById('cf-sewb').checked=true"> SEWB – Justice</label>
           <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="cf-cultural" ${c.cultural?'checked':''} onchange="if(this.checked)document.getElementById('cf-sewb').checked=true"> SEWB – Cultural Strengthening</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="cf-mensgroup" ${c.mensgroup?'checked':''} onchange="if(this.checked)document.getElementById('cf-sewb').checked=true"> SEWB – Men's Group</label>
           <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="cf-workfoundations" ${c.workFoundations?'checked':''}> 🔨 Work Foundations</label>
         </div>
       </div>
@@ -4804,7 +4843,7 @@ function collectClientForm() {
     keyWorker: getWorkerValue('cf-keyWorker','cf-keyWorker-new'),
     assignedWorkers: [...document.querySelectorAll('.cf-assignedWorker:checked')].map(el=>el.value),
     riskLevel: g('cf-riskLevel'), status: g('cf-status'),
-    sewb: gc('cf-sewb'), aod: gc('cf-aod'), justice: gc('cf-justice'), cultural: gc('cf-cultural'), disability: gc('cf-disability'), workFoundations: gc('cf-workfoundations'), homeOwnership: gc('cf-homeownership'),
+    sewb: gc('cf-sewb'), aod: gc('cf-aod'), justice: gc('cf-justice'), cultural: gc('cf-cultural'), mensgroup: gc('cf-mensgroup'), disability: gc('cf-disability'), workFoundations: gc('cf-workfoundations'), homeOwnership: gc('cf-homeownership'),
     referralReason: g('cf-referralReason'), goals: g('cf-goals'), strengths: g('cf-strengths'),
   });
 }
@@ -4817,7 +4856,7 @@ function openNoteModal(clientId, defaultType) {
   <div class="grid-2">
     <div class="form-group"><label>Note Type</label>
       <select id="nm-type">
-        ${['general','sewb','aod','justice','cultural'].map(t=>`<option value="${sanitize(t)}" ${t===(defaultType||'general')?'selected':''}>${t.toUpperCase()}</option>`).join('')}
+        ${['general','sewb','aod','justice','cultural','mensgroup'].map(t=>`<option value="${sanitize(t)}" ${t===(defaultType||'general')?'selected':''}>${noteTypeLabel(t).toUpperCase()}</option>`).join('')}
       </select>
     </div>
     <div class="form-group"><label>Contact Type</label>
@@ -4884,7 +4923,7 @@ function openNoteModal(clientId, defaultType) {
     // Auto-add to calendar
     if(document.getElementById('nm-addtocal')?.checked && n.clientId) {
       const cl = clients.find(c=>c.id===n.clientId);
-      const typeMap = {sewb:'appointment',aod:'aod',justice:'justice',cultural:'cultural',general:'appointment'};
+      const typeMap = {sewb:'appointment',aod:'aod',justice:'justice',cultural:'cultural',mensgroup:'group',general:'appointment'};
       const dur = parseInt(n.duration||60);
       const noteD = new Date(n.created);
       const startHH = String(noteD.getHours()).padStart(2,'0');
@@ -4904,7 +4943,7 @@ function openNoteModal(clientId, defaultType) {
       });
       saveCalEvents();
     }
-    audit('Added note', `${(n.type||'general').toUpperCase()} note — ${n.contactType||''}`, n.clientId);
+    audit('Added note', `${noteTypeLabel(n.type).toUpperCase()} note — ${n.contactType||''}`, n.clientId);
     saveAll(); showToast('Note saved' + (document.getElementById('nm-addtocal')?.checked?' + added to calendar':'')); return true;
   });
 }
@@ -4954,7 +4993,7 @@ function openTimeModal(clientId) {
     <div class="form-group"><label>Program <span style="font-weight:400;color:var(--muted)">— counts toward episodes of care</span></label>
       <select id="tm-program">
         <option value="">— Not program-specific —</option>
-        ${EOC_TIME_PROGRAMS.map(p=>`<option value="${sanitize(p)}">${p==='workfoundations'?'Work Foundations':p.toUpperCase()}</option>`).join('')}
+        ${EOC_TIME_PROGRAMS.map(p=>`<option value="${sanitize(p)}">${noteTypeLabel(p).toUpperCase()}</option>`).join('')}
       </select>
       <div style="font-size:11px;color:var(--muted);margin-top:4px">Time left as "Not program-specific" counts toward SEWB episodes of care (once). Choose a program to count it toward AOD, Justice, etc. instead.</div>
     </div>
@@ -4993,7 +5032,7 @@ function renderNotes() {
   <div class="card" style="padding:0;overflow:hidden">
     <div style="padding:16px 20px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border)">
       <div style="display:flex;gap:8px">
-        ${['all','sewb','aod','justice','cultural','general'].map(t=>`<button class="btn btn-sm btn-outline" onclick="filterAllNotes('${t}')">${t.toUpperCase()}</button>`).join('')}
+        ${['all','sewb','aod','justice','cultural','mensgroup','general'].map(t=>`<button class="btn btn-sm btn-outline" onclick="filterAllNotes('${t}')">${noteTypeLabel(t).toUpperCase()}</button>`).join('')}
       </div>
     </div>
     <div id="all-notes-list" style="padding:20px">
@@ -5002,7 +5041,7 @@ function renderNotes() {
         const c = clients.find(cl=>cl.id===n.clientId);
         return `<div class="note-entry ${n.type||'general'}" data-type="${n.type||'general'}" style="cursor:pointer" onclick="openClientProfile('${n.clientId}')">
           <div class="note-meta">
-            <span class="section-badge badge-${n.type||'general'}">${n.type||'general'}</span>
+            <span class="section-badge badge-${n.type||'general'}">${noteTypeLabel(n.type)}</span>
             <strong style="font-size:12px">${sanitize(c?.fullName||'Unknown')}</strong>
             <span>${fmtdt(n.created)}</span>
             <span>${sanitize(n.worker||'')}</span>
@@ -5164,7 +5203,7 @@ function renderCultural() {
         cClients.map(c=>`<tr>
           <td style="cursor:pointer" onclick="openClientProfile('${c.id}')">${sanitize(c.fullName)}</td>
           <td>${sanitize(c.mob||'—')}</td><td>${sanitize(c.community||'—')}</td>
-          <td style="font-size:12px">${(c.cultGoals||'—').slice(0,60)}</td>
+          <td style="font-size:12px">${sanitize((c.cultGoals||'—').slice(0,60))}</td>
           <td><button class="btn btn-sm btn-outline" onclick="openClientProfile('${c.id}')">View</button></td>
         </tr>`).join('')
       }
@@ -5362,6 +5401,7 @@ function renderCultural() {
         c.aod      = progStr.includes('aod')      || defAod;
         c.justice  = progStr.includes('justice')  || defJustice;
         c.cultural = progStr.includes('cultural') || defCultural;
+        if (/\bmen'?s\b|mensgroup/.test(progStr)) { c.mensgroup = true; c.sewb = true; }
         c.disability = progStr.includes('disab')  || defDisab;
       }
 
@@ -5496,7 +5536,7 @@ function _rptRefresh() { if (currentPage === 'reports') showPage('reports'); }
 // Every report the Run button can open. [value, label] grouped for the menu.
 const REPORT_MENU = [
   ['Time & activity', [['activity','Activity & Time Report'],['workload','Workload & Caseload Report'],['caseload','Full Caseload Report']]],
-  ['Programs', [['sewb','SEWB Program Report'],['sewb-combined','SEWB Program Report (Combined)'],['aod','AOD Program Report'],['justice','Justice Program Report'],['cultural','Cultural Strengthening Report'],['disability','Disability Program Report'],['workfoundations','Work Foundations Report'],['allprograms','All Programs Combined Report']]],
+  ['Programs', [['sewb','SEWB Program Report'],['sewb-combined','SEWB Program Report (Combined)'],['aod','AOD Program Report'],['justice','Justice Program Report'],['cultural','Cultural Strengthening Report'],['mensgroup',"Men's Group Report"],['disability','Disability Program Report'],['workfoundations','Work Foundations Report'],['allprograms','All Programs Combined Report']]],
   ['Outcomes & feedback', [['outcomes','Client Outcomes (Board)'],['goals','Goals Progress Report'],['feedback','Client Feedback Summary'],['risk','Risk Register']]],
   ['Funding — episodes of care', [['fund:sewb','SEWB episodes of care'],['fund:aod','AOD episodes of care'],['fund:justice','Justice episodes of care'],['fund:all','All programs — episodes of care']]],
   ['Selected client', [['client-full','Full client report (choose a client above)']]],
@@ -5751,6 +5791,12 @@ function renderReportsPage() {
         <div class="rc-desc">All cultural clients, connection areas, goals, and activities</div>
         <span class="rc-badge" style="background:#fef3c7;color:#92400e">${clients.filter(c=>c.cultural).length} clients</span>
       </div>
+      <div class="report-card" onclick="generateProgramReport('mensgroup')">
+        <div class="rc-icon">🔥</div>
+        <div class="rc-title">Men's Group Report</div>
+        <div class="rc-desc">Men's Group participants, group sessions attended, goals and notes</div>
+        <span class="rc-badge" style="background:#ccfbf1;color:#115e59">${clients.filter(c=>c.mensgroup).length} clients</span>
+      </div>
       <div class="report-card" onclick="generateProgramReport('disability')">
         <div class="rc-icon">♿</div>
         <div class="rc-title">Disability Program Report</div>
@@ -5995,6 +6041,7 @@ function openQuickReport(type, clientId) {
   else if(type==='aod') openReport(buildAODClientReport(c));
   else if(type==='justice') openReport(buildJusticeClientReport(c));
   else if(type==='cultural') openReport(buildCulturalClientReport(c));
+  else if(type==='mensgroup') openReport(buildMensGroupClientReport(c));
   else if(type==='disability') openReport(buildDisabilityClientReport(c));
   else if(type==='workfoundations') openReport(buildWorkFoundationsClientReport(c));
   else if(type==='full') openReport(buildFullClientReport(c,'2000-01-01',today()));
@@ -6038,6 +6085,7 @@ function reportStyles() {
     .badge-aod { background:#fee2e2; color:#991b1b; }
     .badge-justice { background:#dbeafe; color:#1e40af; }
     .badge-cultural { background:#fef3c7; color:#92400e; }
+    .badge-mensgroup { background:#ccfbf1; color:#115e59; }
     .field-row { display:flex; gap:20px; margin-bottom:6px; flex-wrap:wrap; }
     .field { flex:1; min-width:160px; }
     .field label { font-size:10px; font-weight:700; color:#6b7280; text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:2px; }
@@ -6046,6 +6094,7 @@ function reportStyles() {
     .note-block.aod { border-left-color:#ef4444; }
     .note-block.justice { border-left-color:#3b82f6; }
     .note-block.cultural { border-left-color:#f59e0b; }
+    .note-block.mensgroup { border-left-color:#14b8a6; }
     .note-block.general { border-left-color:#9ca3af; }
     .note-meta { font-size:10px; color:#6b7280; margin-bottom:4px; }
     .domain-row { display:flex; align-items:center; gap:12px; padding:5px 0; border-bottom:1px solid #f0f0f0; }
@@ -6229,6 +6278,7 @@ function _bulkParseRows(raw) {
       aod:      l.includes('aod')||l.includes('alcohol')||l.includes('drug'),
       justice:  l.includes('justice')||l.includes('legal'),
       cultural: l.includes('cultur'),
+      mensgroup: /\bmen'?s\b|mens\s*group/.test(l),
       disability:l.includes('disab'),
     };
   };
@@ -6263,7 +6313,7 @@ function _bulkParseRows(raw) {
     if(obj.dob) obj.dob = normDob(obj.dob);
     if(obj.atsi) obj.atsi = normAtsi(obj.atsi);
     if(obj.gender) obj.gender = normGender(obj.gender);
-    if(obj.program) { const p=normPrograms(obj.program); Object.assign(obj,{sewb:p.sewb,aod:p.aod,justice:p.justice,cultural:p.cultural,disability:p.disability}); delete obj.program; }
+    if(obj.program) { const p=normPrograms(obj.program); Object.assign(obj,{sewb:p.sewb,aod:p.aod,justice:p.justice,cultural:p.cultural,mensgroup:p.mensgroup,disability:p.disability}); delete obj.program; }
     return obj;
   }).filter(Boolean);
   // Which source columns were read, and as what — so the update preview can say
@@ -6775,7 +6825,7 @@ function bulkImportPreview() {
       <tbody>
         ${rows.map((r,i)=>{
           const dup = already[i];
-          const progs = [r.sewb&&'SEWB',r.aod&&'AOD',r.justice&&'Justice',r.cultural&&'Cultural',r.disability&&'Disability'].filter(Boolean).join(', ')||'—';
+          const progs = [r.sewb&&'SEWB',r.aod&&'AOD',r.justice&&'Justice',r.cultural&&'Cultural',r.mensgroup&&"Men's Group",r.disability&&'Disability'].filter(Boolean).join(', ')||'—';
           return `<tr style="background:${dup?'#fef9c3':''}">
             <td style="padding:6px 8px;border:1px solid var(--border);color:var(--muted)">${i+1}</td>
             <td style="padding:6px 8px;border:1px solid var(--border);font-weight:600">${sanitize(r.fullName)}</td>
@@ -6817,7 +6867,7 @@ function bulkImportConfirm() {
       referralDate: r.referralDate || today(),
       referralReason: r.referralReason || '',
       sewb: r.sewb || false, aod: r.aod || false, justice: r.justice || false,
-      cultural: r.cultural || false, disability: r.disability || false,
+      cultural: r.cultural || false, mensgroup: r.mensgroup || false, disability: r.disability || false,
       attachments: [], goalPlan: [], caseNotes: [],
     };
     if (dest==='closed') { newClient.closedDate = today(); newClient.closedReason = 'Historical record — bulk import'; }
@@ -6851,6 +6901,7 @@ function generateReport(type) {
   else if(type==='aod') openReport(buildAODClientReport(c));
   else if(type==='justice') openReport(buildJusticeClientReport(c));
   else if(type==='cultural') openReport(buildCulturalClientReport(c));
+  else if(type==='mensgroup') openReport(buildMensGroupClientReport(c));
   else if(type==='disability') openReport(buildDisabilityClientReport(c));
   else if(type==='workfoundations') openReport(buildWorkFoundationsClientReport(c));
   else if(type==='intake') printIntake(id);
@@ -6864,7 +6915,7 @@ function buildFullClientReport(c, from, to) {
   const clientNotes = notes.filter(n=>n.clientId===c.id&&n.created>=from&&n.created<=to+'T23:59:59').sort((a,b)=>b.created.localeCompare(a.created));
   const clientTime = timeLogs.filter(t=>t.clientId===c.id&&t.date>=from&&t.date<=to);
   const totalMins = clientTime.reduce((a,t)=>a+(t.minutes||0),0);
-  const progs = [c.sewb&&'SEWB',c.aod&&'AOD',c.justice&&'Justice',c.cultural&&'Cultural Strengthening'].filter(Boolean);
+  const progs = [c.sewb&&'SEWB',c.aod&&'AOD',c.justice&&'Justice',c.cultural&&'Cultural Strengthening',c.mensgroup&&"Men's Group"].filter(Boolean);
   const age = c.dob ? Math.floor((Date.now()-new Date(c.dob))/(365.25*24*3600*1000)) : '?';
 
   return `
@@ -6925,6 +6976,7 @@ function buildFullClientReport(c, from, to) {
   ${c.aod ? buildAODClientReport(c, true) : ''}
   ${c.justice ? buildJusticeClientReport(c, true) : ''}
   ${c.cultural ? buildCulturalClientReport(c, true) : ''}
+  ${c.mensgroup ? buildMensGroupClientReport(c, true) : ''}
 
   <h2>Key Workers &amp; Support People</h2>
   ${(c.keyWorkers||[]).length===0 ? '<p>No key workers recorded</p>' : `
@@ -6935,7 +6987,7 @@ function buildFullClientReport(c, from, to) {
   <h2>Case Notes (${clientNotes.length}) — ${fmt(from)} to ${fmt(to)}</h2>
   ${clientNotes.length===0 ? '<p>No notes in this period</p>' :
     clientNotes.map(n=>`<div class="note-block ${sanitize(n.type||'general')}">
-      <div class="note-meta"><strong class="badge badge-${sanitize(n.type||'general')}">${(n.type||'general').toUpperCase()}</strong> &nbsp; ${fmtdt(n.created)} &nbsp;|&nbsp; ${sanitize(n.worker||'—')} &nbsp;|&nbsp; ${sanitize(n.contactType||'')} ${n.duration?'| '+n.duration+' min':''}</div>
+      <div class="note-meta"><strong class="badge badge-${sanitize(n.type||'general')}">${noteTypeLabel(n.type).toUpperCase()}</strong> &nbsp; ${fmtdt(n.created)} &nbsp;|&nbsp; ${sanitize(n.worker||'—')} &nbsp;|&nbsp; ${sanitize(n.contactType||'')} ${n.duration?'| '+n.duration+' min':''}</div>
       <p>${sanitize(n.text||'').replace(/\n/g,'<br>')}</p>
       ${n.followup?`<p style="margin-top:6px;color:#6b7280"><strong>Follow-up:</strong> ${sanitize(n.followup)}</p>`:''}
     </div>`).join('')
@@ -7066,6 +7118,95 @@ function buildCulturalClientReport(c, inline) {
   <h3>Cultural Case Notes (${cNotes.length})</h3>
   ${cNotes.length===0 ? '<p>No cultural notes recorded</p>' :
     cNotes.map(n=>`<div class="note-block cultural">
+      <div class="note-meta">${fmtdt(n.created)} | ${sanitize(n.worker||'—')} | ${sanitize(n.contactType||'')}</div>
+      <p>${sanitize(n.text||'').replace(/\n/g,'<br>')}</p>
+    </div>`).join('')}`;
+}
+
+// ---- MEN'S GROUP (a SEWB sub-program) ----
+// Group sessions attended = the client's Men's Group notes; time = time logged
+// to the Men's Group program. Both feed the reports and the SEWB combined report.
+function mensGroupStats(c, from, to) {
+  const inRange = d => (!from || d >= from) && (!to || d <= to + 'T23:59:59');
+  const ns = notes.filter(n => n.clientId === c.id && n.type === 'mensgroup' && inRange(n.created || ''));
+  const mins = timeLogs.filter(t => t.clientId === c.id && timeLogProgram(t) === 'mensgroup' && inRange((t.date || '') + 'T12:00')).reduce((a, t) => a + (+t.minutes || 0), 0);
+  const last = ns.map(n => n.created).sort().pop() || '';
+  return { sessions: ns.length, minutes: mins, last, notes: ns };
+}
+function saveMensGroup(id) {
+  const c = clients.find(cl=>cl.id===id); if(!c) return;
+  const v = k => document.getElementById(k)?.value || '';
+  c.mgJoined = v('mg-joined'); c.mgGoals = v('mg-goals'); c.mgInterests = v('mg-interests');
+  c.mgSupports = v('mg-supports'); c.mgSafety = v('mg-safety');
+  audit("Updated Men's Group details", c.fullName || '', id);
+  saveAll(); showToast("Men's Group details saved");
+}
+function renderMensGroup() {
+  const mc = visibleClients(clients).filter(c=>c.mensgroup);
+  const monthStart = today().slice(0,8) + '01';
+  const sessThisMonth = notes.filter(n=>n.type==='mensgroup' && (n.created||'') >= monthStart && mc.some(c=>c.id===n.clientId)).length;
+  return `
+  <div class="alert alert-info">🔥 Men's Group sits under SEWB. A yarning and support space for men — connection, wellbeing, culture and mutual support. Group sessions are recorded as Men's Group notes on each participant's file; time logged to the Men's Group program is reported with it.</div>
+  <div class="grid-4" style="margin-bottom:20px">
+    <div class="stat-card"><div class="label">Men's Group Participants</div><div class="value" style="color:#0f766e">${mc.length}</div></div>
+    <div class="stat-card"><div class="label">Active</div><div class="value">${mc.filter(c=>(c.status||'active')==='active').length}</div></div>
+    <div class="stat-card"><div class="label">Group Notes This Month</div><div class="value">${sessThisMonth}</div></div>
+    <div class="stat-card"><div class="label">High Risk</div><div class="value" style="color:var(--danger)">${mc.filter(c=>c.riskLevel==='high').length}</div></div>
+  </div>
+  <div class="card" style="padding:0;overflow:hidden">
+    <div style="padding:16px 20px;font-weight:600;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">Men's Group Participants
+      <button class="btn btn-sm btn-outline" onclick="generateProgramReport('mensgroup')">📊 Men's Group Report</button></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Client</th><th>Joined</th><th>Sessions</th><th>Last attended</th><th>Goals</th><th></th></tr></thead>
+      <tbody>
+      ${mc.length===0?`<tr><td colspan="6"><div class="empty-state"><div class="icon">🔥</div><p>No Men's Group participants yet — tick "SEWB – Men's Group" on a client's details, or use Add to program on their file.</p></div></td></tr>`:
+        mc.map(c=>{ const st=mensGroupStats(c); return `<tr>
+          <td style="cursor:pointer" onclick="openClientProfile('${sanitize(c.id)}','mensgroup')">${sanitize(c.fullName)}</td>
+          <td>${c.mgJoined?fmt(c.mgJoined):'—'}</td><td>${st.sessions}</td><td>${st.last?fmt(st.last):'—'}</td>
+          <td style="font-size:12px">${sanitize((c.mgGoals||'—').slice(0,60))}</td>
+          <td><button class="btn btn-sm btn-outline" onclick="openClientProfile('${sanitize(c.id)}','mensgroup')">View</button></td>
+        </tr>`; }).join('')}
+      </tbody>
+    </table></div>
+  </div>`;
+}
+function buildMensGroupProgramReport(from, to) {
+  const cl = clients.filter(c=>c.mensgroup);
+  const rows = cl.map(c=>({ c, st: mensGroupStats(c, from, to) }));
+  const totalSess = rows.reduce((a,r)=>a+r.st.sessions,0), totalMin = rows.reduce((a,r)=>a+r.st.minutes,0);
+  return `
+  ${reportHeader("Men's Group Program Report",`Period: ${fmt(from)} — ${fmt(to)} · SEWB sub-program`)}
+  <div class="stat-row">
+    <div class="stat-box"><div class="sv">${cl.length}</div><div class="sl">Participants</div></div>
+    <div class="stat-box"><div class="sv">${cl.filter(c=>(c.status||'active')==='active').length}</div><div class="sl">Active</div></div>
+    <div class="stat-box"><div class="sv">${rows.filter(r=>r.st.sessions>0).length}</div><div class="sl">Attended in period</div></div>
+    <div class="stat-box"><div class="sv">${totalSess}</div><div class="sl">Group notes</div></div>
+    <div class="stat-box"><div class="sv">${Math.floor(totalMin/60)}h ${totalMin%60}m</div><div class="sl">Time logged</div></div>
+  </div>
+  <h2>Participants</h2>
+  <table><tr><th>Client</th><th>Community</th><th>Joined</th><th>Sessions (period)</th><th>Last attended</th><th>Goals</th><th>Risk</th></tr>
+  ${rows.map(({c,st})=>`<tr><td>${sanitize(c.fullName)}</td><td>${sanitize(c.community||'—')}</td><td>${c.mgJoined?fmt(c.mgJoined):'—'}</td><td>${st.sessions}</td><td>${st.last?fmt(st.last):'—'}</td><td style="font-size:10px">${sanitize((c.mgGoals||'—').slice(0,50))}</td><td><span class="badge badge-${sanitize(c.riskLevel||'low')}">${sanitize((c.riskLevel||'low').toUpperCase())}</span></td></tr>`).join('')}
+  </table>
+  ${programReportNotesPointer()}`;
+}
+function buildMensGroupClientReport(c, inline) {
+  const st = mensGroupStats(c);
+  const ns = st.notes.slice().sort((a,b)=>(b.created||'').localeCompare(a.created||''));
+  return `
+  ${inline ? '' : reportHeader("Men's Group Report", 'Participation & Progress', c.fullName)}
+  <h2>🔥 Men's Group</h2>
+  <table>
+    <tr><td>Joined</td><td>${c.mgJoined?fmt(c.mgJoined):'—'}</td></tr>
+    <tr><td>Group sessions recorded</td><td>${st.sessions}${st.last?' · last '+fmt(st.last):''}</td></tr>
+    <tr><td>Time logged</td><td>${Math.floor(st.minutes/60)}h ${st.minutes%60}m</td></tr>
+    <tr><td>Goals</td><td>${sanitize(c.mgGoals||'—')}</td></tr>
+    <tr><td>Interests / topics</td><td>${sanitize(c.mgInterests||'—')}</td></tr>
+    <tr><td>Facilitators / Elders / mentors</td><td>${sanitize(c.mgSupports||'—')}</td></tr>
+    <tr><td>Safety considerations</td><td>${sanitize(c.mgSafety||'—')}</td></tr>
+  </table>
+  <h3>Men's Group Notes (${ns.length})</h3>
+  ${ns.length===0 ? "<p>No Men's Group notes recorded</p>" :
+    ns.map(n=>`<div class="note-block mensgroup">
       <div class="note-meta">${fmtdt(n.created)} | ${sanitize(n.worker||'—')} | ${sanitize(n.contactType||'')}</div>
       <p>${sanitize(n.text||'').replace(/\n/g,'<br>')}</p>
     </div>`).join('')}`;
@@ -7246,6 +7387,7 @@ function _buildProgramReport(type, from, to) {
   else if(type==='aod') return (buildAODProgramReport(from, to));
   else if(type==='justice') return (buildJusticeProgramReport(from, to));
   else if(type==='cultural') return (buildCulturalProgramReport(from, to));
+  else if(type==='mensgroup') return (buildMensGroupProgramReport(from, to));
   else if(type==='disability') return (buildDisabilityProgramReport(from, to));
   else if(type==='workfoundations') return (buildWorkFoundationsProgramReport(from, to));
   else if(type==='allprograms') return (buildAllProgramsReport(from, to));
@@ -7289,7 +7431,7 @@ function currentFY(ref){
 // Programs whose LOGGED TIME counts toward an episode of care. First Peoples
 // Home Ownership is separately funded and is deliberately excluded, so FPHO
 // time never contributes to this target.
-const EOC_TIME_PROGRAMS = ['sewb','aod','justice','cultural','disability','workfoundations'];
+const EOC_TIME_PROGRAMS = ['sewb','aod','justice','cultural','mensgroup','disability','workfoundations'];
 const EOC_EXCLUDED_PROGRAMS = ['fpho','homeownership'];
 
 // Which program a time entry belongs to — using only EXPLICIT labels.
@@ -7655,6 +7797,7 @@ function buildAllProgramsReport(from, to) {
     { key:'aod',            label:'AOD',                     icon:'🔴', filter:c=>c.aod,            color:'#fee2e2' },
     { key:'justice',        label:'Justice',                 icon:'⚖️', filter:c=>c.justice,        color:'#dbeafe' },
     { key:'cultural',       label:'Cultural Strengthening',  icon:'🌀', filter:c=>c.cultural,       color:'#fef3c7' },
+    { key:'mensgroup',      label:"Men's Group",            icon:'🔥', filter:c=>c.mensgroup,      color:'#ccfbf1' },
     { key:'disability',     label:'Disability',              icon:'♿', filter:c=>c.disability,     color:'#f3e8ff' },
     { key:'workfoundations',label:'Work Foundations',        icon:'💼', filter:c=>c.workFoundations, color:'#e0f2fe' },
   ];
@@ -7823,6 +7966,7 @@ const SEWB_UMBRELLA_SUBGROUPS = [
   { key:'aod',      label:'AOD' },
   { key:'justice',  label:'Justice' },
   { key:'cultural', label:'Cultural Strengthening' },
+  { key:'mensgroup', label:"Men's Group" },
 ];
 function buildSEWBCombinedReport(from, to) {
   const isOpen = c => (c.status||'active') !== 'closed';
@@ -7957,12 +8101,13 @@ function buildCaseloadReport(from, to) {
     <div class="stat-box"><div class="sv">${clients.filter(c=>c.aod).length}</div><div class="sl">AOD</div></div>
     <div class="stat-box"><div class="sv">${clients.filter(c=>c.justice).length}</div><div class="sl">Justice</div></div>
     <div class="stat-box"><div class="sv">${clients.filter(c=>c.cultural).length}</div><div class="sl">Cultural Strengthening</div></div>
+    <div class="stat-box"><div class="sv">${clients.filter(c=>c.mensgroup).length}</div><div class="sl">Men's Group</div></div>
   </div>
   <h2>Active Clients</h2>
   <table><tr><th>Client</th><th>DOB/Age</th><th>Mob/Community</th><th>Programs</th><th>Key Worker</th><th>Risk</th><th>Open Since</th></tr>
   ${[...active].sort((a,b)=>a.fullName?.localeCompare(b.fullName)).map(c=>{
     const age=c.dob?Math.floor((Date.now()-new Date(c.dob))/(365.25*24*3600*1000)):'?';
-    const progs=[c.sewb&&'S',c.aod&&'A',c.justice&&'J',c.cultural&&'C'].filter(Boolean).join('/');
+    const progs=[c.sewb&&'S',c.aod&&'A',c.justice&&'J',c.cultural&&'C',c.mensgroup&&'M'].filter(Boolean).join('/');
     return `<tr><td><strong>${sanitize(c.fullName)}</strong></td><td>${sanitize(c.dob||'—')} (${age})</td><td>${sanitize(c.mob||'—')} / ${sanitize(c.community||'—')}</td><td>${sanitize(progs||'—')}</td><td>${sanitize(c.keyWorker||'—')}</td><td><span class="badge badge-${sanitize(c.riskLevel||'low')}">${(c.riskLevel||'low').toUpperCase()}</span></td><td>${fmt(c.created)}</td></tr>`;
   }).join('')}
   </table>
@@ -7970,7 +8115,7 @@ function buildCaseloadReport(from, to) {
   <h2>Closed Clients</h2>
   <table><tr><th>Client</th><th>Programs</th><th>Risk</th><th>Open Since</th></tr>
   ${clients.filter(c=>c.status==='closed').map(c=>{
-    const progs=[c.sewb&&'SEWB',c.aod&&'AOD',c.justice&&'Justice',c.cultural&&'Cultural'].filter(Boolean).join(', ');
+    const progs=[c.sewb&&'SEWB',c.aod&&'AOD',c.justice&&'Justice',c.cultural&&'Cultural',c.mensgroup&&"Men's Group"].filter(Boolean).join(', ');
     return `<tr><td>${sanitize(c.fullName)}</td><td>${sanitize(progs||'—')}</td><td><span class="badge badge-${sanitize(c.riskLevel||'low')}">${(c.riskLevel||'low').toUpperCase()}</span></td><td>${fmt(c.created)}</td></tr>`;
   }).join('')}
   </table>` : ''}`;
@@ -8044,7 +8189,7 @@ function buildRiskRegister() {
   <table>
     <tr><th>Client</th><th>Risk</th><th>Programs</th><th>Key Worker</th><th>Safety Plan</th><th>Next Review</th><th>Emergency Contact</th></tr>
     ${atRisk.map(c=>{
-      const progs=[c.sewb&&'SEWB',c.aod&&'AOD',c.justice&&'Justice',c.cultural&&'Cultural'].filter(Boolean).join(', ');
+      const progs=[c.sewb&&'SEWB',c.aod&&'AOD',c.justice&&'Justice',c.cultural&&'Cultural',c.mensgroup&&"Men's Group"].filter(Boolean).join(', ');
       return `<tr>
         <td><strong>${sanitize(c.fullName)}</strong><br><span style="font-size:10px;color:#6b7280">${sanitize(c.community||'')} ${c.mob?'· '+sanitize(c.mob):''}</span></td>
         <td><span class="badge badge-${sanitize(c.riskLevel)}">${c.riskLevel.toUpperCase()}</span></td>
@@ -8870,7 +9015,7 @@ function renderReferralCard(r) {
         <div class="rc-meta" style="margin-top:4px">
           <strong>Referred by:</strong> ${sanitize(r.referralSource||'—')} &bull;
           <strong>Received:</strong> ${fmt(r.created)} &bull;
-          <strong>Programs:</strong> ${[r.sewb&&'SEWB',r.aod&&'AOD',r.justice&&'Justice',r.cultural&&'Cultural'].filter(Boolean).join(', ')||'TBC'}
+          <strong>Programs:</strong> ${[r.sewb&&'SEWB',r.aod&&'AOD',r.justice&&'Justice',r.cultural&&'Cultural',r.mensgroup&&"Men's Group"].filter(Boolean).join(', ')||'TBC'}
         </div>
         ${r.referralReason?`<div style="font-size:12px;margin-top:6px;color:var(--text);line-height:1.5">${sanitize(r.referralReason.slice(0,180))}${r.referralReason.length>180?'…':''}</div>`:''}
         ${r.allocatedTo?`<div style="margin-top:6px;font-size:12px"><span style="background:#dbeafe;color:#1e40af;padding:2px 8px;border-radius:12px;font-weight:600">👷 ${sanitize(r.allocatedTo)}</span></div>`:''}
@@ -8978,7 +9123,7 @@ function openReferralModal(id) {
 
   <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin:14px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)">Programs Requested</div>
   <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:14px">
-    ${[['sewb','💚 SEWB'],['aod','🔴 AOD'],['justice','⚖️ Justice'],['cultural','🌀 Cultural Strengthening'],['ndis','🟣 NDIS'],['employment','💼 Work Foundations']].map(([k,l])=>`<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="checkbox" id="rf-${k}" ${r?.[k]?'checked':''}> ${l}</label>`).join('')}
+    ${[['sewb','💚 SEWB'],['aod','🔴 AOD'],['justice','⚖️ Justice'],['cultural','🌀 Cultural Strengthening'],['mensgroup',"🔥 Men's Group"],['ndis','🟣 NDIS'],['employment','💼 Work Foundations']].map(([k,l])=>`<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="checkbox" id="rf-${k}" ${r?.[k]?'checked':''}> ${l}</label>`).join('')}
   </div>
 
   <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin:14px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)">Risk &amp; Safety</div>
@@ -9014,6 +9159,7 @@ function openReferralModal(id) {
       aod: document.getElementById('rf-aod')?.checked,
       justice: document.getElementById('rf-justice')?.checked,
       cultural: document.getElementById('rf-cultural')?.checked,
+      mensgroup: document.getElementById('rf-mensgroup')?.checked,
       ndis: document.getElementById('rf-ndis')?.checked,
       employment: document.getElementById('rf-employment')?.checked,
     };
@@ -9074,7 +9220,7 @@ function openAllocateModal(id) {
   <div class="form-group"><label>Allocate to Worker *</label>${workerSelectHTML('al-worker','al-worker-new', r.allocatedTo||'')}</div>
   <div class="form-group"><label>Programs to Assign</label>
     <div style="display:flex;gap:16px;flex-wrap:wrap;padding:6px 0">
-      ${[['sewb','💚 SEWB'],['aod','🔴 AOD'],['justice','⚖️ Justice'],['cultural','🌀 Cultural']].map(([k,l])=>`<label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer"><input type="checkbox" id="al-${k}" ${r[k]?'checked':''}> ${l}</label>`).join('')}
+      ${[['sewb','💚 SEWB'],['aod','🔴 AOD'],['justice','⚖️ Justice'],['cultural','🌀 Cultural'],['mensgroup',"🔥 Men's Group"]].map(([k,l])=>`<label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer"><input type="checkbox" id="al-${k}" ${r[k]?'checked':''}> ${l}</label>`).join('')}
     </div>
   </div>
   <div class="form-group"><label>Allocation Notes</label><textarea id="al-notes" style="min-height:70px" placeholder="Reason for allocation, priorities, client background to be aware of…">${sanitize(r.allocationNotes||'')}</textarea></div>
@@ -9090,6 +9236,7 @@ function openAllocateModal(id) {
     r.aod   = document.getElementById('al-aod')?.checked;
     r.justice = document.getElementById('al-justice')?.checked;
     r.cultural = document.getElementById('al-cultural')?.checked;
+    r.mensgroup = document.getElementById('al-mensgroup')?.checked;
     r.status = 'allocated';
     if(!r.actions) r.actions=[];
     r.actions.push({ id:uid(), type:'Allocated', text:`Allocated to ${worker}. ${r.allocationNotes||''}`, worker:'System', date:today() });
@@ -9144,7 +9291,7 @@ function convertToClient(id) {
     atsi:r.atsi||'', riskLevel:r.riskLevel||'medium',
     referralSource:r.referralSource||'', referralDate:r.created?.split('T')[0]||today(),
     referralReason:r.referralReason||'', keyWorker:r.allocatedTo||'',
-    sewb:r.sewb||false, aod:r.aod||false, justice:r.justice||false, cultural:r.cultural||false,
+    sewb:r.sewb||false, aod:r.aod||false, justice:r.justice||false, cultural:r.cultural||false, mensgroup:r.mensgroup||false,
     ndis:r.ndis||false, clientId:ref,
     attachments:[], keyWorkers: r.allocatedTo ? [{name:r.allocatedTo, role:'Key Worker', primary:true, consentShare:true, startDate:today()}] : [],
   };
@@ -9203,6 +9350,7 @@ function renderSessions() {
     .session-card.aod   { border-left-color:#ef4444; }
     .session-card.justice { border-left-color:#3b82f6; }
     .session-card.cultural { border-left-color:#f59e0b; }
+    .session-card.mensgroup { border-left-color:#14b8a6; }
     .session-card.disability { border-left-color:#8b5cf6; }
     .session-card.workfoundations { border-left-color:#d97706; }
     .session-card.general { border-left-color:#9ca3af; }
@@ -9223,7 +9371,7 @@ function renderSessions() {
 
   <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center">
     <span style="font-size:12px;font-weight:600;color:var(--muted)">Filter:</span>
-    ${['all','sewb','aod','justice','cultural','disability','workfoundations','general'].map(t=>`<button class="btn btn-sm btn-outline" onclick="filterSessions('${t}')" id="sf-${t}">${t==='all'?'All':t.toUpperCase()}</button>`).join('')}
+    ${['all','sewb','aod','justice','cultural','mensgroup','disability','workfoundations','general'].map(t=>`<button class="btn btn-sm btn-outline" onclick="filterSessions('${t}')" id="sf-${t}">${t==='all'?'All':noteTypeLabel(t).toUpperCase()}</button>`).join('')}
     <div style="flex:1"></div>
     <div class="search-bar" style="position:relative">
       <span class="search-icon">🔍</span>
@@ -9245,7 +9393,7 @@ function renderSessions() {
           <div style="flex:1;min-width:0">
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
               ${cl?`<span style="font-weight:700;font-size:14px;cursor:pointer" onclick="openClientProfile('${cl.id}')">${sanitize(cl.fullName)}</span>`:'<span style="color:var(--muted)">No client</span>'}
-              <span class="section-badge badge-${n.type||'general'}">${(n.type||'general').toUpperCase()}</span>
+              <span class="section-badge badge-${n.type||'general'}">${noteTypeLabel(n.type).toUpperCase()}</span>
               ${tl||n.duration?`<span class="time-chip">${tl?.minutes||n.duration||0} min</span>`:''}
               ${locked?'<span style="font-size:11px;color:var(--muted)">🔒 Locked</span>':''}
             </div>
@@ -9428,7 +9576,7 @@ function openSessionModal(clientId, defaultType) {
     <div class="form-group"><label>Client *</label><select id="sm-client">${clientOpts}</select></div>
     <div class="form-group"><label>Session Type</label>
       <select id="sm-type" onchange="smToggleNDIS()">
-        ${['general','sewb','aod','justice','cultural','disability','workfoundations'].map(t=>`<option value="${sanitize(t)}" ${t===(defaultType||'general')?'selected':''}>${t==='workfoundations'?'WORK FOUNDATIONS':t.toUpperCase()}</option>`).join('')}
+        ${['general','sewb','aod','justice','cultural','mensgroup','disability','workfoundations'].map(t=>`<option value="${sanitize(t)}" ${t===(defaultType||'general')?'selected':''}>${noteTypeLabel(t).toUpperCase()}</option>`).join('')}
       </select>
     </div>
     <div class="form-group"><label>Contact Type</label>
@@ -9592,7 +9740,7 @@ function openSessionModal(clientId, defaultType) {
       // Add to calendar if checked
       if(document.getElementById('sm-addtocal')?.checked && clientId) {
         const cl=clients.find(c=>c.id===clientId);
-        const typeMap={sewb:'appointment',aod:'aod',justice:'justice',cultural:'cultural',disability:'appointment',workfoundations:'appointment',general:'appointment'};
+        const typeMap={sewb:'appointment',aod:'aod',justice:'justice',cultural:'cultural',mensgroup:'group',disability:'appointment',workfoundations:'appointment',general:'appointment'};
         calEvents.push({ id:uid(), type:typeMap[type]||'appointment',
           title:`${contact||'Session'} — ${sanitize(cl?.fullName||'Client')}`,
           clientId, date:noteDateStr, startTime:`${startH}:${startM}`,
@@ -9609,7 +9757,7 @@ function openSessionModal(clientId, defaultType) {
       saveReminders();
     }
 
-    audit('Logged session', `${(n.type||'general').toUpperCase()} — ${n.contactType||''} ${mins>0?'('+mins+' min)':''}`, clientId);
+    audit('Logged session', `${noteTypeLabel(n.type).toUpperCase()} — ${n.contactType||''} ${mins>0?'('+mins+' min)':''}`, clientId);
     saveAll(); showToast(`Session logged${mins>0?' + '+mins+' min time':''}${attachMsg}${billedMsg}`);
     if(_billedClaim) ndisGenerateInvoice(_billedClaim.clientId, _billedClaim.claim);
     // Saved for real — the draft has done its job.
@@ -9843,7 +9991,7 @@ function openWalkinModal() {
     </div>
     <div class="form-group"><label>Programs of Interest</label>
       <div style="display:flex;gap:10px;flex-wrap:wrap;padding:6px 0">
-        ${['SEWB','AOD','Justice','Cultural','Disability','Work Foundations','NDIS'].map(p=>`<label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer"><input type="checkbox" class="wi-prog" value="${sanitize(p)}"> ${p}</label>`).join('')}
+        ${['SEWB','AOD','Justice','Cultural',"Men's Group",'Disability','Work Foundations','NDIS'].map(p=>`<label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer"><input type="checkbox" class="wi-prog" value="${sanitize(p)}"> ${p}</label>`).join('')}
       </div>
     </div>
   </div>`;
@@ -9883,7 +10031,7 @@ function convertWalkin(id) {
     riskLevel:'medium', referralSource:'Walk-in', referralDate:w.date, referralReason:w.reason||'',
     keyWorker:w.worker||'', attachments:[], goalPlan:[],
     sewb:w.programs?.includes('SEWB'), aod:w.programs?.includes('AOD'),
-    justice:w.programs?.includes('Justice'), cultural:w.programs?.includes('Cultural'),
+    justice:w.programs?.includes('Justice'), cultural:w.programs?.includes('Cultural'), mensgroup:w.programs?.includes("Men's Group"),
     disability:w.programs?.includes('Disability'), clientId:'WI-'+id.slice(-6).toUpperCase() };
   applySewbUmbrella(nc);
   clients.push(nc); w.converted=true; w.convertedClientId=nc.id;
@@ -13966,7 +14114,7 @@ function _allNotesList() {
   const rows = filtered.slice(0, shown).map(n=>{
       const c = clients.find(cl=>cl.id===n.clientId);
       return `<div class="note-entry ${n.type||'general'}" style="margin-bottom:10px;cursor:pointer" onclick="openClientProfile('${n.clientId}')">
-        <div class="note-meta"><span class="section-badge badge-${n.type||'general'}">${n.type||'general'}</span><span style="font-weight:600">${sanitize(c?.fullName||'Unknown client')}</span><span>${sanitize(n.worker||n.author||'Staff')}</span><span>${fmtdt(n.created)}</span></div>
+        <div class="note-meta"><span class="section-badge badge-${n.type||'general'}">${noteTypeLabel(n.type)}</span><span style="font-weight:600">${sanitize(c?.fullName||'Unknown client')}</span><span>${sanitize(n.worker||n.author||'Staff')}</span><span>${fmtdt(n.created)}</span></div>
         <div class="note-text">${noteBodyHTML(n)}</div>
       </div>`;
     }).join('');
@@ -13984,8 +14132,8 @@ function _resetNotesPaging(){ _notesShown = NOTES_PAGE; }
 function _setNotesType(t) { _notesTypeFilter = t; _resetNotesPaging(); document.querySelectorAll('.notes-type-chip').forEach(b=>{ b.className='notes-type-chip btn btn-sm '+(b.dataset.t===t?'btn-primary':'btn-outline'); }); _filterAllNotes(); }
 function renderAllNotes() {
   _resetNotesPaging();
-  const types = ['all','general','sewb','aod','justice','cultural','disability'];
-  const chip = t => `<button class="notes-type-chip btn btn-sm ${_notesTypeFilter===t?'btn-primary':'btn-outline'}" data-t="${t}" onclick="_setNotesType('${t}')" style="text-transform:capitalize">${t==='all'?'All types':t}</button>`;
+  const types = ['all','general','sewb','aod','justice','cultural','mensgroup','disability'];
+  const chip = t => `<button class="notes-type-chip btn btn-sm ${_notesTypeFilter===t?'btn-primary':'btn-outline'}" data-t="${t}" onclick="_setNotesType('${t}')" style="text-transform:capitalize">${t==='all'?'All types':noteTypeLabel(t)}</button>`;
   return `
   <div class="card" style="margin-bottom:16px">
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
@@ -15284,7 +15432,7 @@ function canAccess(feature) {
 const RESTRICTABLE_PAGES = {
   referrals:'Referral Holding Bay', clients:'Clients', closedclients:'Closed Clients',
   sessions:'Session Log', sewb:'SEWB Program', aod:'AOD Program', justice:'Justice Program',
-  cultural:'Cultural Strengthening', disability:'Disability Program',
+  cultural:'Cultural Strengthening', mensgroup:"Men's Group", disability:'Disability Program',
   workfoundations:'Work Foundations', homeownership:'First Peoples Home Ownership',
   policies:'Policies & Procedures', calendar:'Calendar', resources:'Resources', reports:'Reports', auditlog:'Audit Log',
 };
@@ -16794,7 +16942,7 @@ function corePlusProgram(type) {
   if (t.includes('homeownership') || t === 'fpho') return 'fpho';
   return '';
 }
-const CP_PROGRAM_LABEL = { sewb:'SEWB', aod:'AOD', justice:'Justice', cultural:'Cultural', disability:'NDIS / Disability', workfoundations:'Work Foundations', fpho:'Home Ownership', '':'Not program-specific' };
+const CP_PROGRAM_LABEL = { sewb:'SEWB', aod:'AOD', justice:'Justice', cultural:'Cultural', mensgroup:"Men's Group", disability:'NDIS / Disability', workfoundations:'Work Foundations', fpho:'Home Ownership', '':'Not program-specific' };
 
 // ---- the plan ----
 function corePlusTable(rows) {
@@ -17111,7 +17259,7 @@ function buildFunderReport(funder, from, to) {
 
   const genderBreakdown={};
   active.forEach(c=>{const g=c.gender||'Not recorded';genderBreakdown[g]=(genderBreakdown[g]||0)+1;});
-  const programBreakdown={SEWB:active.filter(c=>c.sewb).length,AOD:active.filter(c=>c.aod).length,Justice:active.filter(c=>c.justice).length,Cultural:active.filter(c=>c.cultural).length,'Work Foundations':active.filter(c=>c.employment||c.wf?.hasESP).length};
+  const programBreakdown={SEWB:active.filter(c=>c.sewb).length,AOD:active.filter(c=>c.aod).length,Justice:active.filter(c=>c.justice).length,Cultural:active.filter(c=>c.cultural).length,"Men's Group":active.filter(c=>c.mensgroup).length,'Work Foundations':active.filter(c=>c.employment||c.wf?.hasESP).length};
   const ageGroups={'0-17':0,'18-24':0,'25-34':0,'35-44':0,'45-54':0,'55+':0,'Unknown':0};
   active.forEach(c=>{
     if(!c.dob){ageGroups['Unknown']++;return;}
