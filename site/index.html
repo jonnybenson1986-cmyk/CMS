@@ -805,9 +805,9 @@ const FSYNC = (() => {
     try { const f = await col('fpho').doc('list').get(); if(f.exists){ const d=f.data();
       if(Array.isArray(d.clients)){ fphoClients=d.clients; DB.save('fphoClients',fphoClients); }
       if(Array.isArray(d.applications)){ fphoApplications=d.applications; DB.save('fphoApplications',fphoApplications); } } } catch(e){}
-    try { const w2 = await col('walkins').doc('list').get(); const l=w2.exists?w2.data().list:null; if(Array.isArray(l)){ walkins=l; DB.save('walkins',walkins); } } catch(e){}
-    try { const ce = await col('calevents').doc('list').get(); const l=ce.exists?ce.data().list:null; if(Array.isArray(l)){ calEvents=l; DB.save('calevents',calEvents); } } catch(e){}
-    try { const rs2 = await col('resources').doc('list').get(); const l=rs2.exists?rs2.data().list:null; if(Array.isArray(l)){ resources=l; DB.save('resources',resources); } } catch(e){}
+    try { const w2 = await col('walkins').doc('list').get(); const l=w2.exists?w2.data().list:null; if(Array.isArray(l)){ walkins=_keep(walkins,l); DB.save('walkins',walkins); } } catch(e){}
+    try { const ce = await col('calevents').doc('list').get(); const l=ce.exists?ce.data().list:null; if(Array.isArray(l)){ calEvents=_keep(calEvents,l); DB.save('calevents',calEvents); } } catch(e){}
+    try { const rs2 = await col('resources').doc('list').get(); const l=rs2.exists?rs2.data().list:null; if(Array.isArray(l)){ resources=_keep(resources,l); DB.save('resources',resources); } } catch(e){}
     // QA H4 — the audit log was write-only: pushed but never pulled, so each
     // device only ever showed its own entries. Merge in the most recent 2000.
     try { const al = await col('auditlog').orderBy('ts','desc').limit(2000).get();
@@ -818,10 +818,10 @@ const FSYNC = (() => {
         DB.save('auditlog', auditLog); } } catch(e){ console.warn('Audit pull:', e.message); }
     // _live() drops tombstoned records (QA C2); _seedHashes records what the
     // cloud already holds so the next save doesn't re-upload everything (QA H1).
-    if (!cs.empty) { clients = _live(cs.docs.map(d=>d.data())); DB.save('clients',clients); _seedHashes('clients', cs.docs); }
-    if (!ns.empty) { notes   = _live(ns.docs.map(d=>d.data())); DB.save('notes',notes); _seedHashes('notes', ns.docs); }
-    if (!ts.empty) { timeLogs= _live(ts.docs.map(d=>d.data())); DB.save('timelogs',timeLogs); _seedHashes('timelogs', ts.docs); }
-    if (!rs.empty) { referrals=_live(rs.docs.map(d=>d.data())); DB.save('referrals',referrals); _seedHashes('referrals', rs.docs); }
+    if (!cs.empty) { clients = _keep(clients, _live(cs.docs.map(d=>d.data()))); DB.save('clients',clients); _seedHashes('clients', cs.docs); }
+    if (!ns.empty) { notes   = _keep(notes, _live(ns.docs.map(d=>d.data()))); DB.save('notes',notes); _seedHashes('notes', ns.docs); }
+    if (!ts.empty) { timeLogs= _keep(timeLogs, _live(ts.docs.map(d=>d.data()))); DB.save('timelogs',timeLogs); _seedHashes('timelogs', ts.docs); }
+    if (!rs.empty) { referrals=_keep(referrals, _live(rs.docs.map(d=>d.data()))); DB.save('referrals',referrals); _seedHashes('referrals', rs.docs); }
     if (!ws.empty) { const w=ws.docs[0]?.data()?.list; if(w){workersList=w;DB.save('workersList',workersList);} }
     if (!wks.empty){ const t=wks.docs[0]?.data()?.list; if(t){workflowTasks=t;DB.save('workflowTasks',workflowTasks);} }
   }
@@ -842,12 +842,12 @@ const FSYNC = (() => {
       if (snap.empty && snap.metadata.fromCache) return false; // cold/offline cache — not truth
       return true;
     };
-    _listeners.push(col('clients').onSnapshot(snap=>{ if(!trust(snap))return; clients=_live(snap.docs.map(d=>d.data()));DB.save('clients',clients);
+    _listeners.push(col('clients').onSnapshot(snap=>{ if(!trust(snap))return; clients=_keep(clients,_live(snap.docs.map(d=>d.data())));DB.save('clients',clients);
       try { if (typeof migrateSewbUmbrella === 'function') migrateSewbUmbrella('live sync'); } catch(e){ console.warn('SEWB umbrella:', e.message); }
       refresh(); }, e=>console.warn('clients listener:',e.message)));
-    _listeners.push(col('notes').onSnapshot(snap=>{ if(!trust(snap))return; notes=_live(snap.docs.map(d=>d.data()));DB.save('notes',notes); }, e=>console.warn('notes listener:',e.message)));
-    _listeners.push(col('timelogs').onSnapshot(snap=>{ if(!trust(snap))return; timeLogs=_live(snap.docs.map(d=>d.data()));DB.save('timelogs',timeLogs); }, e=>console.warn('timelogs listener:',e.message)));
-    _listeners.push(col('referrals').onSnapshot(snap=>{ if(!trust(snap))return; referrals=_live(snap.docs.map(d=>d.data()));DB.save('referrals',referrals); if(currentPage==='referrals')setTimeout(()=>showPage('referrals'),50); }, e=>console.warn('referrals listener:',e.message)));
+    _listeners.push(col('notes').onSnapshot(snap=>{ if(!trust(snap))return; notes=_keep(notes,_live(snap.docs.map(d=>d.data())));DB.save('notes',notes); }, e=>console.warn('notes listener:',e.message)));
+    _listeners.push(col('timelogs').onSnapshot(snap=>{ if(!trust(snap))return; timeLogs=_keep(timeLogs,_live(snap.docs.map(d=>d.data())));DB.save('timelogs',timeLogs); }, e=>console.warn('timelogs listener:',e.message)));
+    _listeners.push(col('referrals').onSnapshot(snap=>{ if(!trust(snap))return; referrals=_keep(referrals,_live(snap.docs.map(d=>d.data())));DB.save('referrals',referrals); if(currentPage==='referrals')setTimeout(()=>showPage('referrals'),50); }, e=>console.warn('referrals listener:',e.message)));
     _listeners.push(col('staff').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; const l=doc.exists?doc.data().list:null; if(Array.isArray(l)&&l.length){ _mergeStaffDirectory(l); if(currentPage==='settings')setTimeout(()=>showPage('settings'),50); } }, e=>{ console.warn('staff listener:',e.message); _noteStaffSync(false,e); }));
     _listeners.push(col('policies').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; const pl=doc.exists?doc.data().list:null; if(pl){ policies=pl; DB.save('policies',policies); if(currentPage==='policies')setTimeout(()=>showPage('policies'),50); } }, e=>console.warn('policies listener:',e.message)));
     // Automatic texts: the outbox (results written back by the Cloud Function) and the on/off switch.
@@ -869,13 +869,13 @@ const FSYNC = (() => {
     _listeners.push(col('appConfig').doc('outlook').onSnapshot(_outlookCfgIn('appConfig'), e=>{ _outlookCfgSeen.appConfigError=e.code||e.message; console.warn('appConfig listener:',e.message); }));
     _listeners.push(col('staff').doc('outlookSetup').onSnapshot(_outlookCfgIn('staff'), e=>{ _outlookCfgSeen.staffError=e.code||e.message; console.warn('outlook set-up listener:',e.message); }));
     _listeners.push(col('smsConfig').doc('settings').onSnapshot(doc=>{ smsConfig=doc.exists?doc.data():{}; DB.save('smsConfig',smsConfig); try{ _smsRefresh(); }catch(_){} }, e=>{ window._smsListenErr=e.code||e.message; console.warn('smsConfig listener:',e.message); }));
-    _listeners.push(col('walkins').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; const l=doc.exists?doc.data().list:null; if(l){ walkins=l; DB.save('walkins',walkins); if(currentPage==='walkins')setTimeout(()=>showPage('walkins'),50); } }, e=>console.warn('walkins listener:',e.message)));
-    _listeners.push(col('calevents').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; const l=doc.exists?doc.data().list:null; if(l){ calEvents=l; DB.save('calevents',calEvents); if(currentPage==='calendar')setTimeout(()=>showPage('calendar'),50); } }, e=>console.warn('calevents listener:',e.message)));
+    _listeners.push(col('walkins').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; const l=doc.exists?doc.data().list:null; if(l){ walkins=_keep(walkins,l); DB.save('walkins',walkins); if(currentPage==='walkins')setTimeout(()=>showPage('walkins'),50); } }, e=>console.warn('walkins listener:',e.message)));
+    _listeners.push(col('calevents').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; const l=doc.exists?doc.data().list:null; if(l){ calEvents=_keep(calEvents,l); DB.save('calevents',calEvents); if(currentPage==='calendar')setTimeout(()=>showPage('calendar'),50); } }, e=>console.warn('calevents listener:',e.message)));
     _listeners.push(col('fpho').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; if(!doc.exists)return; const d=doc.data();
       if(Array.isArray(d.clients)){ fphoClients=d.clients; DB.save('fphoClients',fphoClients); }
       if(Array.isArray(d.applications)){ fphoApplications=d.applications; DB.save('fphoApplications',fphoApplications); }
       if(currentPage==='homeownership')setTimeout(()=>showPage('homeownership'),50); }, e=>console.warn('fpho listener:',e.message)));
-    _listeners.push(col('resources').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; const l=doc.exists?doc.data().list:null; if(l){ resources=l; DB.save('resources',resources); if(currentPage==='resources')setTimeout(()=>showPage('resources'),50); } }, e=>console.warn('resources listener:',e.message)));
+    _listeners.push(col('resources').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; const l=doc.exists?doc.data().list:null; if(l){ resources=_keep(resources,l); DB.save('resources',resources); if(currentPage==='resources')setTimeout(()=>showPage('resources'),50); } }, e=>console.warn('resources listener:',e.message)));
   }
 
   // Firestore rejects `undefined` anywhere in a document and fails the WHOLE
@@ -1062,6 +1062,23 @@ const FSYNC = (() => {
   }
   // Strip tombstoned records, and records deleted here but not yet confirmed
   // by the cloud, from anything read out of the cloud.
+  // Cloud refreshes update the records already in memory instead of swapping
+  // in new copies. An open form keeps hold of the record it opened (Edit
+  // Client, Add Child, a goal, a referral…); when a refresh swapped the copy,
+  // its Save went into an object nothing looked at any more and was lost.
+  // Records are matched on id; fields the cloud no longer has are removed.
+  function _keep(oldArr, fresh, key) {
+    key = key || 'id';
+    if (!Array.isArray(oldArr) || !Array.isArray(fresh)) return fresh;
+    const byId = new Map();
+    oldArr.forEach(o => { if (o && typeof o === 'object' && o[key] != null) byId.set(String(o[key]), o); });
+    return fresh.map(n => {
+      const o = n && n[key] != null ? byId.get(String(n[key])) : null;
+      if (!o || o === n) return n;
+      Object.keys(o).forEach(k => { if (!(k in n)) delete o[k]; });
+      return Object.assign(o, n);
+    });
+  }
   function _live(rows){
     const gone = new Set(_pendingDeletes().map(d=>d.id));
     return (rows||[]).filter(r => r && r._deleted !== true && !gone.has(String(r.id)));
@@ -1984,7 +2001,7 @@ function renderClients() {
             const age = c.dob ? Math.floor((Date.now()-new Date(c.dob))/(365.25*24*3600*1000)) : '?';
             const progs = [c.sewb&&'SEWB',c.aod&&'AOD',c.justice&&'Justice',c.cultural&&'Cultural'].filter(Boolean);
             return `<tr class="client-row" data-id="${c.id}" style="cursor:pointer">
-              <td><div style="display:flex;align-items:center;gap:10px"><div class="avatar">${initials(c.fullName)}</div><div><div style="font-weight:600;font-size:13px">${sanitize(c.fullName)}</div><div style="font-size:11px;color:var(--muted)">${c.pronouns||''}</div></div></div></td>
+              <td><div style="display:flex;align-items:center;gap:10px"><div class="avatar">${initials(c.fullName)}</div><div><div style="font-weight:600;font-size:13px">${sanitize(c.fullName)}</div><div style="font-size:11px;color:var(--muted)">${sanitize(c.pronouns||'')}</div></div></div></td>
               <td style="font-size:12px;color:var(--muted)">${c.clientId||'—'}</td>
               <td style="font-size:13px">${c.dob||'—'}<br><span style="font-size:11px;color:var(--muted)">${age} yrs</span></td>
               <td style="font-size:13px">${sanitize(c.community||'—')}<br><span style="font-size:11px;color:var(--muted)">${sanitize(c.mob||'')}</span></td>
@@ -2158,7 +2175,8 @@ function renderClientProfile(id, tab) {
   <div class="pf-nav" id="profile-tabs"><label for="profile-section">Section</label>${profileSectionSelectHTML(c, profileCounts(c), id, tab)}</div>
   <div id="profile-tab-content">${renderProfileTab(tab, c, clientNotes, clientTime)}</div>
   `;
-  showModal('👤 Client Profile', html, null, '900px', true);
+  _showingClientFile = true;
+  try { showModal('👤 Client Profile', html, null, '900px', true); } finally { _showingClientFile = false; }
   if (tab === 'intake') startIntakeAutoSave(id); else stopIntakeAutoSave();
 }
 
@@ -2583,9 +2601,9 @@ function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
         clientTime.sort((a,b)=>b.date?.localeCompare(a.date)).map(t=>`<div class="time-entry">
           <span class="time-badge">${t.minutes||0} min</span>
           <div style="flex:1">
-            <div style="font-size:13px;font-weight:600">${t.activity||'Session'}</div>
+            <div style="font-size:13px;font-weight:600">${sanitize(t.activity||'Session')}</div>
             <div style="font-size:11px;color:var(--muted)">${fmt(t.date)} &bull; ${t.worker||''} &bull; ${t.type||'face-to-face'}</div>
-            ${t.notes?`<div style="font-size:12px;color:var(--muted);margin-top:2px">${t.notes}</div>`:''}
+            ${t.notes?`<div style="font-size:12px;color:var(--muted);margin-top:2px">${sanitize(t.notes)}</div>`:''}
           </div>
           <button class="btn-ghost" style="color:var(--danger);font-size:11px" onclick="deleteTime('${t.id}','${c.id}')">✕</button>
         </div>`).join('')
@@ -2946,15 +2964,15 @@ function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
           <div style="flex:1">
             <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
               <strong style="font-size:14px">${sanitize(w.name)}</strong>
-              <span class="section-badge" style="background:#e0e7ff;color:#3730a3">${w.role||'Worker'}</span>
+              <span class="section-badge" style="background:#e0e7ff;color:#3730a3">${sanitize(w.role||'Worker')}</span>
               ${w.primary?'<span class="tag tag-active" style="font-size:10px">Primary Worker</span>':''}
             </div>
             <div style="font-size:12px;color:var(--muted);margin-top:4px">
               ${w.organisation?`🏢 ${sanitize(w.organisation)} &bull; `:''}
-              ${w.phone?`📞 ${w.phone} &bull; `:''}
-              ${w.email?`✉️ ${w.email}`:''}
+              ${w.phone?`📞 ${sanitize(w.phone)} &bull; `:''}
+              ${w.email?`✉️ ${sanitize(w.email)}`:''}
             </div>
-            ${w.notes?`<div style="font-size:12px;margin-top:6px;color:var(--text)">${w.notes}</div>`:''}
+            ${w.notes?`<div style="font-size:12px;margin-top:6px;color:var(--text)">${sanitize(w.notes)}</div>`:''}
             ${w.consentShare?`<div style="font-size:11px;color:#16a34a;margin-top:4px">✅ Consent to share information</div>`:''}
           </div>
           <div style="display:flex;gap:6px">
@@ -2970,7 +2988,7 @@ function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
       <div id="consent-share-list">
         ${(c.consentShareList||[]).map((cs,i)=>`
         <div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border)">
-          <div style="flex:1;font-size:13px"><strong>${cs.name}</strong> — ${cs.org||''} — ${cs.phone||''}</div>
+          <div style="flex:1;font-size:13px"><strong>${sanitize(cs.name)}</strong> — ${sanitize(cs.org||'')} — ${sanitize(cs.phone||'')}</div>
           <button class="btn btn-sm btn-danger" onclick="removeConsentShare('${c.id}',${i})">✕</button>
         </div>`).join('') || '<p style="font-size:13px;color:var(--muted)">None recorded</p>'}
       </div>
@@ -3140,7 +3158,7 @@ function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
       </div>
       <div class="form-group"><label>Cultural Status</label>
         <div style="display:flex;gap:16px;flex-wrap:wrap;padding:6px 0">
-          ${['Aboriginal','Torres Strait Islander','Both','Non-Indigenous'].map(g=>`<label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer"><input type="radio" name="wf-cultural" value="${sanitize(g)}" ${wf.culturalStatus===g?'checked':''}> ${g}</label>`).join('')}
+          ${['Aboriginal','Torres Strait Islander','Both','Non-Indigenous'].map(g=>`<label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer"><input type="radio" name="wf-cultural" value="${sanitize(g)}" ${(wf.cultural||wf.culturalStatus)===g?'checked':''}> ${g}</label>`).join('')}
         </div>
       </div>
       <div class="form-group"><label>Preferred Contact Method</label>
@@ -3507,7 +3525,7 @@ function loadFeedbackHistory(id, idx) {
   const hist = c.feedbackHistory[idx];
   if(!c.feedback?.date||!c.feedbackHistory) c.feedbackHistory=[];
   if(c.feedback) c.feedbackHistory.push(c.feedback);
-  c.feedback = hist; saveAll(); openClientProfile(id);
+  c.feedback = hist; saveAll(); _refreshClientFile(id);
 }
 
 function printWorkFoundations(id) {
@@ -3680,7 +3698,7 @@ function deleteFile(clientId, idx) {
   const c=clients.find(cl=>cl.id===clientId); if(!c) return;
   const f=c.attachments[idx];
   if(f?.storagePath) FSYNC.deleteStorageFile(f.storagePath);
-  c.attachments.splice(idx,1); saveAll(); openClientProfile(clientId);
+  c.attachments.splice(idx,1); saveAll(); _refreshClientFile(clientId);
 }
 
 // ===== SUMMARY EXPORT =====
@@ -4270,7 +4288,10 @@ function openWorkerModal(clientId, idx) {
       primary: document.getElementById('wm-primary')?.checked,
       consentShare: document.getElementById('wm-consent')?.checked,
     };
-    if(idx !== null) { c.keyWorkers[idx] = entry; } else { c.keyWorkers.push(entry); }
+    // Current copy of the client (a cloud refresh may have replaced it), and an
+    // edit keeps any details this form doesn't show.
+    const cc = clients.find(cl=>cl.id===clientId) || c; if (!Array.isArray(cc.keyWorkers)) cc.keyWorkers = [];
+    if(idx !== null && cc.keyWorkers[idx]) { cc.keyWorkers[idx] = Object.assign({}, cc.keyWorkers[idx], entry); } else { cc.keyWorkers.push(entry); }
     saveAll(); showToast(idx !== null ? 'Worker updated' : 'Worker added'); return true;
   });
 }
@@ -4278,7 +4299,7 @@ function openWorkerModal(clientId, idx) {
 function removeWorker(clientId, idx) {
   if(!confirm('Remove this worker?')) return;
   const c = clients.find(cl=>cl.id===clientId); if(!c) return;
-  c.keyWorkers.splice(idx, 1); saveAll(); openClientProfile(clientId);
+  c.keyWorkers.splice(idx, 1); saveAll(); _refreshClientFile(clientId);
 }
 
 // Small forms opened from inside a client file (Add Child, Add Contact,
@@ -4298,11 +4319,17 @@ function _backToClientFile(place, anchorId) {
   const a = anchorId && document.getElementById(anchorId), ov = document.querySelector('#modal-container .modal-overlay');
   if (a) a.scrollIntoView({ block: 'center' }); else if (ov) ov.scrollTop = place.scroll;
 }
+// After deleting / ticking something inside the file: redraw it where the
+// worker is (same section and scroll), rather than jumping to Overview.
+function _refreshClientFile(clientId) {
+  _backToClientFile(_clientFilePlace(clientId) || { clientId, tab: 'overview', scroll: 0 });
+}
 function _returnToFileOnClose(place, anchorId) {
   if (!place) return;
   const mc = document.getElementById('modal-container');
+  mc._returnPlace = place;
   // Deferred: closeModal empties the box after this runs. If another form has
-  // taken its place instead, leave that one alone.
+  // taken its place instead, leave that one alone (it inherits _returnPlace).
   mc._onClose = () => setTimeout(() => { if (!mc.innerHTML.trim()) _backToClientFile(place, anchorId); }, 0);
 }
 
@@ -4498,7 +4525,7 @@ function openAssignWorkersModal(id) {
         <label style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;cursor:pointer;font-size:13px;${assigned.includes(w)?'background:#f0fdf4;border-color:#86efac':''}">
           <input type="checkbox" class="aw-worker" value="${sanitize(w)}" ${assigned.includes(w)?'checked':''}
             onchange="this.closest('label').style.background=this.checked?'#f0fdf4':'';this.closest('label').style.borderColor=this.checked?'#86efac':'var(--border)'">
-          <span>👤 ${w}</span>
+          <span>👤 ${sanitize(w)}</span>
           ${c.keyWorker===w?'<span style="margin-left:auto;font-size:11px;background:#dbeafe;color:#1e40af;padding:2px 8px;border-radius:10px">Key Worker</span>':''}
         </label>`).join('')}
     </div>`;
@@ -4723,7 +4750,7 @@ function clientFormHTML(c) {
       <div class="form-group"><label>Assigned Workers</label>
         <div style="display:flex;flex-wrap:wrap;gap:8px;padding:6px 0">
           ${workersList.map(w=>`<label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer">
-            <input type="checkbox" class="cf-assignedWorker" value="${sanitize(w)}" ${(c.assignedWorkers||[c.keyWorker]).includes(w)?'checked':''}> ${w}
+            <input type="checkbox" class="cf-assignedWorker" value="${sanitize(w)}" ${(c.assignedWorkers||[c.keyWorker]).includes(w)?'checked':''}> ${sanitize(w)}
           </label>`).join('')}
         </div>
       </div>
@@ -4804,7 +4831,7 @@ function openNoteModal(clientId, defaultType) {
       <div style="display:flex;gap:6px">
         <select id="nm-worker" style="flex:1" onchange="handleWorkerSelect('nm-worker','nm-worker-new')">
           <option value="">— Select worker —</option>
-          ${workersList.map(w=>`<option value="${sanitize(w)}">${w}</option>`).join('')}
+          ${workersList.map(w=>`<option value="${sanitize(w)}">${sanitize(w)}</option>`).join('')}
           <option value="__add__">➕ Add new worker…</option>
         </select>
         <input id="nm-worker-new" placeholder="Type new name, press Enter" style="display:none;flex:1"
@@ -4905,7 +4932,7 @@ function deleteNote(noteId, clientId) {
   notes = notes.filter(n=>n.id!==noteId);
   FSYNC.deleteDoc('notes', noteId);   // tombstone (QA C2) — queued if offline
   saveAll();
-  openClientProfile(clientId);
+  _refreshClientFile(clientId);
 }
 
 // ===== TIME MODAL =====
@@ -4956,7 +4983,7 @@ function openTimeModal(clientId) {
 function deleteTime(timeId, clientId) {
   if(!confirm('Delete this time entry?')) return;
   if (timeId) removeTimeEntries([timeId], 'Deleted from the client file');   // tombstone, CorePlus ignore-list, audit
-  openClientProfile(clientId);
+  _refreshClientFile(clientId);
 }
 
 // ===== PROGRAM PAGES =====
@@ -8407,7 +8434,7 @@ function renderWeekView() {
             const ht  = dur/60*SLOT_H-2;
             const cl  = clients.find(c=>c.id===e.clientId);
             return `<div class="cal-event" style="top:${top}px;height:${ht}px;background:${cfg.bg};border-left:3px solid ${cfg.color};color:${cfg.color};border-top:2px solid ${sc.color}" onclick="viewEvent('${e.id}')">
-              <div class="cal-event-title">${cfg.icon} ${e.title}</div>
+              <div class="cal-event-title">${cfg.icon} ${sanitize(e.title)}</div>
               ${cl?`<div class="cal-event-sub">${sanitize(cl.fullName)}</div>`:''}
               <div class="cal-event-time">${e.startTime||''}${e.endTime?' – '+e.endTime:''}</div>
             </div>`;
@@ -8444,7 +8471,7 @@ function openReminderModal() {
   showModal('🔔 Add Reminder', `
     <div class="form-group"><label>Reminder Text *</label><input id="rm-text" placeholder="e.g. Follow up on housing application"></div>
     <div class="grid-2">
-      <div class="form-group"><label>Client</label><select id="rm-client">${clientOpts.map(([v,l])=>`<option value="${sanitize(v)}">${l}</option>`).join('')}</select></div>
+      <div class="form-group"><label>Client</label><select id="rm-client">${clientOpts.map(([v,l])=>`<option value="${sanitize(v)}">${sanitize(l)}</option>`).join('')}</select></div>
       <div class="form-group"><label>Due Date</label><input type="date" id="rm-due" value="${sanitize(today())}"></div>
     </div>`,
     () => {
@@ -8478,7 +8505,7 @@ function openNoticeModal() {
 
 function viewNotice(id) {
   const n = noticeboards.find(nb=>nb.id===id); if(!n) return;
-  showModal('📋 '+n.title, `
+  showModal('📋 '+sanitize(n.title), `
     <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Posted by <strong>${sanitize(n.author||'Staff')}</strong> on ${fmt(n.created)}</div>
     <p style="font-size:13px;line-height:1.7">${sanitize(n.text||'').replace(/\n/g,'<br>')}</p>`,
     null,'520px',true
@@ -8552,7 +8579,7 @@ function openEventModal(date, startTime) {
     </div>
     <div class="form-group"><label>Client</label>
       <select id="em-client">
-        ${clientOpts.map(([v,l])=>`<option value="${sanitize(v)}">${l}</option>`).join('')}
+        ${clientOpts.map(([v,l])=>`<option value="${sanitize(v)}">${sanitize(l)}</option>`).join('')}
       </select>
     </div>
     <div class="form-group"><label>Date *</label><input type="date" id="em-date" value="${sanitize(date||today())}"></div>
@@ -8641,7 +8668,7 @@ function viewEvent(id) {
   <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;padding:14px;border-radius:8px;background:${cfg.bg}">
     <div style="font-size:32px">${cfg.icon}</div>
     <div>
-      <div style="font-size:16px;font-weight:700;color:${cfg.color}">${e.title}</div>
+      <div style="font-size:16px;font-weight:700;color:${cfg.color}">${sanitize(e.title)}</div>
       <div style="font-size:12px;color:${cfg.color};opacity:0.8">${cfg.label}</div>
     </div>
   </div>
@@ -8650,8 +8677,8 @@ function viewEvent(id) {
     <tr><td style="padding:7px 0;color:var(--muted);font-weight:600">⏰ Time</td><td>${e.startTime||'—'}${e.endTime?' – '+e.endTime:''}</td></tr>
     ${cl?`<tr><td style="padding:7px 0;color:var(--muted);font-weight:600">👤 Client</td><td><a href="#" onclick="closeModal();openClientProfile('${cl.id}')" style="color:var(--primary-light);font-weight:600">${sanitize(cl.fullName)}</a></td></tr>`:''}
     ${e.worker?`<tr><td style="padding:7px 0;color:var(--muted);font-weight:600">👷 Worker</td><td>${e.worker}</td></tr>`:''}
-    ${e.location?`<tr><td style="padding:7px 0;color:var(--muted);font-weight:600">📍 Location</td><td>${e.location}</td></tr>`:''}
-    ${e.notes?`<tr><td style="padding:7px 0;color:var(--muted);font-weight:600;vertical-align:top">📝 Notes</td><td>${e.notes.replace(/\n/g,'<br>')}</td></tr>`:''}
+    ${e.location?`<tr><td style="padding:7px 0;color:var(--muted);font-weight:600">📍 Location</td><td>${sanitize(e.location)}</td></tr>`:''}
+    ${e.notes?`<tr><td style="padding:7px 0;color:var(--muted);font-weight:600;vertical-align:top">📝 Notes</td><td>${sanitize(e.notes).replace(/\n/g,'<br>')}</td></tr>`:''}
     ${e.readOnly?`<tr><td colspan="2" style="padding:7px 0;font-size:12px;color:var(--muted)">ℹ️ Auto-generated from client records — edit in the client profile</td></tr>`:''}
   </table>
   ${!e.readOnly ? `
@@ -8676,7 +8703,7 @@ function editEvent(id) {
       <select id="ee-type">${Object.entries(EVT_TYPES).map(([k,v])=>`<option value="${sanitize(k)}" ${e.type===k?'selected':''}>${v.icon} ${v.label}</option>`).join('')}</select>
     </div>
     <div class="form-group"><label>Client</label>
-      <select id="ee-client">${clientOpts.map(([v,l])=>`<option value="${sanitize(v)}" ${e.clientId===v?'selected':''}>${l}</option>`).join('')}</select>
+      <select id="ee-client">${clientOpts.map(([v,l])=>`<option value="${sanitize(v)}" ${e.clientId===v?'selected':''}>${sanitize(l)}</option>`).join('')}</select>
     </div>
     <div class="form-group"><label>Date *</label><input type="date" id="ee-date" value="${sanitize(e.date||today())}"></div>
     <div class="form-group"><label>Worker</label><input id="ee-worker" value="${sanitize(e.worker||'')}"></div>
@@ -9023,7 +9050,7 @@ function openReferralActionModal(id) {
     ${[...actions].reverse().map(a=>`<div class="ref-action-log"><div style="font-weight:600">${sanitize(a.worker||'Staff')} <span style="font-weight:400;color:var(--muted)">— ${a.type||'Note'} — ${fmtdt(a.date)}</span></div>${a.text}${a.nextAction?`<div style="margin-top:4px;color:var(--primary-light)">→ Next: ${a.nextAction}</div>`:''}</div>`).join('')}
   </div>`:''}`;
 
-  showModal('📋 Action / Notes — '+r.name, html, () => {
+  showModal('📋 Action / Notes — '+sanitize(r.name), html, () => {
     const text = document.getElementById('raf-text')?.value?.trim();
     if(!text) { alert('Action text is required'); return false; }
     if(!r.actions) r.actions=[];
@@ -9053,7 +9080,7 @@ function openAllocateModal(id) {
   <div class="form-group"><label>Allocation Notes</label><textarea id="al-notes" style="min-height:70px" placeholder="Reason for allocation, priorities, client background to be aware of…">${sanitize(r.allocationNotes||'')}</textarea></div>
   <div class="form-group"><label>Target First Contact Date</label><input type="date" id="al-contact" value="${sanitize(r.targetContact||'')}"></div>`;
 
-  showModal('👷 Allocate Referral — '+r.name, html, () => {
+  showModal('👷 Allocate Referral — '+sanitize(r.name), html, () => {
     const worker = getWorkerValue('al-worker','al-worker-new');
     if(!worker) { alert('Please select a worker'); return false; }
     r.allocatedTo = worker;
@@ -9086,7 +9113,7 @@ function openReferralStatusModal(id) {
   </div>
   <div class="form-group"><label>Reason / Note</label><textarea id="rs-note" style="min-height:60px" placeholder="Reason for status change…"></textarea></div>`;
 
-  showModal('🔄 Change Status — '+r.name, html, () => {
+  showModal('🔄 Change Status — '+sanitize(r.name), html, () => {
     const newStatus = document.querySelector('input[name="rs-status"]:checked')?.value;
     if(!newStatus) { alert('Select a status'); return false; }
     const note = document.getElementById('rs-note')?.value;
@@ -9226,7 +9253,7 @@ function renderSessions() {
               <span>📅 ${fmtdt(n.created)}</span>
               ${n.worker?`<span>👤 ${sanitize(n.worker)}</span>`:''}
               ${n.contactType?`<span>📍 ${n.contactType}</span>`:''}
-              ${n.location?`<span>🏠 ${n.location}</span>`:''}
+              ${n.location?`<span>🏠 ${sanitize(n.location)}</span>`:''}
             </div>
           </div>
           <div style="display:flex;gap:6px;flex-shrink:0">
@@ -9771,7 +9798,7 @@ function renderWalkins() {
         ${sorted.map(w=>`<tr>
           <td style="font-size:12px">${fmtdt(w.date+'T'+(w.time||'00:00'))}</td>
           <td><strong>${sanitize(w.name||'Anonymous')}</strong>${w.phone?`<br><span style="font-size:11px;color:var(--muted)">${w.phone}</span>`:''}</td>
-          <td style="font-size:12px;max-width:220px">${w.reason||'—'}</td>
+          <td style="font-size:12px;max-width:220px">${sanitize(w.reason||'—')}</td>
           <td style="font-size:12px">${sanitize(w.worker||'—')}</td>
           <td><span style="font-size:11px;padding:2px 8px;border-radius:12px;background:${w.outcome==='Referred'?'#dbeafe':w.outcome==='Appointment Made'?'#d1fae5':w.outcome==='Information Given'?'#fef3c7':'#f3f4f6'};color:#374151">${w.outcome||'—'}</span></td>
           <td>${w.converted?`<span style="color:#16a34a;font-size:12px">✅ Client</span>`:`<button class="btn btn-sm btn-outline" onclick="convertWalkin('${w.id}')">Create Client</button>`}</td>
@@ -9906,7 +9933,7 @@ function renderDisability() {
         dc.map(c=>{ const f=ndisClientFunding(c); return `<tr>
           <td style="cursor:pointer" onclick="openClientProfile('${c.id}')">${sanitize(c.fullName)}</td>
           <td style="font-size:12px">${(c.dis?.disabilityType||'—').slice(0,30)}</td>
-          <td style="font-size:12px">${c.ndis||c.dis?.ndisNum||'—'}</td>
+          <td style="font-size:12px">${sanitize(c.ndis||c.dis?.ndisNum||'—')}</td>
           <td style="font-size:12px">${c.dis?.supportCoord||'—'}</td>
           <td style="font-size:12px;white-space:nowrap">${f.total>0?`<span style="color:${f.remaining<0?'#dc2626':'#16a34a'};font-weight:600">${ndisMoney(f.remaining)}</span> <span style="color:var(--muted)">/ ${ndisMoney(f.total)}</span>`:'—'}</td>
           <td><span class="risk-pill risk-${c.riskLevel||'low'}">${(c.riskLevel||'low').toUpperCase()}</span></td>
@@ -10825,7 +10852,7 @@ function openNDISForm(clientId) {
     </div>
   </div>`;
 
-  showModal('📋 NDIS Access Request Form — ' + (c.firstName||'') + ' ' + (c.lastName||''), html, ()=>saveNDISForm(clientId), '1100px');
+  showModal('📋 NDIS Access Request Form — ' + sanitize((c.firstName||'') + ' ' + (c.lastName||'')), html, ()=>saveNDISForm(clientId), '1100px');
 }
 
 function saveNDISForm(clientId) {
@@ -11635,7 +11662,7 @@ function workerSelectHTML(selectId, inputId, selectedVal) {
   return `<div style="display:flex;gap:6px">
     <select id="${selectId}" style="flex:1" onchange="handleWorkerSelect('${selectId}','${inputId}')">
       <option value="">— Select worker —</option>
-      ${workersList.map(w=>`<option value="${sanitize(w)}" ${w===selectedVal?'selected':''}>${w}</option>`).join('')}
+      ${workersList.map(w=>`<option value="${sanitize(w)}" ${w===selectedVal?'selected':''}>${sanitize(w)}</option>`).join('')}
       <option value="__add__">➕ Add new worker…</option>
     </select>
     <input id="${inputId}" placeholder="Type name, press Enter" style="display:none;flex:1"
@@ -11703,7 +11730,7 @@ function renderAuditLog() {
       </div>
       <select id="al-filter-worker" onchange="showPage('auditlog')" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;min-width:150px">
         <option value="">All workers</option>
-        ${workers.map(w=>`<option value="${sanitize(w)}" ${fWorker===w?'selected':''}>${w}</option>`).join('')}
+        ${workers.map(w=>`<option value="${sanitize(w)}" ${fWorker===w?'selected':''}>${sanitize(w)}</option>`).join('')}
       </select>
       <select id="al-filter-action" onchange="showPage('auditlog')" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;min-width:150px">
         <option value="">All actions</option>
@@ -12854,7 +12881,7 @@ function openEditStaffModal(userId) {
       </div>
     </div>` : ''}
     <p id="se-error" style="color:#dc2626;font-size:13px;margin-top:8px;min-height:18px"></p>`;
-  showModal('✏️ Edit Staff — ' + u.name, html, ()=>saveStaffEdit(userId), '640px');
+  showModal('✏️ Edit Staff — ' + sanitize(u.name), html, ()=>saveStaffEdit(userId), '640px');
 }
 
 function saveStaffEdit(userId) {   // sync: the modal only stays open (to show an error) on a literal false
@@ -14223,9 +14250,17 @@ function openNewGroupModal() {
 // ============================================================
 
 // ===== MODAL ENGINE =====
+// Every form opened from inside a client file goes back to that file when it
+// closes — saved, cancelled, ✕, Esc or a click outside — at the same section
+// and scroll position. (They used to leave the worker on the Clients list.) A
+// form that opens another form passes the way back along to it.
+let _showingClientFile = false;
 function showModal(title, html, onSave, maxWidth='720px', noSave=false) {
   const mc = document.getElementById('modal-container');
+  const place = _showingClientFile ? null
+    : (currentClientId && _clientFilePlace(currentClientId)) || mc._returnPlace || null;
   _modalClosing(mc);
+  mc._returnPlace = null;
   mc.innerHTML = `
   <div class="modal-overlay" onclick="closeModalOnOverlay(event)">
     <div class="modal" style="max-width:${maxWidth}">
@@ -14242,6 +14277,7 @@ function showModal(title, html, onSave, maxWidth='720px', noSave=false) {
   </div>`;
   mc._onSave = onSave;
   mc._draft = null;
+  if (place) _returnToFileOnClose(place);
 }
 
 function closeModalOnOverlay(e) { if(e.target.classList.contains('modal-overlay')) closeModal(); }
@@ -14259,7 +14295,20 @@ function closeModal() {
 }
 function handleModalSave() {
   const mc = document.getElementById('modal-container');
-  if(mc._onSave) { const ok = mc._onSave(); if(ok !== false) closeModal(); }
+  if(!mc._onSave) return;
+  const ok = mc._onSave();
+  // A save that has to wait (e.g. starting a chat) keeps the form open until it
+  // finishes, and stays open if it says "not yet" (returns false) — before, the
+  // form closed straight away, even after "Select a worker".
+  if (ok && typeof ok.then === 'function') {
+    const btn = mc.querySelector('.modal-footer .btn-primary'), was = btn?.textContent, form = mc.querySelector('.modal');
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+    ok.then(r => { if (r !== false && form && form.isConnected) closeModal(); })   // only if this form is still the one showing
+      .catch(e => { console.warn('Save failed:', e); alert('That could not be saved — please try again.'); })
+      .finally(() => { if (btn && btn.isConnected) { btn.disabled = false; btn.textContent = was; } });
+    return;
+  }
+  if(ok !== false) closeModal();
 }
 
 // ===== TOAST =====
@@ -15179,7 +15228,7 @@ async function logout(reason) {
   const mc = document.getElementById('modal-container');
   try { mc && mc._draft && mc._draft.flush(); } catch(e) {}
   try { flushIntake(); stopIntakeAutoSave(); } catch(e) {}   // an open intake is saved, not lost
-  if (mc) { mc._draft = null; mc.innerHTML = ''; }
+  if (mc) { mc._draft = null; mc._onClose = null; mc._returnPlace = null; mc.innerHTML = ''; }
   // Unsaved note drafts: kept through an inactivity sign-out (so the note
   // isn't lost), but a deliberate Sign Out removes them from this device —
   // after asking, because they are client information.
@@ -16555,7 +16604,7 @@ function openEpisodeReviewModal(id) {
       <div class="form-group"><label>Exit reason *</label><select id="er-reason2">${selOpts(EXIT_REASONS, '', '— Select reason —')}</select></div></div>
       <input id="er-skipnote" placeholder="Details (required for Other)"></div>
     <p id="er-error" style="color:#dc2626;font-size:13px;min-height:18px;margin-top:8px"></p>`;
-  showModal('🔒 End-of-Episode Review — ' + c.fullName, html, () => saveEpisodeReview(id), '720px');
+  showModal('🔒 End-of-Episode Review — ' + sanitize(c.fullName), html, () => saveEpisodeReview(id), '720px');
 }
 function saveEpisodeReview(id) {
   const c = clients.find(cl => cl.id === id); if (!c) return false;
@@ -16972,13 +17021,13 @@ function toggleMilestone(clientId, goalIdx, milestoneIdx) {
   const c=clients.find(cl=>cl.id===clientId); if(!c) return;
   const m=c.goalPlan?.[goalIdx]?.milestones?.[milestoneIdx]; if(!m) return;
   m.done=!m.done; m.doneDate=m.done?today():'';
-  saveAll(); showToast(m.done?'Milestone completed ✓':'Milestone unchecked'); openClientProfile(clientId);
+  saveAll(); showToast(m.done?'Milestone completed ✓':'Milestone unchecked'); _refreshClientFile(clientId);
 }
 
 function deleteGoal(clientId, goalIdx) {
   if(!confirm('Delete this goal?')) return;
   const c=clients.find(cl=>cl.id===clientId); if(!c) return;
-  c.goalPlan.splice(goalIdx,1); saveAll(); openClientProfile(clientId);
+  c.goalPlan.splice(goalIdx,1); saveAll(); _refreshClientFile(clientId);
 }
 
 // ============================================================
@@ -17030,7 +17079,7 @@ function openTaskModal() {
   showModal('➕ New Task', `
     <div class="form-group"><label>Task *</label><input id="tk-text" placeholder="e.g. Follow up housing application"></div>
     <div class="grid-2">
-      <div class="form-group"><label>Client</label><select id="tk-client">${clientOpts.map(([v,l])=>`<option value="${sanitize(v)}">${l}</option>`).join('')}</select></div>
+      <div class="form-group"><label>Client</label><select id="tk-client">${clientOpts.map(([v,l])=>`<option value="${sanitize(v)}">${sanitize(l)}</option>`).join('')}</select></div>
       <div class="form-group"><label>Due Date</label><input type="date" id="tk-due" value="${sanitize(today())}"></div>
       <div class="form-group"><label>Priority</label><select id="tk-priority"><option value="high">High</option><option value="medium" selected>Medium</option><option value="low">Low</option></select></div>
       <div class="form-group"><label>Assigned To</label>${workerSelectHTML('tk-worker','tk-worker-new','')}</div>
