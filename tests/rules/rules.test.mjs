@@ -9,12 +9,12 @@ let pass = 0, fail = 0;
 const check = async (name, p) => { try { await p; pass++; console.log('PASS', name); } catch (e) { fail++; console.log('FAIL', name, '-', e.message.slice(0, 160)); } };
 const RULES = { 'live.rules': '../../firestore.rules', 'strict.rules': '../../firestore.rules.strict' };
 // The keys a client may write must be exactly the intake questions.
-createRequire(import.meta.url)('../../intake/intake-fields.js');
+createRequire(import.meta.url)('../../site/intake/intake-fields.js');
 const KEYS = globalThis.WG_INTAKE.KEYS;
 for (const file of Object.keys(RULES)) {
   const src = fs.readFileSync(new URL(RULES[file], import.meta.url), 'utf8');
   const ruleKeys = (src.match(/answers\.keys\(\)\.hasOnly\(\[([^\]]*)\]\)/) || [, ''])[1].split(',').map(x => x.trim().replace(/'/g, '')).filter(Boolean);
-  await check(file + ': intake rule keys match intake/intake-fields.js', JSON.stringify(ruleKeys) === JSON.stringify(KEYS) ? Promise.resolve() : Promise.reject(new Error('rule keys differ from intake-fields.js')));
+  await check(file + ': intake rule keys match site/intake/intake-fields.js', JSON.stringify(ruleKeys) === JSON.stringify(KEYS) ? Promise.resolve() : Promise.reject(new Error('rule keys differ from intake-fields.js')));
 }
 for (const file of Object.keys(RULES)) {
   const env = await initializeTestEnvironment({ projectId: 'demo-wg-' + file.split('.')[0], firestore: { rules: fs.readFileSync(new URL(RULES[file], import.meta.url), 'utf8'), host: '127.0.0.1', port: 8089 } });

@@ -13,7 +13,7 @@ Australia (Firestore, `australia-southeast1` — Sydney). Read
 ## How it is built
 
 A single-page application delivered as one HTML file. There is no build step and
-no framework — `index.html` contains the markup, styles and all application
+no framework — `site/index.html` contains the markup, styles and all application
 logic, and is deployed to Netlify as a static file.
 
 | Layer | Technology |
@@ -24,17 +24,27 @@ logic, and is deployed to Netlify as a static file.
 | File storage | Firebase Cloud Storage |
 | Offline | Service worker + `localStorage`, syncing when connectivity returns |
 
-The Firebase SDK is **self-hosted** in `vendor/firebase/` rather than loaded from
+The Firebase SDK is **self-hosted** in `site/vendor/firebase/` rather than loaded from
 a CDN, so the Content Security Policy can stay tight and the app keeps working if
 a CDN is unreachable.
 
 ## Repository layout
 
-```
-index.html                  The entire application
-service-worker.js           Offline cache. Bump CACHE_NAME on every deploy
-netlify.toml                Security headers and Content Security Policy
+Only `site/` is published to the website (`publish = "site"` in netlify.toml);
+everything else stays in the repository.
 
+```
+site/                       ← the website (all Netlify serves)
+  index.html                The entire application
+  service-worker.js         Offline cache. Bump CACHE_NAME on every deploy
+  intake.html               Client's own intake form (opened from a texted link)
+  intake/                   Intake form field list + logo, shared with the CMS
+  auth-redirect.html        Where Microsoft returns after Outlook sign-in
+  handbook/                 SEWB Participant Handbook (PDF)
+  vendor/firebase/          Self-hosted Firebase SDK (compat build)
+  vendor/msal/              Self-hosted Microsoft sign-in library (Outlook)
+
+netlify.toml                Publish folder, security headers, CSP, short links
 firebase.json               Firebase CLI config
 .firebaserc                 Firebase project alias
 firestore.rules             Database rules — CURRENTLY DEPLOYED
@@ -43,16 +53,20 @@ storage.rules               File rules — CURRENTLY DEPLOYED
 storage.rules.strict        File rules — role-based, NOT yet deployed
 
 functions/                  Cloud Functions that set role custom claims (not deployed)
+functions-sms/              Automatic text service (handbook + intake links) and its tests
 scripts/                    One-off operational scripts
-vendor/firebase/            Self-hosted Firebase SDK (compat build)
+tests/rules/                Firestore rules tests (run by the GitHub workflow)
+.github/workflows/          Tests and publishes the Firestore rules
 
-SECURITY-DEPLOY.md          How to roll out the strict rules safely
+docs/DEPLOY-FIREBASE.md     Publishing rules / text service from GitHub
+docs/SECURITY-DEPLOY.md     How to roll out the strict rules safely
+docs/SMS-SETUP.md           Automatic texts: provider, budget, go-live
 ```
 
 The `.strict` rule files are the hardened, role-aware versions. **Do not publish
 them until the Cloud Functions in `functions/` are deployed and every staff
 member has signed out and back in**, or managers will lose access. See
-`SECURITY-DEPLOY.md`.
+`docs/SECURITY-DEPLOY.md`.
 
 ## Deploying
 
@@ -60,8 +74,8 @@ A deploy is three independent things. Netlify handles the app; the rules and
 functions are deployed separately and do not happen automatically.
 
 **1 — The application.** Merging to `main` triggers a Netlify build. Before
-merging, bump `CACHE_NAME` in `service-worker.js` (for example `wg-cms-v67` →
-`v68`) **and** `APP_VERSION` in `index.html` to match. Skipping this is the most
+merging, bump `CACHE_NAME` in `site/service-worker.js` (for example `wg-cms-v67` →
+`v68`) **and** `APP_VERSION` in `site/index.html` to match. Skipping this is the most
 common cause of staff running an old build after a deploy. The version shows
 under Sign Out, so anyone can check which build they have; a hard refresh
 (Ctrl+Shift+R) picks up the latest.
@@ -81,7 +95,7 @@ curl -s -o /dev/null -w "%{http_code}\n" \
 Anything other than `403` means client records are readable without signing in.
 Restore the previous rules immediately.
 
-**3 — Cloud Functions.** Not currently deployed. Follow `SECURITY-DEPLOY.md`.
+**3 — Cloud Functions.** Not currently deployed. Follow `docs/SECURITY-DEPLOY.md`.
 
 ## Outlook calendar sync
 
@@ -93,8 +107,8 @@ CMS created are touched. They are marked Private, show the client's first
 name and initial only, and carry no notes.
 
 * Microsoft's sign-in library (MSAL 4.30, LTS) is **self-hosted** in
-  `vendor/msal/` — the old alcdn.msauth.net CDN now returns 404.
-* Microsoft returns the sign-in popup to `auth-redirect.html`, a blank page
+  `site/vendor/msal/` — the old alcdn.msauth.net CDN now returns 404.
+* Microsoft returns the sign-in popup to `site/auth-redirect.html`, a blank page
   served **without** Cross-Origin-Opener-Policy. The app page uses
   `same-origin-allow-popups` (set for `/` and `/index.html` in netlify.toml).
   Either header on the return page, or `same-origin` on the app page, cuts
@@ -192,7 +206,7 @@ A worker can send a client a link to fill in their own SEWB intake on their
 phone or computer: client file → **Intake** tab → **📲 Intake form by link**.
 
 * What's already on file is **filled in** for them. The questions are in
-  `intake/intake-fields.js`, shared by the client page (`intake.html`, served at
+  `site/intake/intake-fields.js`, shared by the client page (`site/intake.html`, served at
   `/i`) and the CMS. Self-harm, family violence, court orders and safety at home
   are deliberately **not** on it — workers ask those in person.
 * Send it as an automatic text (one SMS), from the worker's own phone, by
@@ -218,7 +232,7 @@ phone or computer: client file → **Intake** tab → **📲 Intake form by link
 * `.github/workflows/firebase-deploy.yml` tests the rules (both files) and the
   text service on every pull request, and **publishes `firestore.rules` when
   merged to main**. Run it by hand to also deploy the SMS text service. Set-up,
-  costs and go-live checklist: **DEPLOY-FIREBASE.md**.
+  costs and go-live checklist: **docs/DEPLOY-FIREBASE.md**.
 * Texts are plain characters within 160 = **one SMS** each (`/hb` and `/i` short
   links in netlify.toml). The text service stops at **$10 a month**
   (`SMS_MONTHLY_BUDGET`) and hands texts to workers' phones until the 1st;
@@ -277,11 +291,11 @@ the person rather than the browser they signed in on.
 
 ## Working on the code
 
-`index.html` is around 900 KB and is edited in place. Serve the directory over
-HTTP — opening the file directly breaks the service worker and Firebase auth:
+`site/index.html` is around 1.3 MB and is edited in place. Serve the `site/`
+folder over HTTP — opening the file directly breaks the service worker and Firebase auth:
 
 ```bash
-python3 -m http.server 8000   # then open http://localhost:8000
+python3 -m http.server 8000 --directory site   # then open http://localhost:8000
 ```
 
 Two conventions worth knowing before changing anything date-related or
@@ -356,7 +370,7 @@ blank), or the CorePlus import. Each entry records its `source`. Reports →
 Review & remove time entries lets a manager remove wrong entries; removal is a
 tracked delete and is audited.
 
-**SEWB Participant Handbook.** `handbook/SEWB-Participant-Handbook.pdf` is a
+**SEWB Participant Handbook.** `site/handbook/SEWB-Participant-Handbook.pdf` is a
 public document served with the app. When an intake is saved with a mobile
 number and "Safe to leave calls/texts?" is Yes, the worker is offered a
 ready-written text with a link to it (a text can't carry the PDF itself). It
@@ -374,7 +388,7 @@ instead of the worker's phone. The app only asks (a client id in the
 `smsOutbox` collection); the function re-checks staff, consent, mobile,
 duplicates and an hourly cap from the client's own file, sends, and writes
 the result back. It is off until a System Manager turns on Settings →
-Automatic texts, and needs the setup in `SMS-SETUP.md` first. Deploy only
+Automatic texts, and needs the setup in `docs/SMS-SETUP.md` first. Deploy only
 `functions:sms` — never plain `--only functions`.
 
 When it is on, saving an intake sends the text with no prompt, and the CMS
@@ -423,7 +437,7 @@ Tracked so they are not quietly forgotten:
 - MFA is available but not required for privileged accounts.
 - Feedback requests are sent from the worker's own phone. The handbook text
   can be automatic, but only after the SMS function is set up and deployed
-  (`SMS-SETUP.md`).
+  (`docs/SMS-SETUP.md`).
 - Feedback requests are not sent automatically, and there is no public form
   for clients to answer online — both need a server-side component (email/SMS
   provider and a locked-down response endpoint).

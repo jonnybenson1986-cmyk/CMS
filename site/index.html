@@ -1245,7 +1245,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v94';
+const APP_VERSION = 'v95';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -4116,15 +4116,15 @@ async function handbookSendAllAuto() {
 function smsSettingsStatusHTML() {
   const all = smsOutbox || [], by = k => all.filter(o => (o.status || 'queued') === k).length;
   const stuck = all.filter(smsStuck).length, last = all.slice().sort((a, b) => String(b.requestedAt).localeCompare(String(a.requestedAt)))[0];
-  const denied = window._smsListenErr ? `<div class="alert alert-warning" style="font-size:12px;margin-bottom:8px">Firebase refused access to the automatic-text settings (${sanitize(window._smsListenErr)}). Publish the latest <strong>firestore.rules</strong> in the Firebase console (SMS-SETUP.md), then reload. Until then, intakes ask the worker to send the text from their phone.</div>` : '';
+  const denied = window._smsListenErr ? `<div class="alert alert-warning" style="font-size:12px;margin-bottom:8px">Firebase refused access to the automatic-text settings (${sanitize(window._smsListenErr)}). Publish the latest <strong>firestore.rules</strong> in the Firebase console (docs/SMS-SETUP.md), then reload. Until then, intakes ask the worker to send the text from their phone.</div>` : '';
   return denied + `<div style="font-size:12px;color:var(--muted)">Sent: <strong>${by('sent')}</strong> · not sent: <strong>${by('skipped') + by('failed')}</strong> · waiting: <strong>${all.filter(smsPending).length}</strong>${last ? ` · last request ${fmtdt(last.requestedAt)}${last.status ? ' — ' + sanitize(last.status) + (last.reason ? ': ' + sanitize(last.reason) : '') : ''}` : ''}</div>
-    ${stuck ? `<div class="alert alert-warning" style="font-size:12px;margin-top:8px">${stuck} request${stuck !== 1 ? 's have' : ' has'} waited more than 3 minutes. The text service (Cloud Function) is probably not deployed or not set up — see SMS-SETUP.md. Until then, turn this off and send from your phone.</div>` : ''}`;
+    ${stuck ? `<div class="alert alert-warning" style="font-size:12px;margin-top:8px">${stuck} request${stuck !== 1 ? 's have' : ' has'} waited more than 3 minutes. The text service (Cloud Function) is probably not deployed or not set up — see docs/SMS-SETUP.md. Until then, turn this off and send from your phone.</div>` : ''}`;
 }
 function smsSettingsCardHTML() {
   const on = !!(smsConfig && smsConfig.autoHandbook);
   return `<div class="card" style="border-left:4px solid ${on ? '#16a34a' : '#9ca3af'}">
     <div class="card-header"><div class="card-title">📱 Automatic texts (SMS from Firebase)</div></div>
-    <p style="font-size:13px;color:var(--muted);margin-bottom:10px">When on, saving an intake with a mobile number (and "Safe to leave calls/texts?" = Yes) sends the SEWB Participant Handbook text automatically from Worn Gundidj — no phone needed. Requires the SMS Cloud Function and an SMS provider account (see <code>SMS-SETUP.md</code>). Each text costs a few cents.</p>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:10px">When on, saving an intake with a mobile number (and "Safe to leave calls/texts?" = Yes) sends the SEWB Participant Handbook text automatically from Worn Gundidj — no phone needed. Requires the SMS Cloud Function and an SMS provider account (see <code>docs/SMS-SETUP.md</code>). Each text costs a few cents.</p>
     <label style="display:flex;gap:8px;align-items:center;font-size:14px;font-weight:600"><input type="checkbox" id="sms-auto-toggle" ${on ? 'checked' : ''} ${FSYNC.isReady() ? '' : 'disabled'} onchange="setSmsAuto(this.checked)"> Send the handbook text automatically</label>
     ${on && smsConfig.updatedBy ? `<div style="font-size:11px;color:var(--muted);margin-top:4px">Turned on by ${sanitize(smsConfig.updatedBy)} · ${fmtdt(smsConfig.updatedAt)}</div>` : ''}
     <div id="sms-settings-status" style="margin-top:10px">${smsSettingsStatusHTML()}</div>
@@ -4133,7 +4133,7 @@ function smsSettingsCardHTML() {
 }
 async function setSmsAuto(on) {
   if (currentUser?.role !== 'sysmanager') { showToast('Only the System Manager can change this'); return; }
-  if (on && !confirm('Turn on automatic handbook texts?\n\nOnly do this once the SMS Cloud Function is deployed and the provider is set up (SMS-SETUP.md). Otherwise requests will wait and nothing is sent.')) { showPage('settings'); return; }
+  if (on && !confirm('Turn on automatic handbook texts?\n\nOnly do this once the SMS Cloud Function is deployed and the provider is set up (docs/SMS-SETUP.md). Otherwise requests will wait and nothing is sent.')) { showPage('settings'); return; }
   try { await FSYNC.setSmsConfig({ autoHandbook: !!on, updatedBy: currentUser?.name || '', updatedAt: new Date().toISOString() });
     audit(on ? 'Automatic texts turned on' : 'Automatic texts turned off', 'SEWB Participant Handbook');
     smsConfig = { autoHandbook: !!on, updatedBy: currentUser?.name || '', updatedAt: new Date().toISOString() }; showToast(on ? 'Automatic texts on' : 'Automatic texts off'); showPage('settings');
@@ -14968,7 +14968,7 @@ async function doLogin() {
       // Match Firebase user to local profile (keyed on email; self-healing)
       let u = _resolveUserProfile(cred.user, email);
       // Server-set role wins: once the role Cloud Function is deployed
-      // (SECURITY-DEPLOY.md), the signed token carries {role, name} custom
+      // (docs/SECURITY-DEPLOY.md), the signed token carries {role, name} custom
       // claims that a devtools localStorage edit can't forge. No claims yet
       // (functions not deployed) → keep the local profile role as before.
       try {

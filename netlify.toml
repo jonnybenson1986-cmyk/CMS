@@ -1,3 +1,8 @@
+# Only the site/ folder is published. Everything else in the repository
+# (guides, Firebase rules, server code, tests, scripts) stays off the website.
+[build]
+  publish = "site"
+
 [[headers]]
   for = "/*"
   [headers.values]
