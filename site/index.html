@@ -1267,7 +1267,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v98';
+const APP_VERSION = 'v99';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -2146,7 +2146,7 @@ function profileHeaderHTML(c) {
       </div>
     </div>
     <div class="pf-actions">
-      ${closed ? '' : `<button class="btn btn-primary btn-sm" onclick="openNoteModal('${id}')">📝 Add note</button><button class="btn btn-accent btn-sm" onclick="openTimeModal('${id}')">⏱️ Log time</button>`}
+      ${closed ? '' : `<button class="btn btn-primary btn-sm" onclick="openSessionModal('${id}')" title="Case note and time together — leave the minutes blank to record just a note">📝 Log session</button>`}
       <details class="pf-menu right" id="pf-actions"><summary class="btn btn-outline btn-sm">⋯ Actions ▾</summary>
         <div class="pf-menu-list" role="menu">
           <button class="pf-menu-item" role="menuitem" onclick="openEditClientModal('${id}')"><span>✏️</span><span>Edit details<small>Name, contact, programs, risk</small></span></button>
