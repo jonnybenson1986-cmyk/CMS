@@ -1267,7 +1267,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v99';
+const APP_VERSION = 'v100';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -3757,19 +3757,27 @@ function copyClientSummary(id) {
 }
 
 // ===== OUTLOOK ICS EXPORT =====
-function exportToOutlook(ids) {
-  const evts=ids?calEvents.filter(e=>ids.includes(e.id)):calEvents;
-  const lines=['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Worn Gundidj CMS//EN','CALSCALE:GREGORIAN','METHOD:PUBLISH'];
-  evts.forEach(e=>{
-    const cl=clients.find(c=>c.id===e.clientId);
-    const dtS=e.date.replace(/-/g,'')+'T'+(e.startTime||'09:00').replace(':','')+'00';
-    const dtE=e.date.replace(/-/g,'')+'T'+(e.endTime||'10:00').replace(':','')+'00';
-    lines.push('BEGIN:VEVENT',`UID:${e.id}@worngundidj.org.au`,`SUMMARY:${(e.title||'').replace(/[,;]/g,'\\$&')}`,`DTSTART;TZID=Australia/Melbourne:${dtS}`,`DTEND;TZID=Australia/Melbourne:${dtE}`,`DESCRIPTION:${(cl?'Client: '+cl.fullName+' | ':'')+(e.notes||'').replace(/\n/g,'\\n').slice(0,500)}`,`LOCATION:${(e.location||'')}`,`STATUS:CONFIRMED`,'END:VEVENT');
+// Download MY appointments for today / this week as an .ics file (Outlook,
+// Google, Apple). Same rule as the sync: never the whole team calendar, and
+// only the client's first name and initial — no notes.
+function _icsText(v) { return String(v || '').replace(/\\/g, '\\\\').replace(/[,;]/g, '\\$&').replace(/\r?\n/g, '\\n'); }
+function exportToOutlook(kind) {
+  const range = outlookRange(kind || 'week');
+  const evts = outlookCmsEvents(range.kind);
+  if (!evts.length) { showToast(`You have no appointments ${range.label} to export`); return; }
+  const lines = ['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Worn Gundidj CMS//EN','CALSCALE:GREGORIAN','METHOD:PUBLISH'];
+  evts.forEach(e => {
+    const b = outlookEventBody(e);
+    const dt = x => x.dateTime.replace(/[-:]/g, '').slice(0, 15);
+    lines.push('BEGIN:VEVENT', `UID:${_icsText(e.id)}@worngundidj.org.au`, `SUMMARY:${_icsText(b.subject)}`,
+      `DTSTART;TZID=Australia/Melbourne:${dt(b.start)}`, `DTEND;TZID=Australia/Melbourne:${dt(b.end)}`,
+      `DESCRIPTION:${_icsText(b.body.content)}`, `LOCATION:${_icsText(e.location || '')}`, 'CLASS:PRIVATE', 'STATUS:CONFIRMED', 'END:VEVENT');
   });
   lines.push('END:VCALENDAR');
-  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([lines.join('\r\n')],{type:'text/calendar'}));
-  a.download=`WornGundidj-${today()}.ics`; a.click();
-  showToast('Exported — double-click the .ics file to import into Outlook');
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([lines.join('\r\n')], { type: 'text/calendar' }));
+  a.download = `WornGundidj-my-appointments-${range.kind === 'today' ? today() : range.from}.ics`; a.click();
+  audit('Exported my appointments', `${evts.length} for ${range.label} (.ics)`);
+  showToast(`Exported your ${evts.length} appointment${evts.length !== 1 ? 's' : ''} for ${range.label} — open the .ics file to add them to Outlook`);
 }
 
 // ===== HELPER: service checkboxes =====
@@ -5477,10 +5485,17 @@ function reportPeriods(type) {
 // "jade.atkinson" (an email prefix). Reports group them as one worker.
 function canonicalWorker(name) {
   const raw = String(name || '').trim(); if (!raw) return '';
-  const k = raw.toLowerCase().replace(/[^a-z]/g, '');
-  const p = (userProfiles || []).find(u => u && ((u.name || '').toLowerCase().replace(/[^a-z]/g, '') === k
-          || (u.email || '').split('@')[0].toLowerCase().replace(/[^a-z]/g, '') === k));
-  return p && p.name ? p.name : raw;
+  const k = raw.toLowerCase().replace(/@.*$/, '').replace(/[^a-z]/g, '');
+  const same = u => u && ((u.name || '').toLowerCase().replace(/[^a-z]/g, '') === k
+          || (u.email || '').split('@')[0].toLowerCase().replace(/[^a-z]/g, '') === k);
+  // this device's profiles, then the shared staff directory (every device has it)
+  const p = (userProfiles || []).find(u => same(u) && u.name && !/[.@]/.test(u.name))
+         || (typeof _staffDirectory !== 'undefined' && Array.isArray(_staffDirectory) ? _staffDirectory.find(u => same(u) && u.name && !/[.@]/.test(u.name)) : null);
+  if (p) return p.name;
+  // still an email-style name ("jade.atkinson" / "jade.atkinson@…"): show it as "Jade Atkinson"
+  const m = raw.replace(/@.*$/, '');
+  if (/^[a-z]+([._-][a-z]+)+$/i.test(m) && m === m.toLowerCase()) return m.split(/[._-]/).map(w => w[0].toUpperCase() + w.slice(1)).join(' ');
+  return raw;
 }
 function reportWorkers() {
   const set = new Set();
@@ -8377,7 +8392,7 @@ function renderTodayView() {
     <button class="btn btn-sm ${calView==='week'?'btn-primary':'btn-outline'}"  onclick="calView='week';showPage('calendar')">📆 View Appointments</button>
     <button class="btn btn-sm btn-accent" onclick="openEventModal()">➕ New Appointment</button>
     <button class="btn btn-sm btn-outline" onclick="openAdminNotesModal()">🗒️ Admin Notes</button>
-    <button class="btn btn-sm btn-outline" onclick="exportToOutlook()" title="Export all appointments to Outlook (.ics file)">📤 Export to Outlook</button>
+    <button class="btn btn-sm btn-outline" onclick="exportToOutlook('week')" title="Download your own appointments for this week as an .ics file (not the whole calendar)">📤 Export my week (.ics)</button>
     ${outlookCalendarButtonHTML()}
   </div>
 
@@ -12510,7 +12525,30 @@ const OUTLOOK_SCOPES = ['Calendars.ReadWrite', 'User.Read'];
 const OUTLOOK_CATEGORY = 'Worn Gundidj CMS';
 const OUTLOOK_PROP = 'String {5b3c2f2a-7d0e-4a8e-9a51-6f1c0e2d9b47} Name WGCMSAppointmentId';
 const OUTLOOK_TZ = 'AUS Eastern Standard Time';     // Victoria (Melbourne / Warrnambool), with daylight saving
-const OUTLOOK_DAYS_BACK = 30, OUTLOOK_DAYS_AHEAD = 180;
+// What goes to Outlook: only the signed-in worker's own appointments, for today
+// or this week (Monday–Sunday) — never the whole team calendar.
+function outlookRange(kind) {
+  const t = today();
+  if (kind === 'today') return { kind: 'today', from: t, to: t, label: 'today' };
+  const dow = (new Date(t + 'T12:00:00').getDay() + 6) % 7;          // Monday = 0
+  const from = addDaysStr(t, -dow);
+  return { kind: 'week', from, to: addDaysStr(from, 6), label: 'this week' };
+}
+// Is this worker name me? Matches "Jade Atkinson", "jade atkinson" and the
+// email-prefix form "jade.atkinson", whichever way the appointment was saved.
+function _personKey(v) { return String(v || '').toLowerCase().replace(/@.*$/, '').replace(/[^a-z]/g, ''); }
+function isMyWorkerName(name) {
+  const k = _personKey(name); if (!k || !currentUser) return false;
+  const mine = new Set([_personKey(currentUser.name), _personKey(currentUser.email)].filter(Boolean));
+  return mine.has(k) || (!!currentUser.name && canonicalWorker(name) === canonicalWorker(currentUser.name));
+}
+// Outlook must be the signed-in worker's own mailbox (their CMS email).
+function outlookWrongMailbox() {
+  const acc = outlookAccount(), mine = String(currentUser?.email || '').toLowerCase();
+  if (!acc || !mine) return '';
+  const theirs = String(acc.username || '').toLowerCase();
+  return theirs && theirs !== mine ? theirs : '';
+}
 const _GUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 let _msalInstance = null, _msalKey = '', _outlookBusy = false;
 
@@ -12627,7 +12665,18 @@ async function outlookConnect() {
   try {
     const msalApp = _getMsalInstance(); if (!msalApp) return;
     await msalApp.initialize();
-    const result = await msalApp.loginPopup({ scopes: OUTLOOK_SCOPES, prompt: 'select_account', loginHint: currentUser?.email || undefined });
+    // Steer Microsoft to the worker's own mailbox (their CMS email). MSAL drops
+    // the hint when it's also asked to show the account picker, so only ask for
+    // the picker when there's no email to suggest.
+    const mine = String(currentUser?.email || '').toLowerCase();
+    const result = await msalApp.loginPopup(mine ? { scopes: OUTLOOK_SCOPES, loginHint: mine } : { scopes: OUTLOOK_SCOPES, prompt: 'select_account' });
+    const got = String(result.account?.username || '').toLowerCase();
+    if (mine && got && got !== mine) {
+      try { await msalApp.clearCache({ account: result.account }); } catch (_) {}
+      audit('Outlook connection refused', `signed in to Microsoft as ${got}; CMS user is ${mine}`);
+      _outlookError(`You signed in to Microsoft as ${got}. Appointments only go to your own Outlook — Connect again and sign in as ${mine}.`);
+      return;
+    }
     msalApp.setActiveAccount(result.account);
     _saveOutlookAccount(result.account);
     DB.save('msalToken', ''); DB.save('outlookLastError', null);      // tokens stay in Microsoft's own cache only
@@ -12669,10 +12718,10 @@ function _shortClientName(c) {
   const surname = String(c.fullName || '').replace(/"[^"]*"/g, ' ').trim().split(/\s+/).pop() || '';
   return parts[0] ? parts[0] + (surname && surname !== parts[0] ? ' ' + surname[0] + '.' : '') : '';
 }
-// My appointments, from 30 days ago to 6 months ahead.
-function outlookCmsEvents() {
-  const me = canonicalWorker(currentUser?.name || ''), from = addDaysStr(today(), -OUTLOOK_DAYS_BACK), to = addDaysStr(today(), OUTLOOK_DAYS_AHEAD);
-  return (calEvents || []).filter(e => e && e.id && e.date >= from && e.date <= to && canonicalWorker(e.worker || '') === me);
+// My appointments (as worker or second worker) for today or this week.
+function outlookCmsEvents(kind) {
+  const r = outlookRange(kind || DB.load('outlookRange', 'week'));
+  return (calEvents || []).filter(e => e && e.id && e.date >= r.from && e.date <= r.to && (isMyWorkerName(e.worker) || isMyWorkerName(e.worker2)));
 }
 function outlookEventBody(e) {
   const c = e.clientId ? clients.find(x => x.id === e.clientId) : null;
@@ -12718,11 +12767,14 @@ async function _outlookExisting(token) {
   return found;
 }
 
-async function outlookSync() {
+async function outlookSync(kind) {
   if (_outlookBusy) return; _outlookBusy = true;
   try {
     if (!outlookAccount()) { _outlookError('Connect your Outlook calendar first.'); return; }
-    showToast('Syncing to Outlook…');
+    const wrong = outlookWrongMailbox();
+    if (wrong) { _outlookError(`Outlook here is connected as ${wrong}, but you're signed in to the CMS as ${currentUser.email}. Your appointments only go to your own Outlook — use Disconnect (Settings → Outlook) and connect ${currentUser.email}.`); return; }
+    const range = outlookRange(kind || DB.load('outlookRange', 'week')); DB.save('outlookRange', range.kind);
+    showToast(`Syncing your appointments for ${range.label} to Outlook…`);
     let token = await _getOutlookToken(); if (!token) return;
     let existing;
     try { existing = await _outlookExisting(token); }
@@ -12730,8 +12782,7 @@ async function outlookSync() {
       if (e.status === 401) { token = await _getOutlookToken(true); if (!token) return; existing = await _outlookExisting(token); }
       else throw e;
     }
-    const mine = outlookCmsEvents(), ids = new Set(mine.map(e => String(e.id)));
-    const from = addDaysStr(today(), -OUTLOOK_DAYS_BACK);
+    const mine = outlookCmsEvents(range.kind), ids = new Set(mine.map(e => String(e.id)));
     const r = { created: 0, updated: 0, removed: 0, failed: 0, errors: [] };
     for (const e of mine) {
       const ev = existing.get(String(e.id));
@@ -12740,19 +12791,21 @@ async function outlookSync() {
         else { await _graph(token, 'POST', '/me/events', outlookEventBody(e)); r.created++; }
       } catch (err) { r.failed++; r.errors.push(err.message); }
     }
-    // Appointments deleted in the CMS (or reassigned to someone else) come out of Outlook too —
-    // only events this sync made, and only within the sync window.
+    // Outlook keeps just this period from now on: appointments this sync made that
+    // were deleted or reassigned in the CMS, or fall after the period, come out.
+    // Earlier ones (history) are left alone. Only events this sync created are touched.
     for (const [cmsId, ev] of existing) {
       if (ids.has(cmsId)) continue;
-      if (String(ev.start && ev.start.dateTime || '').slice(0, 10) < from) continue;
+      const d = String(ev.start && ev.start.dateTime || '').slice(0, 10);
+      if (!d || d < range.from) continue;
       try { await _graph(token, 'DELETE', '/me/events/' + encodeURIComponent(ev.id)); r.removed++; } catch (err) { r.failed++; r.errors.push(err.message); }
     }
     const ts = new Date().toLocaleString('en-AU');
     DB.save('msalLastSync', ts);
-    DB.save('outlookLastResult', { at: now(), created: r.created, updated: r.updated, removed: r.removed, failed: r.failed, error: r.errors[0] || '' });
+    DB.save('outlookLastResult', { at: now(), range: range.label, created: r.created, updated: r.updated, removed: r.removed, failed: r.failed, error: r.errors[0] || '' });
     DB.save('outlookLastError', r.failed ? { at: now(), text: `${r.failed} event${r.failed !== 1 ? 's' : ''} could not be synced: ${r.errors[0]}` } : null);
-    audit('Outlook sync', `${r.created} added, ${r.updated} updated, ${r.removed} removed${r.failed ? ', ' + r.failed + ' failed' : ''}`);
-    showToast(r.failed ? `⚠️ Outlook: ${r.created} added, ${r.updated} updated, ${r.removed} removed — ${r.failed} failed` : `✓ Outlook up to date: ${r.created} added, ${r.updated} updated, ${r.removed} removed`);
+    audit('Outlook sync', `${range.label} (${range.from} to ${range.to}) → ${outlookAccount()?.username || ''}: ${r.created} added, ${r.updated} updated, ${r.removed} removed${r.failed ? ', ' + r.failed + ' failed' : ''}`);
+    showToast(r.failed ? `⚠️ Outlook (${range.label}): ${r.created} added, ${r.updated} updated, ${r.removed} removed — ${r.failed} failed` : `✓ Your appointments for ${range.label} are in Outlook: ${r.created} added, ${r.updated} updated, ${r.removed} removed`);
     if (currentPage === 'settings' || currentPage === 'calendar') showPage(currentPage);
   } catch (e) {
     console.warn('Outlook sync failed:', e);
@@ -12764,7 +12817,7 @@ async function outlookSync() {
 function outlookStatusHTML() {
   const acc = outlookAccount(), last = DB.load('outlookLastResult', null), err = DB.load('outlookLastError', null);
   return `${acc ? `<div style="font-size:12px;color:#065f46">● Connected as <strong>${sanitize(acc.name || acc.username)}</strong> (${sanitize(acc.username || '')})</div>` : ''}
-    ${last && last.at ? `<div style="font-size:12px;color:var(--muted);margin-top:4px">Last sync ${fmtdt(last.at)}: ${last.created} added, ${last.updated} updated, ${last.removed} removed${last.failed ? `, <span style="color:#991b1b">${last.failed} failed</span>` : ''}</div>` : ''}
+    ${last && last.at ? `<div style="font-size:12px;color:var(--muted);margin-top:4px">Last sync ${fmtdt(last.at)}${last.range ? ' (' + sanitize(last.range) + ')' : ''}: ${last.created} added, ${last.updated} updated, ${last.removed} removed${last.failed ? `, <span style="color:#991b1b">${last.failed} failed</span>` : ''}</div>` : ''}
     <div id="outlook-error" class="alert alert-warning" style="font-size:12px;margin-top:8px;${err && err.text ? '' : 'display:none'}">${sanitize(err && err.text || '')}</div>`;
 }
 function outlookCalendarButtonHTML() {
@@ -12777,7 +12830,7 @@ function outlookCalendarButtonHTML() {
   const err = DB.load('outlookLastError', null);
   const check = `<button class="btn btn-sm btn-outline" id="outlook-check-btn" onclick="outlookCheck()" title="${sanitize(err && err.text ? 'Last problem: ' + err.text : 'Check each step of the Outlook connection')}">${err && err.text ? '⚠️ ' : ''}🩺 Check</button>`;
   return (outlookAccount()
-    ? `<button class="btn btn-sm btn-outline" id="outlook-sync-btn" onclick="outlookSync()" title="Put your CMS appointments into your Outlook calendar">🔄 Sync to Outlook</button>`
+    ? `<button class="btn btn-sm btn-outline" id="outlook-sync-today-btn" onclick="outlookSync('today')" title="Put your own CMS appointments for today into your Outlook (${sanitize(currentUser?.email || 'your email')})">🔄 Sync today</button><button class="btn btn-sm btn-outline" id="outlook-sync-btn" onclick="outlookSync('week')" title="Put your own CMS appointments for this week (Mon–Sun) into your Outlook (${sanitize(currentUser?.email || 'your email')})">🔄 Sync this week</button>`
     : `<button class="btn btn-sm btn-outline" id="outlook-connect-btn" onclick="outlookConnect()" title="Connect your Microsoft 365 calendar">🔗 Connect Outlook</button>`) + check;
 }
 
@@ -12846,12 +12899,13 @@ async function outlookCheck() {
   }
 
   // 4. What would be synced
-  const mine = outlookCmsEvents();
-  const from = addDaysStr(today(), -OUTLOOK_DAYS_BACK), to = addDaysStr(today(), OUTLOOK_DAYS_AHEAD);
+  const wk = outlookRange('week'), mine = outlookCmsEvents('week'), wrongBox = outlookWrongMailbox();
+  const from = wk.from, to = wk.to;
   const unassigned = (calEvents || []).filter(e => e && e.date >= from && e.date <= to && !String(e.worker || '').trim()).length;
-  if (mine.length) add('ok', `${mine.length} CMS appointment${mine.length !== 1 ? 's are' : ' is'} ready to sync`, 'Appointments where the Worker is ' + (currentUser?.name || 'you') + ', from 30 days ago to 6 months ahead.',
-    `<div><button class="btn btn-sm btn-primary" onclick="closeModal();outlookSync()">🔄 Sync to Outlook now</button></div>`);
-  else add('warn', 'You have no CMS appointments to sync', `Only appointments whose Worker is ${currentUser?.name || 'you'} are synced${unassigned ? ` — ${unassigned} appointment${unassigned !== 1 ? 's have' : ' has'} no worker set` : ''}. Set the Worker on your appointments, then Sync.`);
+  if (wrongBox) add('fail', 'Outlook is connected to someone else\'s mailbox', `Connected as ${wrongBox}, but you're signed in to the CMS as ${currentUser?.email}. Disconnect and connect your own Outlook — appointments only go to the worker's own mailbox.`);
+  if (mine.length) add('ok', `Your ${mine.length} appointment${mine.length !== 1 ? 's' : ''} this week ${mine.length !== 1 ? 'are' : 'is'} ready to sync`, 'Only appointments where you are the Worker (or second worker), for today or this week — never the whole calendar.',
+    `<div><button class="btn btn-sm btn-primary" onclick="closeModal();outlookSync('week')">🔄 Sync this week now</button></div>`);
+  else add('warn', 'You have no CMS appointments this week to sync', `Only appointments whose Worker is ${currentUser?.name || 'you'} are synced${unassigned ? ` — ${unassigned} appointment${unassigned !== 1 ? 's have' : ' has'} no worker set` : ''}. Set the Worker on your appointments, then Sync.`);
   const last = DB.load('outlookLastResult', null);
   if (last && last.at) add(last.failed ? 'warn' : 'info', `Last sync ${fmtdt(last.at)}`, `${last.created} added, ${last.updated} updated, ${last.removed} removed${last.failed ? `, ${last.failed} failed: ${last.error || ''}` : ''}`);
   done();
@@ -12865,12 +12919,12 @@ function outlookSettingsCardHTML() {
       <div class="card-title" style="display:flex;align-items:center;gap:10px"><span style="font-size:20px">📅</span> Outlook Calendar Sync
         <span id="outlook-status-badge" style="font-size:11px;padding:2px 10px;border-radius:12px;font-weight:700;${acc ? 'background:#dbeafe;color:#1e40af' : 'background:#f3f4f6;color:#6b7280'}">${acc ? '● Connected' : '○ Not connected'}</span></div>
       <div style="display:flex;gap:8px">
-        ${!id ? '' : acc ? `<button class="btn btn-sm btn-outline" onclick="outlookSync()">🔄 Sync now</button><button class="btn btn-sm btn-danger" onclick="outlookDisconnect()">Disconnect</button>`
+        ${!id ? '' : acc ? `<button class="btn btn-sm btn-outline" onclick="outlookSync('week')">🔄 Sync this week</button><button class="btn btn-sm btn-danger" onclick="outlookDisconnect()">Disconnect</button>`
                          : `<button class="btn btn-sm btn-primary" onclick="outlookConnect()" style="background:#0078d4;border-color:#0078d4">Connect to Outlook</button>`}
         <button class="btn btn-sm btn-outline" id="outlook-check-settings" onclick="outlookCheck()" title="Check each step of the Outlook connection">🩺 Check connection</button>
       </div>
     </div>
-    <p style="font-size:13px;color:var(--muted);margin-bottom:12px">Puts each worker's CMS appointments into their own Outlook calendar — 30 days back to 6 months ahead. Syncing again updates them (no duplicates) and removes ones deleted in the CMS. Events are marked Private and show only the client's first name and initial. Staff connect from the <strong>Calendar</strong> page; the set-up below is done once.</p>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:12px">Puts each worker's <strong>own</strong> CMS appointments — today, or this week — into their own Outlook (the mailbox of the email they sign in with), never the whole team calendar. Syncing again updates them (no duplicates) and removes ones deleted in the CMS. Events are marked Private and show only the client's first name and initial. Staff connect from the <strong>Calendar</strong> page; the set-up below is done once.</p>
     ${outlookStatusHTML()}
     ${sys ? `<details style="margin-top:12px" ${id ? '' : 'open'}><summary style="font-size:13px;font-weight:700;cursor:pointer">Azure set-up (System Manager)</summary>
     <div style="background:#f8fafc;border:1px solid var(--border);border-radius:8px;padding:14px;font-size:12px;line-height:1.75;margin-top:8px">
