@@ -1267,7 +1267,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v97';
+const APP_VERSION = 'v98';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -2327,7 +2327,7 @@ function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
       <div class="card-header"><div class="card-title">📝 Recent notes</div><button class="btn-ghost" onclick="gotoProfileSection('notes')">All notes &amp; files →</button></div>
       ${recent.length===0?'<p style="color:var(--muted);font-size:13px">No notes yet</p>':
         recent.map(n=>`<div class="note-entry ${n.type||'general'}">
-          <div class="note-meta"><span class="section-badge badge-${n.type||'general'}">${noteTypeLabel(n.type)}</span><span>${fmtdt(n.created)}</span><span>${sanitize(n.worker||'')}</span></div>
+          <div class="note-meta"><span class="section-badge badge-${n.type||'general'}">${noteTypeLabel(n.type)}</span><span>${fmtdt(n.created)}</span><span>${sanitize(workerNames(n))}</span></div>
           <div class="note-text">${noteBodyHTML(n)}</div>
         </div>`).join('')
       }
@@ -2576,7 +2576,7 @@ function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
             <div class="note-meta">
               <span class="section-badge" style="background:#f3f4f6;color:#374151">⏱️ TIME</span>
               <span>${fmt(t.date)}</span>
-              <span>${sanitize(t.worker||'')}</span>
+              <span>${sanitize(workerNames(t))}</span>
               ${t.activity?`<span>📍 ${sanitize(t.activity)}</span>`:''}
               <span>⏱️ ${t.minutes||0} min</span>
             </div>
@@ -2589,7 +2589,7 @@ function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
         <div class="note-meta">
           <span class="section-badge badge-${n.type||'general'}">${noteTypeLabel(n.type)}</span>
           <span>${fmtdt(n.created)}</span>
-          <span>${sanitize(n.worker||'')}</span>
+          <span>${sanitize(workerNames(n))}</span>
           ${n.contactType?`<span>📍 ${sanitize(n.contactType)}</span>`:''}
           ${n.duration?`<span>⏱️ ${n.duration} min</span>`:''}
           ${files.length?`<span title="Attached files">📎 ${files.length}</span>`:''}
@@ -2640,7 +2640,7 @@ function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
           <span class="time-badge">${t.minutes||0} min</span>
           <div style="flex:1">
             <div style="font-size:13px;font-weight:600">${sanitize(t.activity||'Session')}</div>
-            <div style="font-size:11px;color:var(--muted)">${fmt(t.date)} &bull; ${t.worker||''} &bull; ${t.type||'face-to-face'}</div>
+            <div style="font-size:11px;color:var(--muted)">${fmt(t.date)} &bull; ${sanitize(workerNames(t))} &bull; ${t.type||'face-to-face'}</div>
             ${t.notes?`<div style="font-size:12px;color:var(--muted);margin-top:2px">${sanitize(t.notes)}</div>`:''}
           </div>
           <button class="btn-ghost" style="color:var(--danger);font-size:11px" onclick="deleteTime('${t.id}','${c.id}')">✕</button>
@@ -3086,7 +3086,7 @@ function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
       </div>
       <div>
         <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:8px">Recent Notes</div>
-        ${recentNotes.length===0?'<p style="font-size:13px;color:var(--muted)">No notes yet</p>':recentNotes.map(n=>`<div class="note-entry ${n.type||'general'}" style="margin-bottom:8px"><div class="note-meta"><span class="section-badge badge-${n.type||'general'}">${noteTypeLabel(n.type)}</span><span>${fmtdt(n.created)}</span><span>${sanitize(n.worker||'')}</span></div><div class="note-text">${sanitize((n.text||'').slice(0,200))}${(n.text||'').length>200?'…':''}</div></div>`).join('')}
+        ${recentNotes.length===0?'<p style="font-size:13px;color:var(--muted)">No notes yet</p>':recentNotes.map(n=>`<div class="note-entry ${n.type||'general'}" style="margin-bottom:8px"><div class="note-meta"><span class="section-badge badge-${n.type||'general'}">${noteTypeLabel(n.type)}</span><span>${fmtdt(n.created)}</span><span>${sanitize(workerNames(n))}</span></div><div class="note-text">${sanitize((n.text||'').slice(0,200))}${(n.text||'').length>200?'…':''}</div></div>`).join('')}
       </div>
     </div>`;
   }
@@ -4447,7 +4447,7 @@ function filterNotes(clientId, type) {
   const filtered = notes.filter(n=>n.clientId===clientId&&(n.type||'general')===type).sort((a,b)=>b.created?.localeCompare(a.created));
   if(!filtered.length) return '<p style="color:var(--muted);font-size:13px">No notes recorded for this area yet</p>';
   return filtered.map(n=>`<div class="note-entry ${type}">
-    <div class="note-meta"><span>${fmtdt(n.created)}</span><span>${sanitize(n.worker||'')}</span>${n.contactType?`<span>📍 ${sanitize(n.contactType)}</span>`:''}</div>
+    <div class="note-meta"><span>${fmtdt(n.created)}</span><span>${sanitize(workerNames(n))}</span>${n.contactType?`<span>📍 ${sanitize(n.contactType)}</span>`:''}</div>
     <div class="note-text">${noteBodyHTML(n)}</div>
   </div>`).join('');
 }
@@ -5044,7 +5044,7 @@ function renderNotes() {
             <span class="section-badge badge-${n.type||'general'}">${noteTypeLabel(n.type)}</span>
             <strong style="font-size:12px">${sanitize(c?.fullName||'Unknown')}</strong>
             <span>${fmtdt(n.created)}</span>
-            <span>${sanitize(n.worker||'')}</span>
+            <span>${sanitize(workerNames(n))}</span>
             ${n.contactType?`<span>📍 ${sanitize(n.contactType)}</span>`:''}
           </div>
           <div class="note-text">${sanitize((n.text||'').slice(0,200))}${(n.text||'').length>200?'…':''}</div>
@@ -5086,7 +5086,7 @@ function renderTime() {
             <td style="cursor:pointer" onclick="openClientProfile('${t.clientId}')">${sanitize(c?.fullName||'Unknown')}</td>
             <td>${fmt(t.date)}</td><td>${t.activity||'—'}</td><td>${t.type||'—'}</td>
             <td><span class="time-badge">${t.minutes} min</span></td>
-            <td>${t.worker||'—'}</td>
+            <td>${sanitize(workerNames(t)||'—')}</td>
           </tr>`;
         }).join('')||'<tr><td colspan="6"><div class="empty-state"><div class="icon">⏱️</div><p>No time logged yet</p></div></td></tr>'}
         </tbody>
@@ -5485,8 +5485,8 @@ function canonicalWorker(name) {
 function reportWorkers() {
   const set = new Set();
   (userProfiles || []).forEach(u => u?.name && set.add(canonicalWorker(u.name)));
-  (timeLogs || []).forEach(t => t.worker && set.add(canonicalWorker(t.worker)));
-  (notes || []).forEach(n => n.worker && set.add(canonicalWorker(n.worker)));
+  (timeLogs || []).forEach(t => { t.worker && set.add(canonicalWorker(t.worker)); t.worker2 && set.add(canonicalWorker(t.worker2)); });
+  (notes || []).forEach(n => { n.worker && set.add(canonicalWorker(n.worker)); n.worker2 && set.add(canonicalWorker(n.worker2)); });
   return [...set].filter(Boolean).sort((a, b) => a.localeCompare(b));
 }
 // Default: the last 90 days, as the Reports page has always opened with.
@@ -5583,8 +5583,8 @@ function withReportFilters(build, opts = {}) {
       let cs = clients, ns = notes, tl = timeLogs;
       if (f.clientId) { cs = cs.filter(c => c.id === f.clientId); ns = ns.filter(n => n.clientId === f.clientId); tl = tl.filter(t => t.clientId === f.clientId); }
       if (f.worker) {
-        ns = ns.filter(n => canonicalWorker(n.worker) === f.worker);
-        tl = tl.filter(t => canonicalWorker(t.worker) === f.worker);
+        ns = ns.filter(n => hasWorker(n, f.worker, canonicalWorker));
+        tl = tl.filter(t => hasWorker(t, f.worker, canonicalWorker));
         const ids = new Set([...ns.filter(n => inR(n.created)).map(n => n.clientId), ...tl.filter(t => inR(t.date)).map(t => t.clientId),
                              ...cs.filter(c => canonicalWorker(c.keyWorker) === f.worker).map(c => c.id)]);
         cs = cs.filter(c => ids.has(c.id));
@@ -5640,7 +5640,7 @@ let _trOpen = false;            // stays open across page redraws (sync refreshe
 function timeReviewEntries() {
   const f = reportFilter();
   return (timeLogs || []).filter(t => t && t.date >= f.from && t.date <= f.to)
-    .filter(t => !f.worker || canonicalWorker(t.worker) === f.worker)
+    .filter(t => !f.worker || hasWorker(t, f.worker, canonicalWorker))
     .filter(t => !f.clientId || t.clientId === f.clientId)
     .filter(t => { const c = clients.find(x => x.id === t.clientId); return !c || canViewClient(c); })
     .sort((a, b) => String(b.date).localeCompare(String(a.date)));
@@ -5674,7 +5674,7 @@ function timeReviewBodyHTML() {
       ${list.map(t => { const c = clients.find(x => x.id === t.clientId); return `<tr>
         ${can ? `<td><input type="checkbox" class="tr-row" data-id="${sanitize(t.id)}" ${_trSel.has(t.id) ? 'checked' : ''} onchange="timeReviewToggle('${sanitize(t.id)}', this.checked)"></td>` : ''}
         <td>${fmt(t.date)}</td><td>${sanitize(c?.fullName || 'Unknown')}</td><td>${Number(t.minutes) || 0}</td>
-        <td>${sanitize(activityCategory(t.activity))}</td><td>${sanitize(canonicalWorker(t.worker) || '—')}</td><td>${sanitize(TIME_SOURCES[timeLogSource(t)])}</td></tr>`; }).join('')}
+        <td>${sanitize(activityCategory(t.activity))}</td><td>${sanitize([canonicalWorker(t.worker), t.worker2 && canonicalWorker(t.worker2)].filter(Boolean).join(' & ') || '—')}</td><td>${sanitize(TIME_SOURCES[timeLogSource(t)])}</td></tr>`; }).join('')}
       </tbody></table></div>
       ${can ? `<div style="display:flex;gap:10px;align-items:center;margin-top:10px;flex-wrap:wrap">
         <button class="btn btn-danger" id="tr-remove" ${_trSel.size ? '' : 'disabled'} onclick="timeReviewRemove()">🗑️ Remove ${_trSel.size} selected (${selMin} min)</button>
@@ -6987,7 +6987,7 @@ function buildFullClientReport(c, from, to) {
   <h2>Case Notes (${clientNotes.length}) — ${fmt(from)} to ${fmt(to)}</h2>
   ${clientNotes.length===0 ? '<p>No notes in this period</p>' :
     clientNotes.map(n=>`<div class="note-block ${sanitize(n.type||'general')}">
-      <div class="note-meta"><strong class="badge badge-${sanitize(n.type||'general')}">${noteTypeLabel(n.type).toUpperCase()}</strong> &nbsp; ${fmtdt(n.created)} &nbsp;|&nbsp; ${sanitize(n.worker||'—')} &nbsp;|&nbsp; ${sanitize(n.contactType||'')} ${n.duration?'| '+n.duration+' min':''}</div>
+      <div class="note-meta"><strong class="badge badge-${sanitize(n.type||'general')}">${noteTypeLabel(n.type).toUpperCase()}</strong> &nbsp; ${fmtdt(n.created)} &nbsp;|&nbsp; ${sanitize(workerNames(n)||'—')} &nbsp;|&nbsp; ${sanitize(n.contactType||'')} ${n.duration?'| '+n.duration+' min':''}</div>
       <p>${sanitize(n.text||'').replace(/\n/g,'<br>')}</p>
       ${n.followup?`<p style="margin-top:6px;color:#6b7280"><strong>Follow-up:</strong> ${sanitize(n.followup)}</p>`:''}
     </div>`).join('')
@@ -6996,7 +6996,7 @@ function buildFullClientReport(c, from, to) {
   <h2>Time Log (${Math.floor(totalMins/60)}h ${totalMins%60}m) — ${fmt(from)} to ${fmt(to)}</h2>
   ${clientTime.length===0 ? '<p>No time entries in this period</p>' : `
   <table><tr><th>Date</th><th>Activity</th><th>Mode</th><th>Duration</th><th>Worker</th></tr>
-  ${clientTime.sort((a,b)=>b.date.localeCompare(a.date)).map(t=>`<tr><td>${fmt(t.date)}</td><td>${sanitize(t.activity||'—')}</td><td>${sanitize(t.type||'—')}</td><td>${sanitize(t.minutes)} min</td><td>${sanitize(t.worker||'—')}</td></tr>`).join('')}
+  ${clientTime.sort((a,b)=>b.date.localeCompare(a.date)).map(t=>`<tr><td>${fmt(t.date)}</td><td>${sanitize(t.activity||'—')}</td><td>${sanitize(t.type||'—')}</td><td>${sanitize(t.minutes)} min</td><td>${sanitize(workerNames(t)||'—')}</td></tr>`).join('')}
   <tr style="font-weight:700"><td colspan="3">TOTAL</td><td>${Math.floor(totalMins/60)}h ${totalMins%60}m</td><td></td></tr>
   </table>`}`;
 }
@@ -7026,7 +7026,7 @@ function buildSEWBClientReport(c, inline) {
   <h3>SEWB Case Notes (${sewbNotes.length})</h3>
   ${sewbNotes.length===0 ? '<p>No SEWB notes recorded</p>' :
     sewbNotes.map(n=>`<div class="note-block sewb">
-      <div class="note-meta">${fmtdt(n.created)} | ${sanitize(n.worker||'—')} | ${sanitize(n.contactType||'')}</div>
+      <div class="note-meta">${fmtdt(n.created)} | ${sanitize(workerNames(n)||'—')} | ${sanitize(n.contactType||'')}</div>
       <p>${sanitize(n.text||'').replace(/\n/g,'<br>')}</p>
     </div>`).join('')}`;
   return inline ? html : html;
@@ -7060,7 +7060,7 @@ function buildAODClientReport(c, inline) {
   <h3>AOD Case Notes (${aodNotes.length})</h3>
   ${aodNotes.length===0 ? '<p>No AOD notes recorded</p>' :
     aodNotes.map(n=>`<div class="note-block aod">
-      <div class="note-meta">${fmtdt(n.created)} | ${sanitize(n.worker||'—')} | ${sanitize(n.contactType||'')}</div>
+      <div class="note-meta">${fmtdt(n.created)} | ${sanitize(workerNames(n)||'—')} | ${sanitize(n.contactType||'')}</div>
       <p>${sanitize(n.text||'').replace(/\n/g,'<br>')}</p>
     </div>`).join('')}`;
 }
@@ -7088,7 +7088,7 @@ function buildJusticeClientReport(c, inline) {
   <h3>Justice Case Notes (${jNotes.length})</h3>
   ${jNotes.length===0 ? '<p>No justice notes recorded</p>' :
     jNotes.map(n=>`<div class="note-block justice">
-      <div class="note-meta">${fmtdt(n.created)} | ${sanitize(n.worker||'—')} | ${sanitize(n.contactType||'')}</div>
+      <div class="note-meta">${fmtdt(n.created)} | ${sanitize(workerNames(n)||'—')} | ${sanitize(n.contactType||'')}</div>
       <p>${sanitize(n.text||'').replace(/\n/g,'<br>')}</p>
     </div>`).join('')}`;
 }
@@ -7118,7 +7118,7 @@ function buildCulturalClientReport(c, inline) {
   <h3>Cultural Case Notes (${cNotes.length})</h3>
   ${cNotes.length===0 ? '<p>No cultural notes recorded</p>' :
     cNotes.map(n=>`<div class="note-block cultural">
-      <div class="note-meta">${fmtdt(n.created)} | ${sanitize(n.worker||'—')} | ${sanitize(n.contactType||'')}</div>
+      <div class="note-meta">${fmtdt(n.created)} | ${sanitize(workerNames(n)||'—')} | ${sanitize(n.contactType||'')}</div>
       <p>${sanitize(n.text||'').replace(/\n/g,'<br>')}</p>
     </div>`).join('')}`;
 }
@@ -7207,7 +7207,7 @@ function buildMensGroupClientReport(c, inline) {
   <h3>Men's Group Notes (${ns.length})</h3>
   ${ns.length===0 ? "<p>No Men's Group notes recorded</p>" :
     ns.map(n=>`<div class="note-block mensgroup">
-      <div class="note-meta">${fmtdt(n.created)} | ${sanitize(n.worker||'—')} | ${sanitize(n.contactType||'')}</div>
+      <div class="note-meta">${fmtdt(n.created)} | ${sanitize(workerNames(n)||'—')} | ${sanitize(n.contactType||'')}</div>
       <p>${sanitize(n.text||'').replace(/\n/g,'<br>')}</p>
     </div>`).join('')}`;
 }
@@ -7241,7 +7241,7 @@ function buildDisabilityClientReport(c) {
   <div class="field-row"><div class="field"><label>Funded Supports</label><p>${sanitize(dis.fundedSupports||'—')}</p></div></div>
   ${buildNDISFundingReportSection(c)}
   <h3>Disability Notes (${disNotes.length})</h3>
-  ${disNotes.map(n=>`<div class="note-block"><div class="note-meta">${fmtdt(n.created)} | ${sanitize(n.worker||'—')}</div><p>${sanitize(n.text||'').replace(/\n/g,'<br>')}</p></div>`).join('')||'<p>None</p>'}`;
+  ${disNotes.map(n=>`<div class="note-block"><div class="note-meta">${fmtdt(n.created)} | ${sanitize(workerNames(n)||'—')}</div><p>${sanitize(n.text||'').replace(/\n/g,'<br>')}</p></div>`).join('')||'<p>None</p>'}`;
 }
 
 // NDIS funding summary + claims + supports for the printed disability report
@@ -7303,7 +7303,7 @@ function buildWorkFoundationsClientReport(c) {
   <h2>Achievements / Milestones</h2>
   <p>${(wf.achievements||'—').replace(/\n/g,'<br>')}</p>
   <h3>Work Foundations Notes (${wfNotes.length})</h3>
-  ${wfNotes.map(n=>`<div class="note-block"><div class="note-meta">${fmtdt(n.created)} | ${sanitize(n.worker||'—')}</div><p>${sanitize(n.text||'').replace(/\n/g,'<br>')}</p></div>`).join('')||'<p>None</p>'}`;
+  ${wfNotes.map(n=>`<div class="note-block"><div class="note-meta">${fmtdt(n.created)} | ${sanitize(workerNames(n)||'—')}</div><p>${sanitize(n.text||'').replace(/\n/g,'<br>')}</p></div>`).join('')||'<p>None</p>'}`;
 }
 
 // ---- SAFETY PLAN REPORT ----
@@ -7348,7 +7348,7 @@ function buildNotesReport(c, from, to) {
   ${Object.entries(byType).map(([t,ns])=>`
     <h2>${t.toUpperCase()} Notes (${ns.length})</h2>
     ${ns.map(n=>`<div class="note-block ${t}">
-      <div class="note-meta">${fmtdt(n.created)} | ${sanitize(n.worker||'—')} | ${sanitize(n.contactType||'')} ${n.duration?'| '+n.duration+' min':''}</div>
+      <div class="note-meta">${fmtdt(n.created)} | ${sanitize(workerNames(n)||'—')} | ${sanitize(n.contactType||'')} ${n.duration?'| '+n.duration+' min':''}</div>
       <p>${sanitize(n.text||'').replace(/\n/g,'<br>')}</p>
       ${n.followup?`<p style="margin-top:5px"><strong>Follow-up:</strong> ${sanitize(n.followup)}</p>`:''}
     </div>`).join('')}
@@ -7374,7 +7374,7 @@ function buildTimeReport(c, from, to) {
   </table>
   <h2>All Sessions</h2>
   <table><tr><th>Date</th><th>Activity</th><th>Mode</th><th>Duration</th><th>Worker</th><th>Notes</th></tr>
-  ${filtered.map(t=>`<tr><td>${fmt(t.date)}</td><td>${sanitize(t.activity||'—')}</td><td>${sanitize(t.type||'—')}</td><td>${sanitize(t.minutes)} min</td><td>${sanitize(t.worker||'—')}</td><td style="font-size:10px">${sanitize(t.notes||'')}</td></tr>`).join('')}
+  ${filtered.map(t=>`<tr><td>${fmt(t.date)}</td><td>${sanitize(t.activity||'—')}</td><td>${sanitize(t.type||'—')}</td><td>${sanitize(t.minutes)} min</td><td>${sanitize(workerNames(t)||'—')}</td><td style="font-size:10px">${sanitize(t.notes||'')}</td></tr>`).join('')}
   <tr style="font-weight:700;background:#f0f7f3"><td colspan="3">TOTAL</td><td>${Math.floor(total/60)}h ${total%60}m</td><td colspan="2"></td></tr>
   </table>`;
 }
@@ -7625,16 +7625,16 @@ function buildWorkloadReport(from, to){
   const inRange = d => d && d>=from && d<=to+'T23:59:59';
   const workerSet = new Set();
   clients.forEach(c=>c.keyWorker && workerSet.add(c.keyWorker));
-  notes.forEach(n=>n.worker && workerSet.add(n.worker));
-  timeLogs.forEach(t=>t.worker && workerSet.add(t.worker));
+  notes.forEach(n=>{ n.worker && workerSet.add(n.worker); n.worker2 && workerSet.add(n.worker2); });
+  timeLogs.forEach(t=>{ t.worker && workerSet.add(t.worker); t.worker2 && workerSet.add(t.worker2); });
   (workersList||[]).forEach(w=>w && workerSet.add(w));
   const workers = [...workerSet].filter(Boolean).sort();
 
   const rows = workers.map(w=>{
     const myClients = clients.filter(c=>c.keyWorker===w);
     const active   = myClients.filter(c=>c.status==='active').length;
-    const contacts = notes.filter(n=>n.worker===w && inRange(n.created)).length;
-    const minutes  = timeLogs.filter(t=>t.worker===w && inRange(t.date)).reduce((a,t)=>a+(Number(t.minutes)||0),0);
+    const contacts = notes.filter(n=>hasWorker(n,w) && inRange(n.created)).length;
+    const minutes  = timeLogs.filter(t=>hasWorker(t,w) && inRange(t.date)).reduce((a,t)=>a+(Number(t.minutes)||0),0);
     const openTasks= workflowTasks.filter(t=>t.worker===w && !t.done).length;
     const highRisk = myClients.filter(c=>c.riskLevel==='high' && c.status==='active').length;
     return { worker:w, total:myClients.length, active, contacts, hours:minutes/60, openTasks, highRisk };
@@ -8128,6 +8128,8 @@ function buildActivityReport(from, to) {
   const byWorker = {}; const byActivity = {}; const byClient = {};
   filtered.forEach(t=>{
     const w=canonicalWorker(t.worker)||'Unknown'; byWorker[w]=(byWorker[w]||0)+(t.minutes||0);
+    // joint session: the second worker worked that time too (the Total stays counted once)
+    if (t.worker2) { const w2=canonicalWorker(t.worker2); if (w2 && w2!==w) byWorker[w2]=(byWorker[w2]||0)+(t.minutes||0); }
     const a=activityCategory(t.activity); byActivity[a]=(byActivity[a]||0)+(t.minutes||0);
     byClient[t.clientId]=(byClient[t.clientId]||0)+(t.minutes||0);
   });
@@ -8144,7 +8146,7 @@ function buildActivityReport(from, to) {
     <div><h2>By Worker</h2>
     <table><tr><th>Worker</th><th>Total Time</th><th>Sessions</th></tr>
     ${Object.entries(byWorker).sort((a,b)=>b[1]-a[1]).map(([w,m])=>{
-      const count=filtered.filter(t=>(canonicalWorker(t.worker)||'Unknown')===w).length;
+      const count=filtered.filter(t=>(canonicalWorker(t.worker)||'Unknown')===w || (t.worker2 && canonicalWorker(t.worker2)===w)).length;
       return `<tr><td>${sanitize(w)}</td><td>${Math.floor(m/60)}h ${m%60}m</td><td>${count}</td></tr>`;
     }).join('')}</table></div>
     <div><h2>By Activity</h2>
@@ -9399,7 +9401,7 @@ function renderSessions() {
             </div>
             <div class="session-meta">
               <span>📅 ${fmtdt(n.created)}</span>
-              ${n.worker?`<span>👤 ${sanitize(n.worker)}</span>`:''}
+              ${n.worker?`<span>👤 ${sanitize(workerNames(n))}</span>`:''}
               ${n.contactType?`<span>📍 ${n.contactType}</span>`:''}
               ${n.location?`<span>🏠 ${sanitize(n.location)}</span>`:''}
             </div>
@@ -9447,7 +9449,7 @@ function searchSessions(q) {
 //     information and must not linger on a shared computer.
 //   • Drafts expire after 7 days. Attachments are not kept in drafts.
 const DRAFT_TTL_MS = 7 * 24 * 3600 * 1000;
-const SESSION_DRAFT_FIELDS = ['sm-type','sm-contact','sm-location','sm-date','sm-duration','sm-worker',
+const SESSION_DRAFT_FIELDS = ['sm-type','sm-contact','sm-location','sm-date','sm-duration','sm-worker','sm-worker2',
   'sm-text','sm-followup','sm-followupDate','sm-ndis-item','sm-ndis-qty','sm-ndis-cat','sm-addtocal'];
 function _draftUser() { return String(currentUser?.email || currentUser?.id || currentUser?.name || '').toLowerCase(); }
 function _draftStore() { const s = DB.load('noteDrafts', {}); return (s && typeof s === 'object') ? s : {}; }
@@ -9600,6 +9602,10 @@ function openSessionModal(clientId, defaultType) {
         : `<input id="sm-worker" value="${sanitize(currentUser?.name||'')}" readonly title="Sessions are recorded under the worker who is signed in" style="background:var(--bg);color:var(--muted);cursor:not-allowed">
            <div style="font-size:11px;color:var(--muted);margin-top:4px">Recorded under your name. Only a System Manager can log a session for another worker.</div>`}
     </div>
+    <div class="form-group"><label for="sm-worker2">Second worker <span style="font-weight:400;color:var(--muted)">(optional — joint session)</span></label>
+      ${workerSelectHTML('sm-worker2','sm-worker2-new','', '— No second worker —')}
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">For a session run with a colleague. Both names go on the note; the time is recorded once.</div>
+    </div>
   </div>
 
   <div id="sm-ndis-block" style="display:${defaultType==='disability'?'block':'none'};background:#faf5ff;border:1px solid #e9d5ff;border-radius:8px;padding:12px;margin-bottom:14px">
@@ -9677,6 +9683,8 @@ function openSessionModal(clientId, defaultType) {
     const worker = currentUser?.role==='sysmanager'
       ? getWorkerValue('sm-worker','sm-worker-new')
       : (currentUser?.name || '');
+    let worker2 = getWorkerValue('sm-worker2','sm-worker2-new');
+    if (worker2 && canonicalWorker(worker2) === canonicalWorker(worker)) worker2 = '';   // same person twice
     const clientId = document.getElementById('sm-client')?.value;
     const type = document.getElementById('sm-type')?.value||'general';
     const contact = document.getElementById('sm-contact')?.value;
@@ -9687,6 +9695,7 @@ function openSessionModal(clientId, defaultType) {
     // Create note
     const n = { id:uid(), clientId, type, contactType:contact, location,
       created:noteDate, duration:mins, worker, text, followup, followupDate };
+    if (worker2) n.worker2 = worker2;
     const noteHtml = rteHTML('sm-text'); if (noteHtml) n.html = noteHtml;   // pictures are stored as references to the attached files   // formatting (bold, lists, tables…); text stays the plain copy
     notes.push(n);
 
@@ -9735,7 +9744,7 @@ function openSessionModal(clientId, defaultType) {
       const startH = String(noteD.getHours()).padStart(2,'0');
       const startM = String(noteD.getMinutes()).padStart(2,'0');
       timeLogs.push({ id:uid(), clientId, date:noteDateStr, minutes:mins,
-        activity:contact||'Session', type:'Face-to-face', source:'Case note', worker, notes:text.slice(0,100), fromNoteId:n.id });
+        activity:contact||'Session', type:'Face-to-face', source:'Case note', worker, ...(worker2 ? { worker2 } : {}), notes:text.slice(0,100), fromNoteId:n.id });
 
       // Add to calendar if checked
       if(document.getElementById('sm-addtocal')?.checked && clientId) {
@@ -9745,7 +9754,7 @@ function openSessionModal(clientId, defaultType) {
           title:`${contact||'Session'} — ${sanitize(cl?.fullName||'Client')}`,
           clientId, date:noteDateStr, startTime:`${startH}:${startM}`,
           endTime:minsToTime(noteD.getHours()*60+noteD.getMinutes()+mins),
-          notes:text.slice(0,150), worker, status:'completed', fromNote:true });
+          notes:text.slice(0,150), worker, ...(worker2 ? { worker2 } : {}), status:'completed', fromNote:true });
         saveCalEvents();
       }
     }
@@ -10571,7 +10580,7 @@ function renderDisabilityTab(c) {
     </div>
     ${disNotes.length===0?'<p style="color:var(--muted);font-size:13px">No disability notes recorded</p>':
       disNotes.map(n=>`<div class="note-entry disability" style="border-left-color:#8b5cf6">
-        <div class="note-meta"><span>${fmtdt(n.created)}</span><span>${sanitize(n.worker||'')}</span><span>${n.contactType||''}</span></div>
+        <div class="note-meta"><span>${fmtdt(n.created)}</span><span>${sanitize(workerNames(n))}</span><span>${n.contactType||''}</span></div>
         <div class="note-text">${noteBodyHTML(n)}</div>
       </div>`).join('')
     }
@@ -10719,7 +10728,7 @@ function renderWorkFoundationsTab(c) {
     </div>
     ${wfNotes.length===0?'<p style="color:var(--muted);font-size:13px">No work foundations notes recorded</p>':
       wfNotes.map(n=>`<div class="note-entry" style="border-left:4px solid #2563eb">
-        <div class="note-meta"><span>${fmtdt(n.created)}</span><span>${sanitize(n.worker||'')}</span></div>
+        <div class="note-meta"><span>${fmtdt(n.created)}</span><span>${sanitize(workerNames(n))}</span></div>
         <div class="note-text">${noteBodyHTML(n)}</div>
       </div>`).join('')}
   </div>
@@ -11765,7 +11774,7 @@ function renderWFNotes(c) {
     <p style="font-size:12px;color:var(--muted);margin-bottom:12px">Log all Work Foundations / employment support sessions here. Notes are automatically time-tracked.</p>
     ${wfNotes.length===0?'<div class="empty-state"><div class="icon">💼</div><p>No Work Foundations notes yet</p></div>':
       wfNotes.map(n=>`<div class="note-entry workfoundations" style="border-left-color:#d97706">
-        <div class="note-meta"><span class="section-badge" style="background:#fef3c7;color:#92400e">WORK FOUNDATIONS</span><span>${fmtdt(n.created)}</span><span>${sanitize(n.worker||'')}</span>${n.duration?`<span>⏱️ ${n.duration} min</span>`:''}</div>
+        <div class="note-meta"><span class="section-badge" style="background:#fef3c7;color:#92400e">WORK FOUNDATIONS</span><span>${fmtdt(n.created)}</span><span>${sanitize(workerNames(n))}</span>${n.duration?`<span>⏱️ ${n.duration} min</span>`:''}</div>
         <div class="note-text">${noteBodyHTML(n)}</div>
         ${n.followup?`<div style="margin-top:6px;padding:6px 10px;background:#fef3c7;border-radius:4px;font-size:12px">📌 ${sanitize(n.followup)}</div>`:''}
       </div>`).join('')
@@ -11799,6 +11808,10 @@ function addWorkerFromInput(selectId, inputId) {
   sel.value = name; sel.style.display=''; inp.style.display='none'; inp.value='';
 }
 
+// A session can have a second worker (joint session). Shown together, e.g.
+// "Jon Benson & Sam Worker"; worker filters and workload count both of them.
+function workerNames(x) { return [x && x.worker, x && x.worker2].filter(Boolean).join(' & '); }
+function hasWorker(x, w, canon) { const f = canon || (v => v); return !!x && !!w && (f(x.worker) === w || (!!x.worker2 && f(x.worker2) === w)); }
 function getWorkerValue(selectId, inputId) {
   const sel = document.getElementById(selectId);
   const inp = document.getElementById(inputId);
@@ -11806,10 +11819,10 @@ function getWorkerValue(selectId, inputId) {
   return sel?.value && sel.value!=='__add__' ? sel.value : '';
 }
 
-function workerSelectHTML(selectId, inputId, selectedVal) {
+function workerSelectHTML(selectId, inputId, selectedVal, emptyLabel) {
   return `<div style="display:flex;gap:6px">
     <select id="${selectId}" style="flex:1" onchange="handleWorkerSelect('${selectId}','${inputId}')">
-      <option value="">— Select worker —</option>
+      <option value="">${sanitize(emptyLabel || '— Select worker —')}</option>
       ${workersList.map(w=>`<option value="${sanitize(w)}" ${w===selectedVal?'selected':''}>${sanitize(w)}</option>`).join('')}
       <option value="__add__">➕ Add new worker…</option>
     </select>
