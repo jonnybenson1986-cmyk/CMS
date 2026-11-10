@@ -8,8 +8,14 @@ network). The site is served from `site/`.
 node tests/browser/smoke.cjs            # every page and client-file section opens
 node tests/browser/regression.cjs       # counting rules, Log Session, second worker
 node tests/browser/familyviolence.cjs   # Family Violence session type → SEWB
+node tests/browser/datahealth.cjs       # Data Health score, scorecard, document types
+node --test tests/unit/data-health.test.js   # the scoring engine on its own (no browser)
 ```
 
 Needs Playwright (`npm i -g playwright` or a local install) and its Chromium
 (set `CHROME_PATH` to use another one). Each file prints PASS/FAIL lines and a
 `RESULT: n/m passed` summary.
+
+`fixtures-old-completeness.js` is the previous hard-coded "items missing" check,
+kept only so `datahealth.cjs` can prove the schema-driven version gives the same
+answers.

@@ -264,6 +264,29 @@
   .pf-chip { display:inline-flex; align-items:center; gap:5px; padding:4px 11px; border-radius:20px; font-size:12px; font-weight:700; border:1px solid transparent; cursor:pointer; font-family:inherit; }
   .pf-chip.todo { background:#fffbeb; color:#92400e; border-color:#fde68a; }
   .pf-chip.ok { background:#ecfdf5; color:#065f46; border-color:#a7f3d0; cursor:default; }
+  .pf-chip.dh { background:#fff; color:var(--text); border-color:var(--border); }
+  /* Data health */
+  .dh-ring { position:relative; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; }
+  .dh-ring svg { transform:rotate(-90deg); display:block; }
+  .dh-ring .dh-track { stroke:#e5e7eb; }
+  .dh-ring .dh-val { transition:stroke-dashoffset .5s ease; }
+  .dh-ring .dh-num { position:absolute; font-weight:800; color:var(--text); line-height:1; }
+  .dh-ring.dh-wait .dh-track { stroke-dasharray:4 4; animation:dhPulse 1.4s ease-in-out infinite; }
+  @keyframes dhPulse { 50% { opacity:.35; } }
+  @media (prefers-reduced-motion: reduce) { .dh-ring .dh-val { transition:none; } .dh-ring.dh-wait .dh-track { animation:none; } }
+  .dh-top { display:flex; gap:18px; align-items:center; flex-wrap:wrap; }
+  .dh-bar { height:8px; border-radius:6px; background:#e5e7eb; overflow:hidden; flex:1; min-width:60px; }
+  .dh-bar > i { display:block; height:100%; border-radius:6px; }
+  .dh-sec { border-top:1px solid var(--border); }
+  .dh-sec > summary { display:flex; align-items:center; gap:10px; padding:9px 2px; cursor:pointer; list-style:none; font-size:13px; }
+  .dh-sec > summary::-webkit-details-marker { display:none; }
+  .dh-sec > summary .dh-name { width:170px; font-weight:600; flex-shrink:0; }
+  .dh-sec > summary .dh-pct { width:44px; text-align:right; font-weight:700; font-variant-numeric:tabular-nums; }
+  .dh-item { display:flex; align-items:center; gap:8px; padding:5px 2px 5px 14px; font-size:12px; }
+  .dh-item .dh-lvl { font-size:10px; text-transform:uppercase; letter-spacing:.03em; color:var(--muted); border:1px solid var(--border); border-radius:10px; padding:1px 7px; }
+  .dh-mini { display:flex; align-items:center; gap:6px; min-width:92px; }
+  .dh-mini b { font-size:12px; font-variant-numeric:tabular-nums; width:34px; text-align:right; }
+  @media (max-width:520px) { .dh-sec > summary .dh-name { width:110px; } }
   .pf-nav { display:flex; gap:10px; align-items:center; margin:0 0 16px; }
   .pf-nav label { font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; white-space:nowrap; }
   .pf-nav select { flex:1; min-width:0; padding:11px 14px; font-size:15px; font-weight:600; border:1px solid var(--border); border-radius:10px; background:var(--card, #fff); color:inherit; cursor:pointer; }
@@ -600,6 +623,7 @@
 <!-- Microsoft sign-in (MSAL 4.30, LTS) — self-hosted like Firebase: Microsoft retired the alcdn.msauth.net CDN (every version now 404s). -->
 <script src="vendor/msal/msal-browser.min.js"></script>
 <script src="intake/intake-fields.js"></script>
+<script src="data-health.js"></script>
 <script>
 // ===== DATA LAYER =====
 const DB = {
@@ -1269,7 +1293,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v101';
+const APP_VERSION = 'v102';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -2000,21 +2024,22 @@ function renderClients() {
       <table>
         <thead><tr>
           <th>Client</th><th>ID</th><th>DOB / Age</th><th>Community / MOB</th>
-          <th>Programs</th><th>Risk</th><th>Status</th><th>Actions</th>
+          <th>Programs</th><th>Risk</th><th>Status</th><th>Data health</th><th>Actions</th>
         </tr></thead>
         <tbody>
-        ${filtered.length===0?`<tr><td colspan="8"><div class="empty-state"><div class="icon">👥</div><p>No clients found${search?' for "'+search+'"':''}</p><button class="btn btn-primary" onclick="openNewClientModal()" style="margin-top:12px">Add First Client</button></div></td></tr>`:
+        ${filtered.length===0?`<tr><td colspan="9"><div class="empty-state"><div class="icon">👥</div><p>No clients found${search?' for "'+sanitize(search)+'"':''}</p><button class="btn btn-primary" onclick="openNewClientModal()" style="margin-top:12px">Add First Client</button></div></td></tr>`:
           filtered.map(c=>{
             const age = c.dob ? Math.floor((Date.now()-new Date(c.dob))/(365.25*24*3600*1000)) : '?';
             const progs = [c.sewb&&'SEWB',c.aod&&'AOD',c.justice&&'Justice',c.cultural&&'Cultural',c.mensgroup&&"Men's Group"].filter(Boolean);
             return `<tr class="client-row" data-id="${c.id}" style="cursor:pointer">
               <td><div style="display:flex;align-items:center;gap:10px"><div class="avatar">${initials(c.fullName)}</div><div><div style="font-weight:600;font-size:13px">${sanitize(c.fullName)}</div><div style="font-size:11px;color:var(--muted)">${sanitize(c.pronouns||'')}</div></div></div></td>
-              <td style="font-size:12px;color:var(--muted)">${c.clientId||'—'}</td>
-              <td style="font-size:13px">${c.dob||'—'}<br><span style="font-size:11px;color:var(--muted)">${age} yrs</span></td>
+              <td style="font-size:12px;color:var(--muted)">${sanitize(c.clientId||'—')}</td>
+              <td style="font-size:13px">${sanitize(c.dob||'—')}<br><span style="font-size:11px;color:var(--muted)">${age} yrs</span></td>
               <td style="font-size:13px">${sanitize(c.community||'—')}<br><span style="font-size:11px;color:var(--muted)">${sanitize(c.mob||'')}</span></td>
               <td>${progs.map(p=>`<span class="tag badge-${p.toLowerCase()}" style="margin-right:3px;font-size:10px">${p}</span>`).join('')||'<span style="color:var(--muted);font-size:12px">None</span>'}</td>
               <td><span class="risk-pill risk-${c.riskLevel||'low'}">${(c.riskLevel||'low').toUpperCase()}</span></td>
-              <td><span class="tag ${c.status==='active'?'tag-active':'tag-closed'}">${c.status||'active'}</span></td>
+              <td><span class="tag ${c.status==='active'?'tag-active':'tag-closed'}">${sanitize(c.status||'active')}</span></td>
+              <td>${dataHealthMiniHTML(dataHealth(c))}</td>
               <td style="white-space:nowrap">
                 <button class="btn btn-sm btn-outline" onclick="event.stopPropagation();openClientProfile('${c.id}')">View</button>
                 ${currentUser?.role==='sysmanager' ? `<button class="btn btn-sm btn-outline" title="${c.accessRestricted?'Restricted — manage who can see this file':'Restrict who can see this file'}" style="margin-left:4px;${c.accessRestricted?'background:#f5f3ff;color:#5b21b6;border-color:#ddd6fe':''}" onclick="event.stopPropagation();openRestrictAccessModal('${c.id}')">${c.accessRestricted?'🔒':'🔓'}</button>` : ''}
@@ -2161,11 +2186,14 @@ function profileHeaderHTML(c) {
     </div>
   </div>
   ${profileProgramsRowHTML(c)}
-  ${closed ? '' : (() => {
-    const nMiss = fileCompleteness(c).length, extras = [feedbackDue(c).length ? 'feedback due' : '', episodeEndReached(c) ? 'episode end reached' : ''].filter(Boolean);
+  ${(() => {
+    const dh = dataHealth(c);
+    const healthChip = `<button class="pf-chip dh" id="pf-health" onclick="showDataHealth('${id}')" title="See what this file still needs">${dataHealthRingHTML(dh, 20)} Data health ${dh.score != null ? dh.score + '%' : '—'}</button>`;
+    if (closed) return `<div style="margin:-4px 0 12px;display:flex;gap:8px;flex-wrap:wrap">${healthChip}</div>`;
+    const nMiss = fileCompleteness(c, dh).length, extras = [feedbackDue(c).length ? 'feedback due' : '', episodeEndReached(c) ? 'episode end reached' : ''].filter(Boolean);
     const txt = nMiss ? `⚠️ ${nMiss} item${nMiss !== 1 ? 's' : ''} missing on this file${extras.length ? ' · ' + extras.join(' · ') : ''} — view`
               : extras.length ? `✓ File complete · ${extras.join(' · ')} — view` : '✓ File complete';
-    return `<div style="margin:-4px 0 12px"><button class="pf-chip ${nMiss || extras.length ? 'todo' : 'ok'}" id="pf-todo" onclick="switchProfileTab('overview','${id}')">${txt}</button></div>`;
+    return `<div style="margin:-4px 0 12px;display:flex;gap:8px;flex-wrap:wrap"><button class="pf-chip ${nMiss || extras.length ? 'todo' : 'ok'}" id="pf-todo" onclick="switchProfileTab('overview','${id}')">${txt}</button>${healthChip}</div>`;
   })()}`;
 }
 
@@ -2301,6 +2329,7 @@ function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
       <div class="card-header"><div class="card-title">${attn.length ? '⚠️ Needs attention' : '✓ Nothing needs attention'}</div></div>
       ${attn.length ? attn.join('') : '<p style="font-size:13px;color:#065f46">Intake, consent, goals, safety and home risk are all in order.</p>'}
     </div>`}
+    ${dataHealthCardHTML(c)}
     <div class="pf-two">
       <div class="card">
         <div class="card-header"><div class="card-title">📇 Contact &amp; support</div><button class="btn btn-sm btn-outline" onclick="openEditClientModal('${c.id}')">Edit</button></div>
@@ -3124,7 +3153,8 @@ function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
             <div style="font-size:28px">${fileIcon(f.type)}</div>
             <div style="flex:1;min-width:0">
               <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${sanitize(f.name)}</div>
-              <div style="font-size:11px;color:var(--muted);margin-top:2px">${formatBytes(f.size)} · ${fmt(f.uploadedAt)} · ${f.uploadedBy||'—'}</div>
+              <div style="font-size:11px;color:var(--muted);margin-top:2px">${formatBytes(f.size)} · ${fmt(f.uploadedAt)} · ${sanitize(f.uploadedBy||'—')}</div>
+              ${fileDocTypeSelectHTML(c.id, i, f)}
               ${srcLabel?`<div style="font-size:11px;color:var(--primary);margin-top:3px">${srcNote?`<a href="#" onclick="event.preventDefault();gotoProfileSection('notes')" style="color:var(--primary);text-decoration:none">${srcLabel}</a>`:sanitize(srcLabel)}</div>`:''}
             </div>
             <div style="display:flex;gap:6px;flex-shrink:0">
@@ -16731,29 +16761,107 @@ function _isHomeVisitEvent(type, title, location) {
 // ============================================================
 // FILE COMPLETENESS
 // ============================================================
-// One list of what a client file must hold. Shown on the file and rolled up on
-// the dashboard ("3 clients missing goals").
-// AOD_VADC_FIELDS are the AOD fields this system holds that the Victorian
-// Alcohol and Drug Collection needs — confirm against your VADC pre-flight
-// list and add any others here.
-const AOD_VADC_FIELDS = [['aodPrimary','Principal drug of concern'],['aodTreatment','Treatment type'],['referralSource','Referral source']];
+// What a client file must hold is defined ONCE, in data-health.js (the Data
+// Health schema). Two things read it:
+//   • dataHealth(c)       → the 0–100% score, by section, with what's missing;
+//   • fileCompleteness(c) → the schema's flagged items, for the "items missing"
+//     banner and the dashboard roll-up ("3 clients missing goals").
+// To add or change a requirement, edit the schema — not this file.
 const COMPLETENESS_GROUPS = { intake:'Intake not completed', demo:'Core details missing', consent:'Consent not recorded', goals:'No goals', goalsMeasure:'Goals not measurable', goalReview:'Goal review overdue', risk:'Safety plan missing (medium/high risk)', homerisk:'Home risk assessment missing or out of date', handbook:'Participant handbook not given', vadc:'AOD / VADC fields missing' };
-function fileCompleteness(c) {
-  const out = [], add = (group, label, tab) => out.push({ group, label, tab });
-  if (!(c.intakeSavedAt || c.ifIntakeWorker)) add('intake', 'Intake form not completed', 'intake');
-  const demo = [!c.dob && 'date of birth', !c.gender && 'gender', !c.atsi && 'Aboriginal / Torres Strait Islander status', !(c.phone || c.address) && 'phone or address'].filter(Boolean);
-  if (demo.length) add('demo', 'Missing: ' + demo.join(', '), 'intake');
-  if (!c.ifConsentSigned) add('consent', 'Signed consent not recorded', 'intake');
-  const goals = c.goalPlan || [];
-  if (!goals.length) add('goals', 'No goals recorded', 'goals');
-  else if (!goals.some(goalIsMeasurable)) add('goalsMeasure', 'Goals have no starting score / target', 'goals');
-  if (goals.some(goalReviewOverdue)) add('goalReview', 'Goal review overdue', 'goals');
-  if (['medium','high'].includes(c.riskLevel) && !(c.sfWarning || c.sfCoping || c.sfPros || c.sfDate)) add('risk', `Safety plan not completed (${c.riskLevel} risk)`, 'safety');
-  const hr = homeRiskStatus(c); if (!hr.ok) add('homerisk', hr.msg, 'homerisk');
-  if (!hasHandbook(c)) add('handbook', 'Participant handbook not given', 'files');
-  if (c.aod) { const miss = AOD_VADC_FIELDS.filter(([k]) => !String(c[k] || '').trim()).map(([, l]) => l); if (miss.length) add('vadc', 'AOD / VADC: ' + miss.join(', '), miss[0] === 'Referral source' && miss.length === 1 ? 'overview' : 'aod'); }
-  return out;
+// Flag groups whose missing items are listed together in one banner entry.
+const COMPLETENESS_MERGE = { demo:'Missing: ', vadc:'AOD / VADC: ' };
+// The CMS checks the schema's rules may call.
+function _dataHealthHelpers() { return { goalIsMeasurable, goalReviewOverdue, homeRiskStatus, hasHandbook }; }
+function dataHealthReady() { return typeof WG_DATA_HEALTH !== 'undefined'; }
+function dataHealth(c) {
+  if (!dataHealthReady()) return { status:'unavailable', score:null, band:null, earned:0, possible:0, sections:[], missing:[], errors:[] };
+  const r = WG_DATA_HEALTH.compute(c, { helpers: _dataHealthHelpers() });
+  if (r.errors.length && !dataHealth._warned) { dataHealth._warned = true; console.warn('Data Health: some checks could not run', r.errors); }
+  return r;
 }
+function fileCompleteness(c, dh) {
+  // If the schema file didn't load, say so rather than report the file as complete.
+  if (!dataHealthReady()) return [{ group:'unavailable', label:'File checks could not load — refresh the page', tab:'overview' }];
+  return WG_DATA_HEALTH.flags(dh || dataHealth(c), c, { helpers: _dataHealthHelpers(), groupOrder: Object.keys(COMPLETENESS_GROUPS), mergePrefix: COMPLETENESS_MERGE });
+}
+
+// ---- Data Health: display ----
+// Progress ring. `dh` is a dataHealth() result; a missing score draws a grey
+// "—" ring (dashed and pulsing while the checks aren't available yet).
+function dataHealthRingHTML(dh, size) {
+  size = size || 56;
+  const stroke = Math.max(3, Math.round(size / 9)), r = (size - stroke) / 2, circ = 2 * Math.PI * r;
+  const has = dh && dh.score != null, score = has ? dh.score : 0;
+  const color = has ? dh.band.color : '#9ca3af';
+  const title = has ? `Data health ${score}% — ${dh.band.label}` : dh && dh.status === 'empty' ? 'Data health: nothing to measure on this file yet' : 'Data health is not available yet';
+  return `<span class="dh-ring${dh && dh.status === 'unavailable' ? ' dh-wait' : ''}" style="width:${size}px;height:${size}px" role="img" aria-label="${sanitize(title)}" title="${sanitize(title)}">
+    <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" aria-hidden="true">
+      <circle class="dh-track" cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke-width="${stroke}"></circle>
+      ${has ? `<circle class="dh-val" cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="${color}" stroke-width="${stroke}" stroke-linecap="round" stroke-dasharray="${circ.toFixed(2)}" stroke-dashoffset="${(circ * (1 - score / 100)).toFixed(2)}"></circle>` : ''}
+    </svg>${size >= 40 ? `<span class="dh-num" style="font-size:${Math.round(size * 0.27)}px">${has ? score + '%' : '—'}</span>` : ''}</span>`;
+}
+function _dhBar(score, color) { return `<span class="dh-bar"><i style="width:${Math.max(0, Math.min(100, score || 0))}%;background:${color}"></i></span>`; }
+// Compact bar + % for tables.
+function dataHealthMiniHTML(dh) {
+  if (!dh || dh.score == null) return `<span class="dh-mini" title="Data health is not available"><span class="dh-bar"></span><b style="color:var(--muted)">—</b></span>`;
+  return `<span class="dh-mini" title="Data health ${dh.score}% — ${sanitize(dh.band.label)}">${_dhBar(dh.score, dh.band.color)}<b>${dh.score}%</b></span>`;
+}
+// "Fix →" target: a section of the file, or the Edit details form.
+function dataHealthFix(clientId, tab) {
+  if (tab === 'edit') return openEditClientModal(clientId);
+  if (tab) switchProfileTab(tab, clientId);
+}
+function showDataHealth(clientId) {
+  if (document.getElementById('profile-section')?.value !== 'overview') switchProfileTab('overview', clientId);
+  const el = document.getElementById('dh-card'); if (el) { el.scrollIntoView({ block:'start', behavior:'smooth' }); el.querySelector('details.dh-sec:not([open])')?.focus?.(); }
+}
+// Scorecard on the file's Overview.
+function dataHealthCardHTML(c) {
+  const dh = dataHealth(c), id = sanitize(c.id);
+  const head = extra => `<div class="card-header"><div class="card-title">📊 Data health</div>${extra || ''}</div>`;
+  if (dh.status === 'unavailable') return `<div class="card dh-card" id="dh-card">${head()}<div class="dh-top">${dataHealthRingHTML(dh, 88)}<p style="font-size:13px;color:var(--muted)">The file checks haven't loaded yet. Refresh the page to see this file's data health.</p></div></div>`;
+  if (dh.status === 'empty') return `<div class="card dh-card" id="dh-card">${head()}<div class="dh-top">${dataHealthRingHTML(dh, 88)}<p style="font-size:13px;color:var(--muted)">Nothing to measure on this file yet.</p></div></div>`;
+  const all = dh.sections.flatMap(s => s.items), done = all.filter(i => i.ok).length;
+  const fixBtn = i => i.tab ? `<button class="btn btn-sm btn-outline" style="font-size:11px" onclick="dataHealthFix('${id}','${sanitize(i.tab)}')">Fix →</button>` : '';
+  const top = dh.missing.slice(0, 3);
+  const pts = n => Math.round(n * 10) / 10;
+  return `<div class="card dh-card" id="dh-card" style="border-left:4px solid ${dh.band.color}">
+    ${head(`<span style="font-size:12px;font-weight:700;color:${dh.band.color}">${sanitize(dh.band.label)}</span>`)}
+    <div class="dh-top">
+      ${dataHealthRingHTML(dh, 96)}
+      <div style="flex:1;min-width:220px">
+        <div style="font-size:13px"><strong>${done} of ${all.length}</strong> items complete <span style="color:var(--muted)">· ${pts(dh.earned)} of ${pts(dh.possible)} points</span></div>
+        ${dh.band === WG_DATA_HEALTH.BANDS[WG_DATA_HEALTH.BANDS.length - 1] && dh.missing.some(i => i.id === 'intakeDone') ? `<p style="font-size:12px;color:var(--muted);margin-top:4px">This file has just been started — the intake form fills in most of it.</p>` : ''}
+        ${top.length ? `<div style="font-size:12px;color:var(--muted);margin:8px 0 4px">Biggest gains:</div>
+          ${top.map(i => `<div class="dh-item" style="padding-left:0"><span style="flex:1">○ ${sanitize(i.label)}</span>${fixBtn(i)}</div>`).join('')}`
+          : `<p style="font-size:13px;color:#065f46;margin-top:6px">✓ Everything this file needs is recorded.</p>`}
+      </div>
+    </div>
+    <div style="margin-top:12px">
+      ${dh.sections.map(s => { const col = WG_DATA_HEALTH.bandFor(s.score).color, miss = s.items.filter(i => !i.ok).length;
+        return `<details class="dh-sec" data-section="${sanitize(s.id)}">
+          <summary><span class="dh-name">${sanitize(s.label)}</span>${_dhBar(s.score, col)}<span class="dh-pct">${s.score}%</span><span style="font-size:11px;color:var(--muted);width:74px;text-align:right">${miss ? miss + ' to add' : 'complete'}</span></summary>
+          ${s.items.map(i => `<div class="dh-item"><span style="color:${i.ok ? '#16a34a' : i.fraction > 0 ? '#d97706' : '#9ca3af'}">${i.ok ? '✓' : i.fraction > 0 ? '◐' : '○'}</span><span style="flex:1;${i.ok ? 'color:var(--muted)' : ''}">${sanitize(i.label)}${!i.ok && i.fraction > 0 ? ` <span style="color:var(--muted)">(${Math.round(i.fraction * 100)}%)</span>` : ''}</span><span class="dh-lvl">${sanitize(i.level)}</span>${i.ok ? '' : fixBtn(i)}</div>`).join('')}
+        </details>`; }).join('')}
+    </div>
+    <p style="font-size:11px;color:var(--muted);margin-top:10px">Critical items count ${WG_DATA_HEALTH.WEIGHTS.critical}×, required ${WG_DATA_HEALTH.WEIGHTS.required}×, recommended ${WG_DATA_HEALTH.WEIGHTS.recommended}×. Program sections appear only for programs this client is in.</p>
+  </div>`;
+}
+// Document type on an attached file (Files section) — counts toward Data Health.
+function fileDocTypeSelectHTML(clientId, idx, f) {
+  if (!dataHealthReady()) return '';
+  const cur = WG_DATA_HEALTH.docTypeOf(f), guessed = cur && !f.docType;
+  return `<select class="dh-doctype" aria-label="Document type for ${sanitize(f.name)}" title="${guessed ? 'Recognised from the file name — change it if wrong' : 'What kind of document is this?'}" style="font-size:11px;padding:3px 6px;margin-top:5px;max-width:220px" onchange="setFileDocType('${sanitize(clientId)}',${idx},this.value)">
+    <option value="">— Document type —</option>${WG_DATA_HEALTH.DOC_TYPES.map(t => `<option value="${sanitize(t.key)}" ${t.key === cur ? 'selected' : ''}>${sanitize(t.label)}${t.key === cur && guessed ? ' (from file name)' : ''}</option>`).join('')}</select>`;
+}
+function setFileDocType(clientId, idx, type) {
+  const c = clients.find(cl => cl.id === clientId), f = c && (c.attachments || [])[idx]; if (!f) return;
+  if (type && !WG_DATA_HEALTH.DOC_TYPES.some(t => t.key === type)) return;
+  f.docType = type || 'other';
+  audit('Set document type', `${c.fullName} — ${(WG_DATA_HEALTH.DOC_TYPES.find(t => t.key === f.docType) || {}).label || f.docType}`, clientId);
+  saveAll(); _refreshClientFile(clientId);
+}
+
 function renderCompletenessBanner(c) {
   if ((c.status || 'active') === 'closed') return '';
   const items = fileCompleteness(c), due = feedbackDue(c), end = episodeEndReached(c);
@@ -16785,8 +16893,15 @@ function renderCompletenessDashboard() {
   if (ending.length) rows.unshift(['End-of-episode review due', ending, 'ending']);
   if (feedback.length) rows.push(['Feedback due', feedback, 'feedback']);
   const complete = list.filter(c => !fileCompleteness(c).length).length;
+  const scored = list.map(c => ({ c, dh: dataHealth(c) })).filter(x => x.dh.score != null);
+  const avg = scored.length ? Math.round(scored.reduce((a, x) => a + x.dh.score, 0) / scored.length) : null;
+  const lowest = scored.slice().sort((a, b) => a.dh.score - b.dh.score).filter(x => x.dh.score < 100).slice(0, 3);
   return `<div class="card completeness-dash" style="margin-bottom:16px;border-left:4px solid #f59e0b">
     <div class="card-header"><div class="card-title">📋 File completeness</div><span style="font-size:12px;color:var(--muted)">${complete} of ${list.length} complete · ${sanitize(label)}</span></div>
+    ${avg == null ? '' : `<div class="dh-dash" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:2px 0 10px;border-bottom:1px solid var(--border)">
+      ${dataHealthRingHTML({ score: avg, band: WG_DATA_HEALTH.bandFor(avg), status: 'ok' }, 48)}
+      <div style="flex:1;min-width:200px"><div style="font-size:13px;font-weight:600">Average data health ${avg}%</div>
+        ${lowest.length ? `<div style="font-size:12px;color:var(--muted);margin-top:2px">Lowest: ${lowest.map(x => `<a href="#" onclick="event.preventDefault();openClientProfile('${sanitize(x.c.id)}')">${sanitize(x.c.fullName)} (${x.dh.score}%)</a>`).join(' · ')}</div>` : ''}</div></div>`}
     ${rows.length ? rows.map(([txt, ids, k]) => `<div class="cd-row" data-group="${k}" style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border);cursor:pointer" onclick="openCompletenessList('${k}')">
       <span style="font-weight:700;min-width:28px;text-align:right">${ids.length}</span><span style="font-size:13px;flex:1">client${ids.length !== 1 ? 's' : ''}: ${sanitize(txt.toLowerCase())}</span><span style="font-size:11px;color:var(--muted)">View →</span></div>`).join('')
       : '<p style="font-size:13px;color:#065f46">✓ Every file is complete.</p>'}
