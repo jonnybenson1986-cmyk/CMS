@@ -31,8 +31,7 @@
         https://www.gstatic.com
         https://www.googleapis.com
         https://www.google.com
-        https://www.recaptcha.net
-        https://cdn.jsdelivr.net;
+        https://www.recaptcha.net;
       style-src 'self' 'unsafe-inline';
       connect-src 'self'
         https://*.googleapis.com

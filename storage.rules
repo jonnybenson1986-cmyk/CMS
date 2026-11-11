@@ -19,7 +19,9 @@ rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
 
-    function signedIn() { return request.auth != null; }
+    // A real staff account. Anonymous sessions are never "signed in" here, so
+    // switching Anonymous sign-in on in the Firebase console cannot open the data.
+    function signedIn() { return request.auth != null && request.auth.token.firebase.sign_in_provider != 'anonymous'; }
     function underLimit() { return request.resource.size < 25 * 1024 * 1024; }
 
     // All CMS files live under teams/{teamId}/**
