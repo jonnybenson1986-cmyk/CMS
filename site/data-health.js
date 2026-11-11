@@ -41,6 +41,7 @@
   // Document types a worker can give an attached file. `match` recognises older
   // files (uploaded before types existed) from their file name.
   const DOC_TYPES = [
+    { key: 'vprconsent', label: 'VPR consent form',      match: /vpr|vulnerable.?persons?/i },
     { key: 'consent',    label: 'Signed consent form',   match: /consent/i },
     { key: 'referral',   label: 'Referral',              match: /referr?al/i },
     { key: 'id',         label: 'Identification',        match: /(^|[^a-z])id([^a-z]|$)|identification|licen[cs]e|passport|medicare|birth.?cert/i },

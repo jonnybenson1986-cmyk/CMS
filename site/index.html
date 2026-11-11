@@ -561,6 +561,9 @@
     <div class="nav-item" onclick="showPage('reports')">
       <span class="icon">📈</span><span>Reports</span>
     </div>
+    <div class="nav-item" onclick="showPage('vpr')">
+      <span class="icon">🚨</span><span>Vulnerable Persons Register</span>
+    </div>
     <div class="nav-item" onclick="showPage('auditlog')">
       <span class="icon">🔍</span><span>Audit Log</span>
     </div>
@@ -624,6 +627,7 @@
 <script src="vendor/msal/msal-browser.min.js"></script>
 <script src="intake/intake-fields.js"></script>
 <script src="data-health.js"></script>
+<script src="vpr.js"></script>
 <script>
 // ===== DATA LAYER =====
 const DB = {
@@ -1288,7 +1292,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v103';
+const APP_VERSION = 'v104';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -1875,6 +1879,7 @@ function showPage(page) {
     showToast('Settings is available to the System Manager only.'); page = 'dashboard';
   }
   if(!pageAllowed(page)) { showToast("You don't have access to that section — ask your System Manager."); page = 'dashboard'; }
+  if(page === 'vpr' && !vprPageAllowed()) { showToast('The Vulnerable Persons Register is available to managers and supervisors.'); page = 'dashboard'; }
   currentPage = page;
   // Background refreshes (e.g. sync snapshots) can fire while the login screen
   // has replaced #main — nothing to render onto yet, so bail out safely.
@@ -1883,7 +1888,7 @@ function showPage(page) {
   setMobTab(page);
   document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
   const items = document.querySelectorAll('.nav-item');
-  const titles = { dashboard:'Dashboard', referrals:'Referral Holding Bay', clients:'Clients', sessions:'Session Log', notes:'All Case Notes', policies:'Policies & Procedures', walkins:'Walk-in Register', sewb:'SEWB Program', aod:'AOD Program', justice:'Justice Program', mensgroup:"Men's Group", cultural:'Cultural Strengthening', disability:'Disability Program', reports:'Reports', calendar:'Calendar', auditlog:'Audit Log', settings:'Settings' };
+  const titles = { dashboard:'Dashboard', referrals:'Referral Holding Bay', clients:'Clients', sessions:'Session Log', notes:'All Case Notes', policies:'Policies & Procedures', walkins:'Walk-in Register', sewb:'SEWB Program', aod:'AOD Program', justice:'Justice Program', mensgroup:"Men's Group", cultural:'Cultural Strengthening', disability:'Disability Program', reports:'Reports', calendar:'Calendar', vpr:'Vulnerable Persons Register', auditlog:'Audit Log', settings:'Settings' };
   document.getElementById('page-title').textContent = titles[page] || page;
   items.forEach(el => { if(el.getAttribute('onclick')?.includes(`'${page}'`)) el.classList.add('active'); });
   if (page !== 'auditlog' && page !== currentPage) audit('Page view', titles[page] || page);
@@ -1920,7 +1925,7 @@ function showPage(page) {
     btn.onclick = openNewClientModal;
   }
 
-  const pages = { dashboard: renderDashboard, referrals: renderReferrals, clients: renderClients, closedclients: renderClosedClients, sessions: renderSessions, notes: renderAllNotes, walkins: renderWalkins, sewb: renderSEWB, aod: renderAOD, justice: renderJustice, cultural: renderCultural, mensgroup: renderMensGroup, disability: renderDisability, workfoundations: renderWorkFoundations, homeownership: renderHomeOwnership, reports: renderReportsPage, calendar: renderCalendarPage, resources: renderResourcesPage, policies: renderPoliciesPage, auditlog: renderAuditLog, settings: renderSettings, chat: renderChatPage };
+  const pages = { dashboard: renderDashboard, referrals: renderReferrals, clients: renderClients, closedclients: renderClosedClients, sessions: renderSessions, notes: renderAllNotes, walkins: renderWalkins, sewb: renderSEWB, aod: renderAOD, justice: renderJustice, cultural: renderCultural, mensgroup: renderMensGroup, vpr: renderVprPage, disability: renderDisability, workfoundations: renderWorkFoundations, homeownership: renderHomeOwnership, reports: renderReportsPage, calendar: renderCalendarPage, resources: renderResourcesPage, policies: renderPoliciesPage, auditlog: renderAuditLog, settings: renderSettings, chat: renderChatPage };
   const fn = pages[page];
   document.getElementById('content').innerHTML = fn ? fn() : '<div class="empty-state"><p>This page could not be opened. Please refresh, or contact your system manager if it keeps happening.</p></div>';
   attachPageEvents(page);
@@ -2093,6 +2098,8 @@ function reopenClient(id) {
   c.reopenedDate = today();
   c.episodeStart = today();          // a reopened file starts a new episode
   c.plannedEndDate = '';
+  if (c.vpr && c.vpr.removedAt) c.vpr.needsReview = true;   // was on the VPR: confirm criteria and consent again
+  vprSync(c, 'File reopened — all four criteria still recorded as met');
   audit('Reopened client', c.fullName, id);
   saveAll();
   showToast(c.fullName + ' has been reopened');
@@ -2129,7 +2136,7 @@ function profileSectionGroups(c, counts) {
   return [
     ['Client file', [{ v:'overview', l:'🏠 Overview' }, { v:'summary', l:'📄 Summary' }, { v:'demographics', l:'👤 Personal details' }, { v:'keyworkers', l:'👷 Key workers' }]],
     ['Case work', [{ v:'intake', l:'📋 Intake form' }, { v:'notes', l:`📝 Case notes (${counts.notes})` }, { v:'goals', l:`🎯 Goals & progress (${counts.goals})` }, { v:'time', l:`⏱️ Time (${counts.time})` }, { v:'files', l:`📎 Files (${counts.files})` }]],
-    ['Safety & feedback', [{ v:'safety', l:'🛡️ Safety plan' }, { v:'homerisk', l:`🏠 Home risk assessment${hr}` }, { v:'feedback', l:'⭐ Feedback' }]],
+    ['Safety & feedback', [{ v:'safety', l:'🛡️ Safety plan' }, { v:'homerisk', l:`🏠 Home risk assessment${hr}` }, { v:'vpr', l:`🚨 Emergency plan & VPR${vprOnRegister(c) ? ' — on register' : ''}` }, { v:'feedback', l:'⭐ Feedback' }]],
     enrolled.length ? ['Programs — enrolled', enrolled] : null,
     other.length ? ['Programs — not enrolled', other] : null,
   ].filter(Boolean);
@@ -2184,11 +2191,12 @@ function profileHeaderHTML(c) {
   ${(() => {
     const dh = dataHealth(c);
     const healthChip = `<button class="pf-chip dh" id="pf-health" onclick="showDataHealth('${id}')" title="See what this file still needs">${dataHealthRingHTML(dh, 20)} Data health ${dh.score != null ? dh.score + '%' : '—'}</button>`;
+    const vprChip = vprOnRegister(c) ? `<button class="pf-chip" id="pf-vpr" style="background:#fef2f2;color:#991b1b;border-color:#fecaca" onclick="switchProfileTab('vpr','${id}')" title="This person is on the Vulnerable Persons Register">🚨 On the VPR</button>` : '';
     if (closed) return `<div style="margin:-4px 0 12px;display:flex;gap:8px;flex-wrap:wrap">${healthChip}</div>`;
     const nMiss = fileCompleteness(c, dh).length, extras = [feedbackDue(c).length ? 'feedback due' : '', episodeEndReached(c) ? 'episode end reached' : ''].filter(Boolean);
     const txt = nMiss ? `⚠️ ${nMiss} item${nMiss !== 1 ? 's' : ''} missing on this file${extras.length ? ' · ' + extras.join(' · ') : ''} — view`
               : extras.length ? `✓ File complete · ${extras.join(' · ')} — view` : '✓ File complete';
-    return `<div style="margin:-4px 0 12px;display:flex;gap:8px;flex-wrap:wrap"><button class="pf-chip ${nMiss || extras.length ? 'todo' : 'ok'}" id="pf-todo" onclick="switchProfileTab('overview','${id}')">${txt}</button>${healthChip}</div>`;
+    return `<div style="margin:-4px 0 12px;display:flex;gap:8px;flex-wrap:wrap"><button class="pf-chip ${nMiss || extras.length ? 'todo' : 'ok'}" id="pf-todo" onclick="switchProfileTab('overview','${id}')">${txt}</button>${healthChip}${vprChip}</div>`;
   })()}`;
 }
 
@@ -2276,6 +2284,7 @@ const TAB_SAVE_BAR = {
   workfoundations: { label:'Save Work Foundations',  fn:'saveWF' },
   safety:          { label:'Save Safety Plan',       fn:'saveSafety' },
   homerisk:        { label:'Save Home Risk Assessment', fn:'saveHomeRisk' },
+  vpr:             { label:'Save Emergency plan & VPR', fn:'saveVpr' },
   feedback:        { label:'Save & Record',          fn:'saveFeedback' },
 };
 function formSaveBar(label, onclick, note) {
@@ -2296,6 +2305,7 @@ function renderProfileTab(tab, c, clientNotes, clientTime) {
   return bar ? html + formSaveBar(bar.label, `${bar.fn}('${sanitize(c.id)}')`, bar.note) : html;
 }
 function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
+  if(tab === 'vpr') return renderVprTab(c);
   if(tab === 'overview') {
     const totalMins = clientTime.reduce((a,t)=>a+(t.minutes||0),0);
     const recent = clientNotes.slice(0,3);
@@ -2311,6 +2321,7 @@ function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
       ...issues.map(i=>`<div class="pf-attn-row"><span>⚠️ ${sanitize(i.label)}</span><button class="btn btn-sm btn-outline" onclick="gotoProfileSection('${i.tab}')">Fix →</button></div>`),
       ...(intakeFormState(currentIntakeForm(c.id))==='submitted' ? [`<div class="pf-attn-row"><span>📲 ${sanitize(smsFirstName(c))} sent back their intake form</span><button class="btn btn-sm btn-primary" onclick="openIntakeReviewModal('${sanitize(currentIntakeForm(c.id).id)}')">Review →</button></div>`] : []),
       ...due.map(d=>`<div class="pf-attn-row"><span>⭐ Feedback due: ${sanitize(QF_POINTS[d])}</span><button class="btn btn-sm btn-outline" onclick="openFeedbackSendModal('${c.id}','${d}')">Ask →</button></div>`),
+      ...vprAttention(c).map(t=>`<div class="pf-attn-row"><span>🚨 ${sanitize(t)}</span><button class="btn btn-sm btn-outline" onclick="gotoProfileSection('vpr')">Review →</button></div>`),
     ];
     return `
     <div class="pf-glance">
@@ -2984,6 +2995,21 @@ function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
       <div class="form-group"><label>Additional feedback on previous experience</label><textarea id="if-prevFeedback" style="min-height:60px">${sanitize(c.ifPrevFeedback||'')}</textarea></div>
     </div>
 
+    <!-- EMERGENCY PLANNING (Vulnerable People in Emergencies Policy) -->
+    <div class="card">
+      <div class="card-header"><div class="card-title">🚨 Emergency planning</div><button class="btn btn-sm btn-outline" onclick="gotoProfileSection('vpr')">Emergency plan &amp; VPR screening →</button></div>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:12px">Ask every client. Everyone should have their own plan for fire, flood, heatwave or storm. These answers show whether a Vulnerable Persons Register (VPR) screening is needed.</p>
+      <div class="grid-3">
+        <div class="form-group"><label for="if-emergencyPlan">Do you have a personal emergency plan?</label>
+          <select id="if-emergencyPlan">${selOpts(['Yes','No'], c.ifEmergencyPlan, 'Select…')}</select></div>
+        <div class="form-group"><label for="if-emergencyAssist">Would you need help to leave home or act in an emergency?</label>
+          <select id="if-emergencyAssist">${selOpts(['Yes','No'], c.ifEmergencyAssist, 'Select…')}</select></div>
+        <div class="form-group"><label for="if-emergencyHelp">Is there family, a friend or a neighbour nearby who could help you?</label>
+          <select id="if-emergencyHelp">${selOpts(['Yes','No'], c.ifEmergencyHelp, 'Select…')}</select></div>
+      </div>
+      <div class="vpr-intake-status" style="font-size:12px;margin-top:4px;color:${vprOnRegister(c) ? '#991b1b' : 'var(--muted)'}">${sanitize(vprIntakeStatusText(c))}</div>
+    </div>
+
     <!-- CONSENT -->
     <div class="card">
       <div class="card-header"><div class="card-title">✍️ Consent — Worn Gundidj Services</div></div>
@@ -2996,6 +3022,10 @@ function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
         ${consentCheck(c, 'ifConsentVideo', 'Consent for online video calls (Telehealth / Teams / Zoom)')}
         ${consentCheck(c, 'ifConsentPack', 'Client received SEWB Program Information Pack')}
         ${consentCheck(c, 'ifConsentSigned', 'Client has completed and signed consent form')}
+        <div class="vpr-consent-line" style="display:flex;align-items:center;gap:10px;font-size:13px;padding:8px 12px;background:var(--bg);border-radius:6px;flex-wrap:wrap">
+          <span style="flex:1;min-width:200px">🚨 <strong>Vulnerable Persons Register consent</strong> — ${sanitize(vprConsentText(c))}</span>
+          <button type="button" class="btn btn-sm btn-outline" onclick="gotoProfileSection('vpr')">${vprOf(c).consent ? 'View' : 'Record'} →</button>
+        </div>
       </div>
       <div class="grid-3" style="margin-top:16px">
         <div class="form-group"><label>Client Signature (note)</label><input id="if-clientSig" value="${sanitize(c.ifClientSig||'')}" placeholder="Name or 'Signed'"></div>
@@ -3940,6 +3970,7 @@ function saveIntake(id, quiet=false) {
     ifNdisCoord: g('if-ndisCoord'), ifNdisMgmt: g('if-ndisMgmt'), ifNdisDetails: g('if-ndisDetails'),
     ifOtherProviders: g('if-otherProviders'),
     ifHasChildren: g('if-hasChildren'), ifSafeHome: g('if-safeHome'),
+    ifEmergencyPlan: g('if-emergencyPlan'), ifEmergencyAssist: g('if-emergencyAssist'), ifEmergencyHelp: g('if-emergencyHelp'),
     ifChildCourt: g('if-childCourt'), ifIvo: g('if-ivo'), ifTransportConsent: r('if-transportConsent'),
     ifPrevAccess: g('if-prevAccess'), ifReferralHow: g('if-referralHow'), ifPrevService: g('if-prevService'),
     ifPrevDate: g('if-prevDate'), ifPrevWorker: g('if-prevWorker'), ifPrevPositive: g('if-prevPositive'), ifPrevFeedback: g('if-prevFeedback'),
@@ -4313,9 +4344,17 @@ function printIntake(id) {
     <tr><td>Medium-term</td><td>${sanitize(c.ifGoalMedium||'')}</td></tr>
     <tr><td>Longer-term</td><td>${sanitize(c.ifGoalLong||'')}</td></tr>
   </table>
+  <h2>Emergency planning</h2>
+  <table>
+    <tr><td>Has a personal emergency plan</td><td>${sanitize(c.ifEmergencyPlan||'')}</td></tr>
+    <tr><td>Would need help in an emergency</td><td>${sanitize(c.ifEmergencyAssist||'')}</td></tr>
+    <tr><td>Family, friend or neighbour nearby who could help</td><td>${sanitize(c.ifEmergencyHelp||'')}</td></tr>
+    <tr><td>Vulnerable Persons Register</td><td>${sanitize(vprIntakeStatusText(c))}</td></tr>
+  </table>
   <h2>Consent</h2>
   <table>
-    <tr><td>Signed</td><td>${c.ifConsentSigned?'Yes — '+c.ifClientSig:'Not yet'}</td></tr>
+    <tr><td>Signed</td><td>${c.ifConsentSigned?'Yes — '+sanitize(c.ifClientSig||''):'Not yet'}</td></tr>
+    <tr><td>Vulnerable Persons Register consent</td><td>${sanitize(vprConsentText(c))}</td></tr>
     <tr><td>Date</td><td>${sanitize(c.ifConsentDate||'')}</td></tr>
     <tr><td>Intake Worker</td><td>${sanitize(c.ifIntakeWorker||'')}</td></tr>
     <tr><td>Received Info Pack</td><td>${c.ifConsentPack?'Yes':'No'}</td></tr>
@@ -4657,8 +4696,11 @@ function openEditClientModal(id) {
   const c = clients.find(cl=>cl.id===id); if(!c) return;
   const html = clientFormHTML(c);
   showModal('✏️ Edit Client', html, () => {
-    const updated = collectClientForm();
-    Object.assign(c, updated); saveAll();
+    const updated = collectClientForm(), wasClosed = c.status === 'closed';
+    Object.assign(c, updated);
+    if (wasClosed && c.status !== 'closed' && c.vpr && c.vpr.removedAt) c.vpr.needsReview = true;
+    vprSync(c, c.status === 'closed' ? 'File closed' : 'File reopened — all four criteria still recorded as met');
+    saveAll();
     audit('Edited client', c.fullName, c.id);
     showToast('Client updated'); return true;
   });
@@ -15551,7 +15593,7 @@ const RESTRICTABLE_PAGES = {
   sessions:'Session Log', sewb:'SEWB Program', aod:'AOD Program', justice:'Justice Program',
   cultural:'Cultural Strengthening', mensgroup:"Men's Group", disability:'Disability Program',
   workfoundations:'Work Foundations', homeownership:'First Peoples Home Ownership',
-  policies:'Policies & Procedures', calendar:'Calendar', resources:'Resources', reports:'Reports', auditlog:'Audit Log',
+  policies:'Policies & Procedures', calendar:'Calendar', resources:'Resources', reports:'Reports', vpr:'Vulnerable Persons Register', auditlog:'Audit Log',
 };
 function _myHiddenPages(){
   if(!currentUser || currentUser.role==='sysmanager') return [];
@@ -15584,7 +15626,7 @@ function applyNavRestrictions(){
     const m = (el.getAttribute('onclick')||'').match(/showPage\('([^']+)'\)/);
     const page = m && m[1];
     // Settings is System-Manager only; everything else respects hiddenPages.
-    const blocked = page && ((page==='settings' && !isSys) || hidden.includes(page));
+    const blocked = page && ((page==='settings' && !isSys) || (page==='vpr' && !vprPageAllowed()) || hidden.includes(page));
     el.style.display = blocked ? 'none' : '';
   });
 }
@@ -16755,6 +16797,330 @@ function _isHomeVisitEvent(type, title, location) {
 }
 
 // ============================================================
+// VULNERABLE PERSONS REGISTER (VPR)
+// ============================================================
+// The rules (four criteria, consent evidence, revalidation dates) are in
+// vpr.js. This is the CMS side: the screening on each client file, the
+// register page under Admin, and keeping the register in step:
+//   • all four criteria met on an open file  → on the register (automatic);
+//   • a criterion no longer met, consent withdrawn, or the file closed
+//                                             → off the register (automatic).
+// Coming off never deletes anything — screening, consent and history stay on
+// the client record, and the register page lists them under "Removed".
+// This is the organisation's own register. The official VPR is the State's
+// online database; each record tracks whether it has been entered there.
+function vprReady() { return typeof WG_VPR !== 'undefined'; }
+function vprPageAllowed() { return _clientOversightRole(); }      // managers and supervisors
+function vprOf(c) { return (c && c.vpr) || {}; }
+function vprOnRegister(c) { return vprReady() && WG_VPR.onRegister(c); }
+function vprValidation(c) { return vprOf(c).needsReview ? 'revalidate' : WG_VPR.validationStatus(vprOf(c), today()); }
+function _vprWho() { return currentUser?.name || ''; }
+function _vprLog(v, action, detail) { (v.history = v.history || []).push({ at: now(), by: _vprWho(), action, detail: detail || '' }); }
+// Bring the stored "listed" flag in line with the rules, recording the change.
+// Returns 'added', 'removed' or null.
+function vprSync(c, why) {
+  if (!vprReady() || !c || !c.vpr) return null;
+  const v = c.vpr, on = WG_VPR.onRegister(c), was = !!v.listed;
+  if (on === was) return null;
+  if (on) {
+    v.listed = true; v.listedAt = now(); v.removedAt = ''; v.removedReason = '';
+    _vprLog(v, 'Added to the register', why || 'All four criteria met');
+    audit('VPR: added to register', c.fullName, c.id);
+    return 'added';
+  }
+  v.listed = false; v.removedAt = now(); v.removedReason = why || WG_VPR.offReason(c);
+  _vprLog(v, 'Removed from the register', v.removedReason);
+  audit('VPR: removed from register', `${c.fullName} — ${v.removedReason}`, c.id);
+  return 'removed';
+}
+function vprConsentText(c) {
+  if (!vprReady()) return 'not available';
+  const v = vprOf(c);
+  if (v.consent === 'Yes') { const m = WG_VPR.CONSENT_METHODS.find(x => x.key === v.consentMethod); const ev = WG_VPR.consentEvidence(v);
+    return `given${m ? ' — ' + m.label.toLowerCase() : ''}${v.consentDate ? ', ' + fmt(v.consentDate) : ''}${ev.ok ? '' : ' (still to record: ' + ev.missing.join(', ') + ')'}`; }
+  if (v.consent === 'Withdrawn') return 'withdrawn';
+  if (v.consent === 'No') return 'not given';
+  return WG_VPR.screened(v) ? 'not yet recorded' : 'not applicable until a VPR screening is done';
+}
+function vprIntakeStatusText(c) {
+  if (!vprReady()) return '';
+  const v = vprOf(c);
+  if (vprOnRegister(c)) return `On the Vulnerable Persons Register since ${fmt(v.listedAt)}.`;
+  if (v.removedAt) return `Removed from the Vulnerable Persons Register ${fmt(v.removedAt)} — ${v.removedReason}. Records kept.`;
+  if (WG_VPR.screened(v)) { const unmet = WG_VPR.criteria(v).filter(x => !x.met).map(x => x.n); return `VPR screening recorded — not on the register (criteria not met: ${unmet.join(', ')}).`; }
+  if (c.ifEmergencyAssist === 'Yes' && c.ifEmergencyHelp === 'No') return 'Needs help in an emergency and has nobody nearby — complete the VPR screening.';
+  return 'VPR screening not done.';
+}
+// Things a worker should act on, for the file's "Needs attention" list.
+function vprAttention(c) {
+  if (!vprReady() || (c.status || 'active') === 'closed') return [];
+  const v = vprOf(c), out = [];
+  if (vprOnRegister(c)) {
+    const st = vprValidation(c), d = WG_VPR.revalidationDates(today());
+    if (st === 'revalidate') out.push(v.needsReview ? 'VPR record: confirm the criteria and consent again (file was reopened)' : `VPR record is due for re-validation by ${fmt(d.next)}`);
+    if (st === 'unverified') out.push('VPR record is unverified — the re-validation date was missed');
+    if (!v.councilEntered) out.push("On the VPR here, but not yet entered in the council's VPR database");
+  } else if (!WG_VPR.screened(v) && c.ifEmergencyAssist === 'Yes' && c.ifEmergencyHelp === 'No') out.push('Needs help in an emergency and has nobody nearby — VPR screening needed');
+  else if (['c1', 'c2', 'c3'].every(k => v[k] === 'Yes') && v.consent !== 'No' && v.consent !== 'Withdrawn') out.push('Meets VPR criteria 1–3 — consent still to be recorded');
+  return out;
+}
+function _vprPill(st) { const m = WG_VPR.VALIDATION[st]; return `<span class="tag vpr-pill" data-status="${st}" title="${sanitize(m.hint)}" style="background:${m.color}1a;color:${m.color};border:1px solid ${m.color}55">${sanitize(m.label)}</span>`; }
+function _vprEmergencyContact(c) { return [c.ifEc1name, c.ifEc1rel, c.ifEc1phone].filter(Boolean).join(' · ') || c.emergencyContact || ''; }
+
+// ---- on the client file: "Emergency plan & VPR" ----
+function renderVprTab(c) {
+  if (!vprReady()) return '<div class="alert alert-warning">The Vulnerable Persons Register checks could not load — refresh the page.</div>';
+  const v = vprOf(c), id = sanitize(c.id), on = vprOnRegister(c), crit = WG_VPR.criteria(v), closed = (c.status || 'active') === 'closed';
+  const yn = k => ['Yes', 'No', ''].map(o => `<label style="display:flex;align-items:center;gap:5px;font-size:13px;font-weight:400"><input type="radio" name="vpr-${k}" value="${o}" ${(v[k] || '') === o ? 'checked' : ''}> ${o || 'Not assessed'}</label>`).join('');
+  const st = on ? vprValidation(c) : '', d = WG_VPR.revalidationDates(today());
+  const banner = on
+    ? `<div class="card vpr-status on" style="border-left:4px solid #dc2626">
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><strong style="font-size:15px">🚨 On the Vulnerable Persons Register</strong>${_vprPill(st)}
+          <span style="font-size:12px;color:var(--muted);flex:1">since ${fmt(v.listedAt)} · last validated ${v.lastValidated ? fmt(v.lastValidated) : fmt(v.listedAt)} · next re-validation due ${fmt(d.next)}</span>
+          <button class="btn btn-sm btn-primary" onclick="vprRevalidate('${id}')">✓ Re-validate</button></div>
+        ${v.councilEntered ? '' : `<div class="alert alert-warning" style="font-size:12px;margin:10px 0 0">Not yet entered in the council's VPR database. Emergency services only see the official register — enter this record there, then add the date and reference below.</div>`}
+      </div>`
+    : `<div class="card vpr-status off" style="border-left:4px solid #9ca3af">
+        <strong style="font-size:15px">${v.removedAt ? 'Removed from the Vulnerable Persons Register' : 'Not on the Vulnerable Persons Register'}</strong>
+        <div style="font-size:12px;color:var(--muted);margin-top:4px">${v.removedAt ? `${fmt(v.removedAt)} — ${sanitize(v.removedReason || '')}. All records are kept below.` : closed ? 'This file is closed.' : 'A person is added automatically once all four criteria below are met.'}</div>
+      </div>`;
+  return `<div id="vpr-form" data-client="${id}">
+    ${banner}
+    <div class="card">
+      <div class="card-header"><div class="card-title">🧭 Personal emergency planning</div></div>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:12px">Planning comes first: help the person make their own plan and find family, friends or neighbours who can help. The register is a last resort, and being listed does not guarantee assistance in an emergency.</p>
+      <div class="grid-2">
+        <div class="form-group"><label for="vpr-hasPlan">Personal emergency plan in place?</label><select id="vpr-hasPlan">${selOpts(['Yes', 'No'], v.hasPlan || c.ifEmergencyPlan, 'Select…')}</select></div>
+        <div style="display:flex;align-items:center;gap:8px;font-size:13px;padding-top:14px"><input type="checkbox" id="vpr-planDiscussed" style="width:auto;flex:none" ${v.planDiscussed ? 'checked' : ''}> <span onclick="document.getElementById('vpr-planDiscussed').click()" style="cursor:pointer">Emergency planning information provided and/or discussed</span></div>
+      </div>
+      <div style="font-size:12px;color:var(--muted)">Planning resources:
+        <a href="https://www.redcross.org.au/emergency-resources" target="_blank" rel="noopener noreferrer">Red Cross RediPlan</a> ·
+        <a href="https://www.cfa.vic.gov.au/plan-prepare/before-and-during-a-fire/your-bushfire-plan" target="_blank" rel="noopener noreferrer">CFA bushfire plan</a> ·
+        <a href="https://collaborating4inclusion.org" target="_blank" rel="noopener noreferrer">Person-Centred Emergency Preparedness (P-CEP)</a> ·
+        <a href="https://www.ses.vic.gov.au/plan-and-stay-safe/emergencies/flood" target="_blank" rel="noopener noreferrer">VICSES storms and floods</a></div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><div class="card-title">📋 VPR screening — all four criteria must be met</div><span style="font-size:12px;color:var(--muted)">${crit.filter(x => x.met).length} of 4 met</span></div>
+      ${WG_VPR.CRITERIA.filter(x => x.key !== 'c4').map(x => { const r = crit.find(y => y.key === x.key); return `
+      <div class="vpr-crit" data-crit="${x.key}" style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:10px;border-left:4px solid ${r.met ? '#16a34a' : '#d1d5db'}">
+        <div style="font-weight:600;font-size:13px">${x.n}. ${sanitize(x.label)}</div>
+        <ul style="font-size:12px;color:var(--muted);margin:6px 0 8px 18px">${x.consider.map(t => `<li>${sanitize(t)}</li>`).join('')}</ul>
+        <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:8px" role="radiogroup" aria-label="Criterion ${x.n}">${yn(x.key)}</div>
+        <div class="form-group" style="margin:0"><input id="vpr-${x.key}Notes" value="${sanitize(v[x.key + 'Notes'] || '')}" placeholder="Why — what you observed or were told" aria-label="Notes for criterion ${x.n}"></div>
+      </div>`; }).join('')}
+      ${(() => { const r = crit.find(y => y.key === 'c4'); return `
+      <div class="vpr-crit" data-crit="c4" style="border:1px solid var(--border);border-radius:8px;padding:12px;border-left:4px solid ${r.met ? '#16a34a' : '#d1d5db'}">
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span style="font-weight:600;font-size:13px;flex:1">4. Consents to be on the VPR — informed consent</span>
+          <button type="button" class="btn btn-sm btn-outline" onclick="printVprConsent('${id}')">🖨️ Print consent form</button></div>
+        <p style="font-size:12px;color:var(--muted);margin:6px 0 10px">Voluntary, and the person can ask to be removed at any time. A record without evidence of consent is non-compliant. Attach the signed form in Files (document type "VPR consent form"), or record the details here.</p>
+        <div class="grid-2">
+          <div class="form-group"><label for="vpr-consent">Consent</label><select id="vpr-consent">${selOpts([{ v: 'Yes', l: 'Yes — consents' }, { v: 'No', l: 'No — does not consent' }, { v: 'Withdrawn', l: 'Withdrawn — asked to be removed' }], v.consent, 'Not yet asked')}</select></div>
+          <div class="form-group"><label for="vpr-consentMethod">How consent was given</label><select id="vpr-consentMethod">${selOpts(WG_VPR.CONSENT_METHODS.map(m => ({ v: m.key, l: m.label })), v.consentMethod, 'Select…')}</select></div>
+          <div class="form-group"><label for="vpr-consentDate">Date of consent</label><input type="date" id="vpr-consentDate" value="${sanitize(v.consentDate || '')}"></div>
+          <div class="form-group"><label for="vpr-consentBy">Consent obtained / witnessed by</label><input id="vpr-consentBy" value="${sanitize(v.consentBy || currentUser?.name || '')}"></div>
+        </div>
+        <div style="font-size:12px;font-weight:600;margin:4px 0 6px">If given by an authorised representative (the person does not have capacity to consent)</div>
+        <div class="grid-3">
+          <div class="form-group"><label for="vpr-repName">Representative's name</label><input id="vpr-repName" value="${sanitize(v.repName || '')}"></div>
+          <div class="form-group"><label for="vpr-repRelationship">Relationship</label><input id="vpr-repRelationship" value="${sanitize(v.repRelationship || '')}"></div>
+          <div class="form-group"><label for="vpr-repPhone">Contact number</label><input id="vpr-repPhone" value="${sanitize(v.repPhone || '')}"></div>
+        </div>
+        <div style="font-size:12px;font-weight:600;margin:4px 0 6px">So the decision is informed, the worker has:</div>
+        ${WG_VPR.WORKER_CHECKLIST.map((t, i) => `<label style="display:flex;align-items:flex-start;gap:8px;font-size:13px;font-weight:400;padding:3px 0"><input type="checkbox" class="vpr-check" data-i="${i}" style="margin-top:3px" ${(v.checklist || [])[i] ? 'checked' : ''}> ${sanitize(t)}</label>`).join('')}
+        ${r.met ? '' : `<div class="vpr-consent-missing" style="font-size:12px;color:#92400e;margin-top:8px">Criterion 4 not met: ${sanitize(r.why)}.</div>`}
+      </div>`; })()}
+    </div>
+
+    <div class="card">
+      <div class="card-header"><div class="card-title">🚑 Emergency considerations</div></div>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:10px">Tick what an emergency services officer would need to know to help this person. Leave blank if it doesn't apply or isn't known.</p>
+      <div class="grid-2">${WG_VPR.CONSIDERATIONS.map(g => `<fieldset style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin:0"><legend style="font-size:12px;font-weight:600;padding:0 6px">${sanitize(g.label)}</legend>
+        ${g.items.map(it => `<label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:400;padding:2px 0"><input type="checkbox" class="vpr-cons" data-group="${g.key}" value="${sanitize(it)}" ${((v.considerations || {})[g.key] || []).includes(it) ? 'checked' : ''}> ${sanitize(it)}</label>`).join('')}</fieldset>`).join('')}</div>
+      <div class="form-group" style="margin-top:12px"><label for="vpr-comments">Comments for emergency services</label>
+        <textarea id="vpr-comments" style="min-height:80px" placeholder="${sanitize(WG_VPR.COMMENT_PROMPTS.join(' '))}">${sanitize(v.comments || '')}</textarea>
+        <ul style="font-size:11px;color:var(--muted);margin:6px 0 0 18px">${WG_VPR.COMMENT_PROMPTS.map(t => `<li>${sanitize(t)}</li>`).join('')}</ul></div>
+      <div style="font-size:12px;color:var(--muted);margin-top:8px">Used with the record: name, date of birth, gender and address (Personal details), phone, and emergency contact${_vprEmergencyContact(c) ? ' — ' + sanitize(_vprEmergencyContact(c)) : ' — <strong style="color:#92400e">none recorded</strong>'}.</div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><div class="card-title">🏛️ Council's VPR database</div></div>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:10px">Victoria Police and the council see only the official register (vpr.mecccentral.com). Record here when this person was entered there.</p>
+      <div class="grid-2">
+        <div class="form-group"><label for="vpr-councilEntered">Date entered / revalidated in the council VPR</label><input type="date" id="vpr-councilEntered" value="${sanitize(v.councilEntered || '')}"></div>
+        <div class="form-group"><label for="vpr-councilRef">VPR record reference</label><input id="vpr-councilRef" value="${sanitize(v.councilRef || '')}"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><div class="card-title">🕘 Register history</div></div>
+      ${(v.history || []).length ? (v.history || []).slice().reverse().map(h => `<div class="vpr-hist" style="font-size:12px;padding:6px 0;border-bottom:1px solid var(--border)"><strong>${sanitize(h.action)}</strong>${h.detail ? ' — ' + sanitize(h.detail) : ''}<span style="color:var(--muted)"> · ${fmtdt(h.at)}${h.by ? ' · ' + sanitize(h.by) : ''}</span></div>`).join('') : '<p style="font-size:13px;color:var(--muted)">Nothing recorded yet.</p>'}
+    </div>
+  </div>`;
+}
+function saveVpr(id) {
+  const c = clients.find(x => x.id === id), form = document.getElementById('vpr-form');
+  if (!c || !form || form.dataset.client !== id) return;       // only ever save the form that is on screen
+  const v = c.vpr = c.vpr || {}, beforeConsent = v.consent || '';
+  const g = k => (document.getElementById('vpr-' + k)?.value || '').trim();
+  const r = k => form.querySelector(`input[name="vpr-${k}"]:checked`)?.value || '';
+  ['c1', 'c2', 'c3'].forEach(k => { v[k] = r(k); v[k + 'Notes'] = g(k + 'Notes'); });
+  v.hasPlan = g('hasPlan'); v.planDiscussed = !!document.getElementById('vpr-planDiscussed')?.checked;
+  v.consent = g('consent'); v.consentMethod = g('consentMethod'); v.consentDate = g('consentDate'); v.consentBy = g('consentBy');
+  v.repName = g('repName'); v.repRelationship = g('repRelationship'); v.repPhone = g('repPhone');
+  v.checklist = [...form.querySelectorAll('.vpr-check')].map(el => el.checked);
+  v.considerations = {};
+  WG_VPR.CONSIDERATIONS.forEach(grp => { v.considerations[grp.key] = [...form.querySelectorAll(`.vpr-cons[data-group="${grp.key}"]:checked`)].map(el => el.value); });
+  v.comments = g('comments'); v.councilEntered = g('councilEntered'); v.councilRef = g('councilRef');
+  v.updatedAt = now(); v.updatedBy = _vprWho();
+  if (v.consent !== beforeConsent && v.consent) {
+    const m = WG_VPR.CONSENT_METHODS.find(x => x.key === v.consentMethod);
+    _vprLog(v, v.consent === 'Yes' ? 'Consent recorded' : v.consent === 'Withdrawn' ? 'Consent withdrawn' : 'Consent not given', v.consent === 'Yes' ? [m && m.label, v.consentDate && fmt(v.consentDate), v.consentBy && 'by ' + v.consentBy].filter(Boolean).join(', ') : '');
+  }
+  const change = vprSync(c);
+  audit('Saved emergency plan & VPR screening', c.fullName, id);
+  saveAll();
+  const unmet = WG_VPR.criteria(v).filter(x => !x.met);
+  showToast(change === 'added' ? `${c.fullName} added to the Vulnerable Persons Register`
+    : change === 'removed' ? `${c.fullName} removed from the register — records kept`
+    : vprOnRegister(c) ? 'Saved — on the Vulnerable Persons Register'
+    : `Saved — not on the register (${unmet.length} of 4 criteria still to be met)`);
+  _vprRefresh(id);
+}
+// Redraw what is on screen: the register page (it may be underneath an open file) and the file itself.
+function _vprRefresh(id) {
+  if (currentPage === 'vpr' && document.getElementById('vpr-count-on')) showPage('vpr');
+  if (_clientFilePlace(id)) _refreshClientFile(id);
+}
+function vprRevalidate(id) {
+  const c = clients.find(x => x.id === id); if (!c || !vprOnRegister(c)) return;
+  if (!confirm(`Re-validate ${c.fullName}'s VPR record?\n\nOnly confirm if you have checked with them (or their representative) that:\n • all four criteria are still met, and\n • they still consent to be on the register.\n\nIf anything has changed, update the screening instead.`)) return;
+  const v = c.vpr; v.lastValidated = today(); v.needsReview = false;
+  _vprLog(v, 'Re-validated', 'Criteria and consent confirmed');
+  audit('VPR: re-validated', c.fullName, id);
+  saveAll(); showToast('VPR record re-validated');
+  _vprRefresh(id);
+}
+// The consent form (Guidance, Attachment 3), filled in with what is on file.
+function printVprConsent(id) {
+  const c = clients.find(x => x.id === id); if (!c) return;
+  const v = vprOf(c), box = on => on ? '☑' : '☐', org = DB.load('orgName', 'Worn Gundidj Aboriginal Co-Operative');
+  const line = (val, w) => val ? `<u>&nbsp;${sanitize(val)}&nbsp;</u>` : `<span style="display:inline-block;border-bottom:1px solid #111;width:${w || 220}px">&nbsp;</span>`;
+  const yes = v.consent === 'Yes', m = yes ? v.consentMethod : '';
+  audit('Printed VPR consent form', c.fullName, id);
+  openReport(`
+  ${reportHeader('Vulnerable Persons Register: Consent Form', 'Consent to sharing of personal information', c.fullName)}
+  <table><tr><td style="width:34%">Agency name</td><td>${sanitize(org)}</td></tr>
+    <tr><td>Date entered / revalidated on VPR</td><td>${v.councilEntered ? fmt(v.councilEntered) : ''}</td></tr>
+    <tr><td>Entered by (name / id)</td><td>${sanitize(v.consentBy || '')}</td></tr></table>
+  <h2>Personal details</h2>
+  <table><tr><td style="width:34%">Name</td><td>${sanitize(c.fullName || '')}</td></tr><tr><td>ID ref #</td><td>${sanitize(c.clientId || v.councilRef || '')}</td></tr>
+    <tr><td>Date of birth</td><td>${c.dob ? fmt(c.dob) : ''}</td></tr><tr><td>Address</td><td>${sanitize(c.address || '')}</td></tr></table>
+  <p>Your consent is requested to enable your personal information to be provided by you, your delegate or your service provider and be stored in a secure Vulnerable Persons Register.</p>
+  <p>This information will be available to Victoria Police, councils and/or the Department of Families, Fairness and Housing due to their role in leading or supporting emergency management activities. Information will be accessed to support emergency management planning and exercising and may be accessed and used for emergency response and recovery.</p>
+  <p>Through the Vulnerable Persons Register, your information may also be available to other health and community services providers and/or other emergency management organisations for database management or emergency management planning and response.</p>
+  <p>Being listed on a Vulnerable Persons Register is voluntary and you can request to remove yourself at any time. Once you have provided consent it will remain current until you request to remove consent.</p>
+  <p>The information collected on a Vulnerable Persons Register, which may be disclosed will include:</p>
+  <ul><li><strong>personal identification information</strong> — including your name, date of birth and address information</li>
+    <li><strong>contact information</strong> — your personal and emergency contact information</li>
+    <li><strong>personal care needs</strong> — your health and mobility (such as life sustaining medications and equipment), security and access, communication and cognitive, or other needs that would be relevant to emergency services officers in considering the nature of assistance you may require.</li></ul>
+  <p>Your information will be treated in accordance with the Privacy and Data Protection Act 2014 and only available to authorised personnel for the above-mentioned purposes.</p>
+  <h2>Section 1 — Please read the following</h2>
+  <ul><li>Being listed on the Vulnerable Persons Register does not guarantee assistance in an emergency.</li>
+    <li>Emergency management planning is important and it is an individual's responsibility to have a plan and be prepared for an emergency.</li></ul>
+  <p>Information to help me plan for an emergency has been provided and/or discussed with me: &nbsp; ${box(v.planDiscussed)} YES</p>
+  <h2>Section 2 — Record of consent</h2>
+  <p>${box(m === 'written')} <strong>Written consumer consent</strong><br>The worker/practitioner has discussed with me how and why certain information about me may be shared with other organisations, as set out above. I understand this and I give my consent for the information to be shared in the way set out in this form.</p>
+  <p>Signature: ${line('', 240)} &nbsp; Date: ${line(m === 'written' && v.consentDate ? fmt(v.consentDate) : '', 140)}</p>
+  <p><em>Or</em></p>
+  <p>${box(m === 'verbal')} <strong>Verbal consumer consent</strong><br>I have discussed with the consumer how and why certain information may be shared with other organisations, as set out in this form. I am satisfied that this has been understood and that informed consent has been given for the information to be shared as set out in this form.${m === 'verbal' && v.consentDate ? ` &nbsp; Date: ${fmt(v.consentDate)}` : ''}</p>
+  <p><em>Or</em></p>
+  <p>${box(m === 'representative')} <strong>Consumer does not have the capacity to provide consent</strong> <em>(that is, they do not understand the nature of what they are consenting to, or the consequences)</em></p>
+  <p>Consent given by authorised representative: ${line(m === 'representative' ? v.repName : '', 260)}</p>
+  <p>Sign: ${line('', 220)} &nbsp; Date: ${line(m === 'representative' && v.consentDate ? fmt(v.consentDate) : '', 140)}<br>Relationship: ${line(m === 'representative' ? v.repRelationship : '', 200)} &nbsp; Contact number: ${line(m === 'representative' ? v.repPhone : '', 160)}</p>
+  <p>To ensure that the consumer / authorised representative can make an informed decision about consenting to the sharing of information as detailed above, the worker/practitioner should (tick when completed):</p>
+  <table>${WG_VPR.WORKER_CHECKLIST.map((t, i) => `<tr><td style="width:24px">${i + 1}.</td><td>${sanitize(t)}</td><td style="width:30px;text-align:center">${box((v.checklist || [])[i])}</td></tr>`).join('')}</table>
+  <h2>Consent obtained / witnessed by</h2>
+  <table><tr><td style="width:50%">Name: ${sanitize(v.consentBy || '')}</td><td>Agency: ${sanitize(org)}</td></tr>
+    <tr><td>Position:</td><td>Contact number:</td></tr><tr><td>Sign:</td><td>Date: ${v.consentDate ? fmt(v.consentDate) : ''}</td></tr></table>`);
+}
+
+// ---- the register page (Admin) ----
+let _vprTab = 'on';
+function vprSetTab(t) { _vprTab = t; showPage('vpr'); }
+function vprGroups() {
+  const list = visibleClients(clients), g = { on: [], screening: [], notEligible: [], removed: [], unscreened: [] };
+  list.forEach(c => {
+    const v = vprOf(c), open = (c.status || 'active') !== 'closed';
+    if (vprOnRegister(c)) g.on.push(c);
+    else if (v.removedAt || v.listed) g.removed.push(c);       // v.listed without removedAt: closed on a device that hadn't updated yet
+    else if (!open) return;
+    else if (!WG_VPR.screened(v) && !v.consent) g.unscreened.push(c);
+    else if (['c1', 'c2', 'c3'].some(k => v[k] === 'No') || v.consent === 'No' || v.consent === 'Withdrawn') g.notEligible.push(c);
+    else g.screening.push(c);
+  });
+  const byName = (a, b) => String(a.fullName || '').localeCompare(String(b.fullName || ''));
+  Object.values(g).forEach(a => a.sort(byName));
+  return g;
+}
+function renderVprPage() {
+  if (!vprReady()) return '<div class="alert alert-warning">The Vulnerable Persons Register checks could not load — refresh the page.</div>';
+  const g = vprGroups(), d = WG_VPR.revalidationDates(today());
+  const due = g.on.filter(c => vprValidation(c) !== 'verified').length, notCouncil = g.on.filter(c => !vprOf(c).councilEntered).length;
+  const daysTo = Math.round((new Date(d.next + 'T12:00') - new Date(today() + 'T12:00')) / 86400000);
+  const tabs = [['on', 'On the register'], ['screening', 'Being screened'], ['notEligible', 'Screened — not eligible'], ['removed', 'Removed — records kept'], ['unscreened', 'Not yet screened']];
+  if (!tabs.some(t => t[0] === _vprTab)) _vprTab = 'on';
+  const open = c => `<button class="btn btn-sm btn-outline" onclick="openClientProfile('${sanitize(c.id)}','vpr')">Open</button>`;
+  const nameCell = c => `<td style="cursor:pointer;font-weight:600" onclick="openClientProfile('${sanitize(c.id)}','vpr')">${sanitize(c.fullName)}<div style="font-size:11px;font-weight:400;color:var(--muted)">${c.dob ? 'DOB ' + fmt(c.dob) : ''}</div></td>`;
+  const empty = (cols, txt) => `<tr><td colspan="${cols}"><div class="empty-state" style="padding:24px"><div class="icon">🚨</div><p>${txt}</p></div></td></tr>`;
+  let table;
+  if (_vprTab === 'on') table = `<table><thead><tr><th>Person</th><th>Address &amp; phone</th><th>Emergency contact</th><th>Emergency considerations</th><th>Consent</th><th>Council VPR</th><th>Status</th><th></th></tr></thead><tbody>
+    ${g.on.length ? g.on.map(c => { const v = vprOf(c), m = WG_VPR.CONSENT_METHODS.find(x => x.key === v.consentMethod); return `<tr class="vpr-row" data-id="${sanitize(c.id)}">${nameCell(c)}
+      <td style="font-size:12px">${sanitize(c.address || '—')}<br>${sanitize(c.phone || '')}</td>
+      <td style="font-size:12px">${sanitize(_vprEmergencyContact(c) || '—')}</td>
+      <td style="font-size:12px;max-width:240px">${sanitize(WG_VPR.considerationsText(v) || '—')}${v.comments ? `<div style="color:var(--muted);margin-top:3px">${sanitize(v.comments)}</div>` : ''}</td>
+      <td style="font-size:12px">${sanitize(m ? m.label.split(' (')[0] : '')}<br>${v.consentDate ? fmt(v.consentDate) : ''}</td>
+      <td style="font-size:12px">${v.councilEntered ? `${fmt(v.councilEntered)}${v.councilRef ? '<br>' + sanitize(v.councilRef) : ''}` : '<span style="color:#92400e;font-weight:600">Not entered</span>'}</td>
+      <td>${_vprPill(vprValidation(c))}</td>
+      <td style="white-space:nowrap">${open(c)} <button class="btn btn-sm btn-primary" onclick="vprRevalidate('${sanitize(c.id)}')">Re-validate</button></td></tr>`; }).join('') : empty(8, 'Nobody is on the register. People are added automatically when all four criteria are met on their file.')}</tbody></table>`;
+  else if (_vprTab === 'removed') table = `<table><thead><tr><th>Person</th><th>On the register</th><th>Removed</th><th>Reason</th><th>File</th><th></th></tr></thead><tbody>
+    ${g.removed.length ? g.removed.map(c => { const v = vprOf(c); return `<tr class="vpr-row" data-id="${sanitize(c.id)}">${nameCell(c)}<td style="font-size:12px">${v.listedAt ? fmt(v.listedAt) : '—'}</td><td style="font-size:12px">${v.removedAt ? fmt(v.removedAt) : (c.closedDate ? fmt(c.closedDate) : '—')}</td><td style="font-size:12px">${sanitize(v.removedReason || WG_VPR.offReason(c))}</td><td><span class="tag ${(c.status || 'active') === 'closed' ? 'tag-closed' : 'tag-active'}">${sanitize(c.status || 'active')}</span></td><td>${open(c)}</td></tr>`; }).join('') : empty(6, 'Nobody has been removed from the register.')}</tbody></table>`;
+  else if (_vprTab === 'unscreened') table = `<table><thead><tr><th>Client</th><th>Needs help in an emergency?</th><th>Someone nearby to help?</th><th></th></tr></thead><tbody>
+    ${g.unscreened.length ? g.unscreened.map(c => `<tr class="vpr-row" data-id="${sanitize(c.id)}">${nameCell(c)}<td style="font-size:12px">${sanitize(c.ifEmergencyAssist || '—')}</td><td style="font-size:12px">${sanitize(c.ifEmergencyHelp || '—')}</td><td><button class="btn btn-sm btn-outline" onclick="openClientProfile('${sanitize(c.id)}','vpr')">Screen →</button></td></tr>`).join('') : empty(4, 'Every open client has been screened.')}</tbody></table>`;
+  else table = `<table><thead><tr><th>Client</th><th>1. Frail / impaired</th><th>2. Can't respond</th><th>3. No support network</th><th>4. Consent</th><th></th></tr></thead><tbody>
+    ${g[_vprTab].length ? g[_vprTab].map(c => { const cr = WG_VPR.criteria(vprOf(c)); return `<tr class="vpr-row" data-id="${sanitize(c.id)}">${nameCell(c)}${cr.map(x => `<td style="font-size:12px;color:${x.met ? '#065f46' : 'var(--muted)'}">${x.met ? '✓ Met' : sanitize(x.why)}</td>`).join('')}<td>${open(c)}</td></tr>`; }).join('') : empty(6, _vprTab === 'screening' ? 'No screenings are part-way through.' : 'Nobody has been screened as not eligible.')}</tbody></table>`;
+  return `
+  <div class="alert alert-info"><div>🚨 People who would need tailored advice or help to evacuate in an emergency, and have nobody to help them. A person is listed only while <strong>all four criteria</strong> are met — frail or impaired; unable to understand warnings or respond; no personal or community support; and they consent. They come off automatically when a criterion is no longer met, they withdraw consent, or their file is closed — their records are kept. Being listed does not guarantee assistance in an emergency.</div></div>
+  <div class="alert alert-warning" style="font-size:13px">This is Worn Gundidj's own register. Victoria Police and the council see only the State's VPR database (vpr.mecccentral.com) — each person here must also be entered and re-validated there.</div>
+  <div class="grid-4" style="margin-bottom:20px">
+    <div class="stat-card"><div class="label">On the register</div><div class="value" style="color:#dc2626" id="vpr-count-on">${g.on.length}</div></div>
+    <div class="stat-card"><div class="label">Need re-validation</div><div class="value" style="color:${due ? '#d97706' : 'inherit'}">${due}</div></div>
+    <div class="stat-card"><div class="label">Not in council database</div><div class="value" style="color:${notCouncil ? '#d97706' : 'inherit'}">${notCouncil}</div></div>
+    <div class="stat-card"><div class="label">Next re-validation due</div><div class="value" style="font-size:18px;padding:3px 0">${fmt(d.next)}</div><div class="sub">in ${daysTo} day${daysTo !== 1 ? 's' : ''}${today() >= d.windowStart ? ' — review every record now' : ''}</div></div>
+  </div>
+  <div class="card" style="padding:0;overflow:hidden">
+    <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      ${tabs.map(([k, l]) => `<button class="btn btn-sm ${_vprTab === k ? 'btn-primary' : 'btn-outline'}" data-vpr-tab="${k}" onclick="vprSetTab('${k}')">${l} (${g[k].length})</button>`).join('')}
+      <span style="flex:1"></span>
+      <button class="btn btn-sm btn-outline" onclick="printVprRegister()" title="A printed copy for use in an emergency — keep it secure">🖨️ Print register</button>
+    </div>
+    <div class="table-wrap">${table}</div>
+  </div>`;
+}
+function printVprRegister() {
+  if (!vprPageAllowed()) return;
+  const on = vprGroups().on;
+  audit('Printed Vulnerable Persons Register', `${on.length} ${on.length === 1 ? 'person' : 'people'}`);
+  openReport(`
+  ${reportHeader('Vulnerable Persons Register', `As at ${fmt(today())} · ${on.length} ${on.length === 1 ? 'person' : 'people'} · CONFIDENTIAL — for emergency planning and response only`)}
+  <p style="font-size:10px">Evacuation of people listed cannot be guaranteed in an emergency; any assistance depends on the capacity and ability of emergency services to safely provide it. This is the organisation's own register — the official record is the State's VPR database.</p>
+  <table><tr><th>Name</th><th>DOB / gender</th><th>Address</th><th>Phone</th><th>Emergency contact</th><th>Emergency considerations</th><th>Consent</th><th>Status</th></tr>
+  ${on.map(c => { const v = vprOf(c); return `<tr><td>${sanitize(c.fullName)}</td><td>${c.dob ? fmt(c.dob) : '—'}<br>${sanitize(c.gender || '')}</td><td>${sanitize(c.address || '—')}</td><td>${sanitize(c.phone || '—')}</td><td>${sanitize(_vprEmergencyContact(c) || '—')}</td>
+    <td>${sanitize(WG_VPR.considerationsText(v) || '—')}${v.comments ? '<br><em>' + sanitize(v.comments) + '</em>' : ''}</td><td>${v.consentDate ? fmt(v.consentDate) : ''}</td><td>${sanitize(WG_VPR.VALIDATION[vprValidation(c)].label)}</td></tr>`; }).join('') || '<tr><td colspan="8">Nobody is on the register.</td></tr>'}
+  </table>`);
+}
+
+// ============================================================
 // FILE COMPLETENESS
 // ============================================================
 // What a client file must hold is defined ONCE, in data-health.js (the Data
@@ -16993,6 +17359,7 @@ function saveEpisodeReview(id) {
   review.episodeStart = episodeStart(c);
   c.episodeReviews = c.episodeReviews || []; c.episodeReviews.push(review);
   c.status = 'closed'; c.closedDate = date; c.closureReason = review.exitReason; c.closureNotes = review.notes || '';
+  vprSync(c, 'File closed');   // comes off the Vulnerable Persons Register; the record and its history are kept
   audit('Closed client', `${c.fullName} — ${review.exitReason}`, id);
   audit(review.skipped ? 'End-of-episode review skipped' : 'End-of-episode review completed',
     `${c.fullName}${review.skipped ? ' — ' + review.skipReason : ` — ${review.goals.length} goal outcome${review.goals.length !== 1 ? 's' : ''}, ${review.referrals.length} referral${review.referrals.length !== 1 ? 's' : ''}`}`, id);
