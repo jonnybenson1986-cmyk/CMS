@@ -22,6 +22,18 @@ for (const file of Object.keys(RULES)) {
   const sys = env.authenticatedContext('u-sys', { email: 'jon@x.org', role: 'sysmanager' }).firestore();
   const wkr = env.authenticatedContext('u-wkr', { email: 'w@x.org', role: 'worker' }).firestore();
   const anon = env.unauthenticatedContext().firestore();
+  // An ANONYMOUS Firebase session (what anyone could get if Anonymous sign-in were ever switched on).
+  const anonUser = env.authenticatedContext('u-anon', { firebase: { sign_in_provider: 'anonymous' } }).firestore();
+  await env.withSecurityRulesDisabled(async ctx => { const d = ctx.firestore();
+    await setDoc(doc(d, 'teams/worngundidj/clients/seed'), { id: 'seed', fullName: 'Synthetic Person' });
+    await setDoc(doc(d, 'teams/worngundidj/notes/seed'), { id: 'seed', clientId: 'seed', text: 'x' }); });
+  for (const col of ['clients', 'notes', 'timelogs', 'referrals', 'calevents', 'walkins', 'staff', 'smsOutbox', 'intakeForms', 'auditlog']) {
+    await check(file + `: an anonymous session cannot read ${col}`, assertFails(getDocs(collection(anonUser, 'teams/worngundidj/' + col))));
+  }
+  await check(file + ': an anonymous session cannot read a client by id', assertFails(getDoc(doc(anonUser, 'teams/worngundidj/clients/seed'))));
+  await check(file + ': an anonymous session cannot write a client', assertFails(setDoc(doc(anonUser, 'teams/worngundidj/clients/evil'), { id: 'evil', fullName: 'x' })));
+  await check(file + ': an anonymous session cannot request a text', assertFails(setDoc(doc(anonUser, 'teams/worngundidj/smsOutbox/a1'), { kind: 'handbook', clientId: 'seed', requestedBy: 'u-anon', requestedByName: 'x', requestedAt: '2026-10-14T10:00:00Z' })));
+  await check(file + ': a signed-out visitor cannot read or list clients', Promise.all([assertFails(getDoc(doc(anon, 'teams/worngundidj/clients/seed'))), assertFails(getDocs(collection(anon, 'teams/worngundidj/clients')))]));
   const ok = { kind: 'handbook', clientId: 'c1', requestedBy: 'u-wkr', requestedByName: 'Sam', requestedAt: '2026-10-14T10:00:00Z' };
   const f = file + ':';
   await check(f + ' staff can request a handbook text for a client', assertSucceeds(setDoc(doc(wkr, T + '/smsOutbox/r1'), ok)));

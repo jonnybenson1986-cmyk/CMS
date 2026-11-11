@@ -721,8 +721,7 @@ const FSYNC = (() => {
     const ver = '9.23.0';
     const bases = [
       'vendor/firebase/',                                       // self-hosted (same origin) — most reliable, CSP 'self'
-      `https://www.gstatic.com/firebasejs/${ver}/`,             // CSP-allowed CDN fallback
-      `https://cdn.jsdelivr.net/npm/firebase@${ver}/`,          // CSP-allowed CDN fallback
+      `https://www.gstatic.com/firebasejs/${ver}/`,             // Google's own CDN, as a fallback
     ];
     const files = ['firebase-app-compat.js', 'firebase-firestore-compat.js', 'firebase-auth-compat.js', 'firebase-storage-compat.js', 'firebase-app-check-compat.js'];
     for (const base of bases) {
@@ -777,14 +776,10 @@ const FSYNC = (() => {
         // their two-step code) — don't swap in an anonymous session under them.
         throw new Error('Sign-in in progress');
       } else if (!firebase.auth().currentUser) {
-        try {
-          await firebase.auth().signInAnonymously();
-          _log.push('Anon sign-in ✓');
-        } catch(e) {
-          // Anon auth failure is non-fatal — Firestore may still work if security rules allow
-          _log.push('Anon sign-in skipped: ' + e.message);
-          console.warn('Anon auth:', e.message);
-        }
+        // Nobody is signed in: there is nothing to load. The CMS never signs in
+        // anonymously — records are only ever read by a staff account (and the
+        // Firestore rules refuse anonymous sessions).
+        throw new Error('Not signed in');
       } else {
         _log.push('Already signed in ✓');
       }
@@ -800,14 +795,14 @@ const FSYNC = (() => {
     } catch(e) {
       _log.push('ERROR: ' + e.message);
       console.warn('Firebase init failed. Steps:', _log.join(' → '));
-      _showSyncBadge(false, e.message);
+      if (e.message !== 'Not signed in' && e.message !== 'Sign-in in progress') _showSyncBadge(false, e.message);   // before sign-in isn't a fault
       // Give plain-English guidance based on error type
       const msg = e.message || '';
       let guidance = '';
       if (msg.includes('SDK not loaded')) {
         guidance = '⚠️ Could not load Firebase. Check your internet connection and refresh the page.';
-      } else if (msg.includes('auth/operation-not-allowed') || msg.includes('OPERATION_NOT_ALLOWED')) {
-        guidance = '⚠️ <strong>Anonymous sign-in is not enabled.</strong> Go to <a href="https://console.firebase.google.com" target="_blank">Firebase Console</a> → your project → Authentication → Sign-in method → Anonymous → Enable it.';
+      } else if (msg === 'Not signed in' || msg === 'Sign-in in progress') {
+        guidance = 'Sign in with your staff email and password to connect.';
       } else if (msg.includes('NOT_FOUND') || msg.includes('not-found') || msg.includes('does not exist')) {
         guidance = '⚠️ <strong>Firestore database not created yet.</strong> Go to <a href="https://console.firebase.google.com" target="_blank">Firebase Console</a> → your project → Firestore Database → Create database → Start in production mode → Choose <strong>australia-southeast1</strong> region.';
       } else if (msg.includes('permission-denied') || msg.includes('PERMISSION_DENIED')) {
@@ -1293,7 +1288,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v102';
+const APP_VERSION = 'v103';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -15509,7 +15504,7 @@ async function logout(reason) {
   saveCurrentUser(null);
   DB.save('currentUser', null);
   // Sign out of Firebase so the auth token is cleared and the login screen
-  // re-prompts for credentials rather than auto-reconnecting anonymously.
+  // re-prompts for credentials.
   try {
     if(window.firebase && firebase.apps.length) await firebase.auth().signOut();
   } catch(e) { /* ignore */ }
@@ -15521,7 +15516,8 @@ async function logout(reason) {
   try {
     if (FSYNC.isReady()) {
       clients=[]; notes=[]; timeLogs=[]; referrals=[];
-      ['clients','notes','timelogs','referrals','fphoApplications','fphoClients','resources'].forEach(k=>DB.save(k,[]));
+      smsOutbox=[]; intakeForms=[];   // cloud-held (re-read at next sign-in); they carry client names and numbers
+      ['clients','notes','timelogs','referrals','fphoApplications','fphoClients','resources','smsOutbox','intakeForms'].forEach(k=>DB.save(k,[]));
     } else {
       console.warn('Logout: Cloud Sync not connected — local data kept to avoid destroying unsynced work.');
       alert('Note: you are not connected to Cloud Sync, so your data has been kept on this device rather than cleared (clearing it would lose anything not yet uploaded).\n\nReconnect and sign out again on a shared device.');
