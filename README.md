@@ -40,6 +40,7 @@ site/                       ← the website (all Netlify serves)
   intake.html               Client's own intake form (opened from a texted link)
   intake/                   Intake form field list + logo, shared with the CMS
   data-health.js            Data Health schema + scoring (what a client file must hold)
+  vpr.js                    Vulnerable Persons Register rules (four criteria, consent, revalidation)
   auth-redirect.html        Where Microsoft returns after Outlook sign-in
   handbook/                 SEWB Participant Handbook (PDF)
   vendor/firebase/          Self-hosted Firebase SDK (compat build)
@@ -58,7 +59,7 @@ functions-sms/              Automatic text service (handbook + intake links) and
 scripts/                    One-off operational scripts
 tests/rules/                Firestore rules tests (run by the GitHub workflow)
 tests/browser/              End-to-end browser checks against a fake cloud (synthetic data)
-tests/unit/                 Unit tests for site/data-health.js (node --test)
+tests/unit/                 Unit tests for site/data-health.js and site/vpr.js (node --test)
 .github/workflows/          Tests and publishes the Firestore rules
 
 docs/DEPLOY-FIREBASE.md     Publishing rules / text service from GitHub
