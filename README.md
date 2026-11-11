@@ -64,6 +64,7 @@ tests/unit/                 Unit tests for site/data-health.js and site/vpr.js (
 
 docs/DEPLOY-FIREBASE.md     Publishing rules / text service from GitHub
 docs/SECURITY-DEPLOY.md     How to roll out the strict rules safely
+docs/PRIVACY-ASSESSMENT.md  Privacy law assessment: findings, what changed, what the organisation must do
 docs/SMS-SETUP.md           Automatic texts: provider, budget, go-live
 ```
 

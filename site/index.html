@@ -900,6 +900,7 @@ const FSYNC = (() => {
     // already published, so staff get it before the newer appConfig rules are). Newest copy wins.
     const _outlookCfgIn=(where)=>doc=>{ _outlookCfgSeen[where]=true; if(doc.exists) _applyOutlookConfig(doc.data()||{}); };
     _listeners.push(col('appConfig').doc('outlook').onSnapshot(_outlookCfgIn('appConfig'), e=>{ _outlookCfgSeen.appConfigError=e.code||e.message; console.warn('appConfig listener:',e.message); }));
+    _listeners.push(col('appConfig').doc('privacy').onSnapshot(doc=>{ if(doc.exists) _applyPrivacyConfig(doc.data()||{}); }, e=>console.warn('privacy settings listener:',e.message)));
     _listeners.push(col('staff').doc('outlookSetup').onSnapshot(_outlookCfgIn('staff'), e=>{ _outlookCfgSeen.staffError=e.code||e.message; console.warn('outlook set-up listener:',e.message); }));
     _listeners.push(col('smsConfig').doc('settings').onSnapshot(doc=>{ smsConfig=doc.exists?doc.data():{}; DB.save('smsConfig',smsConfig); try{ _smsRefresh(); }catch(_){} }, e=>{ window._smsListenErr=e.code||e.message; console.warn('smsConfig listener:',e.message); }));
     _listeners.push(col('walkins').doc('list').onSnapshot(doc=>{ if(doc.metadata.hasPendingWrites)return; const l=doc.exists?doc.data().list:null; if(l){ walkins=_keep(walkins,l); DB.save('walkins',walkins); if(currentPage==='walkins')setTimeout(()=>showPage('walkins'),50); } }, e=>console.warn('walkins listener:',e.message)));
@@ -939,7 +940,8 @@ const FSYNC = (() => {
   function _forgetHash(colName, id){ if(_syncHash[colName]) { delete _syncHash[colName][String(id)]; _saveHashes(); } }
 
   async function _batch(colName, items, idFn, force) {
-    if (!db||!items.length) return;
+    if (!db) return false;
+    if (!items.length) return true;
     const map = _syncHash[colName] = _syncHash[colName] || {};
     // Only send records whose content actually changed since the last push.
     const pending = [];
@@ -949,7 +951,7 @@ const FSYNC = (() => {
       const h = _hashOf(clean);
       if (force || map[id] !== h) pending.push({id, clean, h});
     });
-    if (!pending.length) return;                      // nothing changed — no writes
+    if (!pending.length) return true;                 // nothing changed — no writes
     let committed = 0;
     for (let i=0;i<pending.length;i+=400) {
       const slice = pending.slice(i,i+400);
@@ -965,6 +967,7 @@ const FSYNC = (() => {
       if (ok) { slice.forEach(r=>{ map[r.id]=r.h; }); committed += slice.length; }
     }
     if (committed) _saveHashes();
+    return committed === pending.length;              // true = every record is in the cloud
   }
   // Surface sync failures instead of swallowing them (QA H3).
   let _syncErrCount = 0;
@@ -1045,7 +1048,7 @@ const FSYNC = (() => {
       .catch(e=>{ console.warn('Staff sync:',e.message); _noteStaffSync(false,e); _syncFailed('staff directory',e); });
   }
   async function pushPolicies() { if(db) col('policies').doc('list').set({list:policies.map(p=>{ const {data,...rest}=p; return rest; })}).catch(e=>console.warn('Policy sync:',e.message)); }
-  async function pushAudit()    { await _batch('auditlog',auditLog,a=>a.id); }
+  async function pushAudit()    { return await _batch('auditlog',auditLog,a=>a.id); }
   // QA C4/H5 — these were device-local only. FPHO holds real client records, so
   // losing the device (or signing out, which purges local data) destroyed them
   // permanently and no other worker could see them. Now synced like everything
@@ -1295,7 +1298,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v105';
+const APP_VERSION = 'v106';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -1312,6 +1315,9 @@ function _applyOutlookConfig(cfg) {
   outlookOrgConfig = cfg; DB.save('outlookOrgConfig', cfg);
   if (changed) { try { _msalInstance = null; if (currentPage === 'calendar' || currentPage === 'settings') setTimeout(() => showPage(currentPage), 50); } catch (_) {} }
 }
+// Privacy settings shared with all staff (appConfig/privacy): { voiceOff, contact, updatedBy, updatedAt }
+let privacyConfig = DB.load('privacyConfig', {}) || {};
+function _applyPrivacyConfig(cfg) { privacyConfig = cfg || {}; DB.save('privacyConfig', privacyConfig); try { if (currentPage === 'settings') showPage('settings'); } catch (_) {} }
 let policies = DB.load('policies', []); // organisation policies & procedures library
 function saveFPHO() { DB.save('fphoApplications', fphoApplications); if(FSYNC.isReady()) FSYNC.pushFpho?.(); }
 function saveFPHOClients() { DB.save('fphoClients', fphoClients); if(FSYNC.isReady()) FSYNC.pushFpho?.(); }
@@ -1352,6 +1358,7 @@ let _voiceBtnId  = null;
 function toggleVoiceInput(textareaId, btnId) {
   if(_voiceRecog && _voiceTarget === textareaId) { stopVoiceInput(); return; }
   if(_voiceRecog) stopVoiceInput();
+  if(!voiceGate()) return;
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if(!SR) { alert('Voice input is not supported in this browser.\nPlease use Google Chrome or Microsoft Edge.'); return; }
   const ta = document.getElementById(textareaId);
@@ -2069,17 +2076,18 @@ function renderClosedClients() {
     ${closed.length===0?'<p style="color:var(--muted);font-size:13px;padding:20px 0;text-align:center">No closed client files</p>':
     `<div class="table-wrap"><table>
       <thead><tr>
-        <th>Client</th><th>ID</th><th>Programs</th><th>Closed Date</th><th>Closure Reason</th><th>Actions</th>
+        <th>Client</th><th>ID</th><th>Programs</th><th>Closed Date</th><th>Closure Reason</th><th title="Health records must be kept at least this long (Health Records Act 2001 (Vic), HPP 4.2)">Keep record until</th><th>Actions</th>
       </tr></thead>
       <tbody>
         ${closed.map(c=>{
           const progs = [c.sewb&&'SEWB',c.aod&&'AOD',c.justice&&'Justice',c.cultural&&'Cultural',c.mensgroup&&"Men's Group",c.disability&&'Disability',c.workFoundations&&'Work Foundations'].filter(Boolean);
           return `<tr>
             <td><div style="display:flex;align-items:center;gap:10px"><div class="avatar" style="opacity:0.6">${initials(c.fullName)}</div><div style="font-weight:600;font-size:13px">${sanitize(c.fullName)}</div></div></td>
-            <td style="font-size:12px;color:var(--muted)">${c.clientId||'—'}</td>
+            <td style="font-size:12px;color:var(--muted)">${sanitize(c.clientId)||'—'}</td>
             <td>${progs.map(p=>`<span class="tag" style="font-size:10px;margin-right:3px">${p}</span>`).join('')||'—'}</td>
-            <td style="font-size:13px">${c.closedDate||'—'}</td>
-            <td style="font-size:13px;color:var(--muted)">${c.closureReason||'—'}</td>
+            <td style="font-size:13px">${sanitize(c.closedDate)||'—'}</td>
+            <td style="font-size:13px;color:var(--muted)">${sanitize(c.closureReason)||'—'}</td>
+            <td style="font-size:12px" class="keep-until" title="${sanitize(retention(c).why)}">${retention(c).until ? fmt(retention(c).until) : '—'}</td>
             <td style="white-space:nowrap">
               <button class="btn btn-sm btn-outline" onclick="openClientProfile('${c.id}')">View</button>
               <button class="btn btn-sm" style="background:#d1fae5;color:#065f46;margin-left:4px" onclick="reopenClient('${c.id}')">🔓 Reopen</button>
@@ -3024,6 +3032,7 @@ function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
         ${consentCheck(c, 'ifConsentDatabase', 'Information stored in Worn Gundidj online database')}
         ${consentCheck(c, 'ifConsentExternal', 'Information shared with external agencies for services or funding support')}
         ${consentCheck(c, 'ifConsentVideo', 'Consent for online video calls (Telehealth / Teams / Zoom)')}
+        ${consentCheck(c, 'ifConsentPrivacy', 'Privacy explained: why we collect information, who it may be shared with, and how to see or correct it or make a complaint')}
         ${consentCheck(c, 'ifConsentPack', 'Client received SEWB Program Information Pack')}
         ${consentCheck(c, 'ifConsentSigned', 'Client has completed and signed consent form')}
         <div class="vpr-consent-line" style="display:flex;align-items:center;gap:10px;font-size:13px;padding:8px 12px;background:var(--bg);border-radius:6px;flex-wrap:wrap">
@@ -3800,17 +3809,18 @@ function deleteFile(clientId, idx) {
   if(!confirm('Remove this file?')) return;
   const c=clients.find(cl=>cl.id===clientId); if(!c) return;
   const f=c.attachments[idx];
+  if (f) audit('Removed file from client record', `${f.name || 'file'}${f.docType ? ' (' + f.docType + ')' : ''}`, clientId);
   if(f?.storagePath) FSYNC.deleteStorageFile(f.storagePath);
   c.attachments.splice(idx,1); saveAll(); _refreshClientFile(clientId);
 }
 
 // ===== SUMMARY EXPORT =====
-function exportClientSummaryPDF(id) { openReport(buildFullClientReport(clients.find(c=>c.id===id),'2000-01-01',today())); }
+function exportClientSummaryPDF(id) { const c=clients.find(c=>c.id===id); if(!c) return; audit('Printed / exported client file', c.fullName, id); openReport(buildFullClientReport(c,'2000-01-01',today())); }
 function exportClientJSON(id) {
   const c=clients.find(cl=>cl.id===id); if(!c) return;
   const data={client:c,notes:notes.filter(n=>n.clientId===id),timeLogs:timeLogs.filter(t=>t.clientId===id),exportedAt:now()};
   const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));
-  a.download=`${c.fullName.replace(/\s+/g,'-')}-${today()}.json`; a.click(); showToast('Client file exported');
+  a.download=`${c.fullName.replace(/\s+/g,'-')}-${today()}.json`; a.click(); audit('Exported client file (.json)', c.fullName, id); showToast('Client file exported');
 }
 function copyClientSummary(id) {
   const c=clients.find(cl=>cl.id===id); if(!c) return;
@@ -3818,7 +3828,7 @@ function copyClientSummary(id) {
   const progs=[c.sewb&&'SEWB',c.aod&&'AOD',c.justice&&'Justice',c.cultural&&'Cultural',c.mensgroup&&"Men's Group"].filter(Boolean).join(', ');
   const rn=notes.filter(n=>n.clientId===id).sort((a,b)=>b.created.localeCompare(a.created)).slice(0,3);
   const text=['WORN GUNDIDJ — CLIENT SUMMARY',`Generated: ${new Date().toLocaleDateString('en-AU')}`,``,`CLIENT: ${sanitize(c.fullName)}`,`DOB: ${c.dob||'—'} (${age} yrs)  |  Risk: ${(c.riskLevel||'low').toUpperCase()}`,`Mob: ${sanitize(c.mob||'—')}  |  Community: ${sanitize(c.community||'—')}`,`Phone: ${c.phone||'—'}  |  Key Worker: ${sanitize(c.keyWorker||'—')}`,``,`PROGRAMS: ${progs||'None'}`,``,`GOALS:`,`  Short: ${c.ifGoalShort||c.goals||'—'}`,`  Medium: ${c.ifGoalMedium||'—'}`,`  Long: ${c.ifGoalLong||'—'}`,``,`RECENT NOTES:`,...rn.map(n=>`  [${noteTypeLabel(n.type).toUpperCase()}] ${fmtdt(n.created)}: ${(n.text||'').slice(0,150)}`)].join('\n');
-  navigator.clipboard.writeText(text).then(()=>showToast('Summary copied to clipboard'));
+  navigator.clipboard.writeText(text).then(()=>{ audit('Copied client summary', c.fullName, id); showToast('Summary copied to clipboard'); });
 }
 
 // ===== OUTLOOK ICS EXPORT =====
@@ -3980,7 +3990,7 @@ function saveIntake(id, quiet=false) {
     ifPrevDate: g('if-prevDate'), ifPrevWorker: g('if-prevWorker'), ifPrevPositive: g('if-prevPositive'), ifPrevFeedback: g('if-prevFeedback'),
     ifConsentInfo: gb('ifConsentInfo'), ifConsentAudit: gb('ifConsentAudit'), ifConsentDatabase: gb('ifConsentDatabase'),
     ifConsentExternal: gb('ifConsentExternal'), ifConsentVideo: gb('ifConsentVideo'),
-    ifConsentPack: gb('ifConsentPack'), ifConsentSigned: gb('ifConsentSigned'),
+    ifConsentPrivacy: gb('ifConsentPrivacy'), ifConsentPack: gb('ifConsentPack'), ifConsentSigned: gb('ifConsentSigned'),
     ifClientSig: g('if-clientSig'), ifConsentDate: g('if-consentDate'), ifIntakeWorker: g('if-intakeWorker'),
     ifDateCompleted: g('if-dateCompleted'), ifIntakeWorkerName: g('if-intakeWorkerName'), ifIntakeLocation: g('if-intakeLocation'),
   });
@@ -4030,7 +4040,7 @@ const _maskPhone = m => m ? m.slice(0, 4) + ' ••• ' + m.slice(-3) : '';
 // Short link (netlify.toml: /hb → the PDF) so the whole text fits in one SMS.
 function handbookShortUrl() { return location.origin + '/hb'; }
 function handbookMessage(c) {
-  return toGsmText(`Hi ${smsFirstName(c)}, welcome to Worn Gundidj SEWB. Your Participant Handbook: ${handbookShortUrl()} Questions? Call ${ORG_PHONE}`);
+  return toGsmText(`Hi ${smsFirstName(c)}, welcome to Worn Gundidj. Your Participant Handbook: ${handbookShortUrl()} Questions? Call ${ORG_PHONE}`);
 }
 // Where things stand for this client, in one place (used on the Intake tab).
 // ---- Automatic texts (Firebase) ----
@@ -4197,7 +4207,7 @@ function sendHandbook(clientId, channel, ctx) {
   const to = channel === 'email' ? c.email : auMobile(document.getElementById('hb-to')?.value || c.phone);
   if (channel === 'sms' && !to) { alert('Enter a mobile number (04…)'); return; }
   if (channel === 'sms') openExternalLink(`sms:${to}?&body=${encodeURIComponent(msg)}`);
-  else if (channel === 'email') openExternalLink(`mailto:${encodeURIComponent(c.email)}?subject=${encodeURIComponent('Your Worn Gundidj SEWB Participant Handbook')}&body=${encodeURIComponent(msg)}`);
+  else if (channel === 'email') openExternalLink(`mailto:${encodeURIComponent(c.email)}?subject=${encodeURIComponent('Your Worn Gundidj Participant Handbook')}&body=${encodeURIComponent(msg)}`);
   else if (channel === 'copy') { try { navigator.clipboard.writeText(msg); } catch (_) {} }
   const person = channel === 'in person';
   c.handbookSent = c.handbookSent || [];
@@ -4361,6 +4371,7 @@ function printIntake(id) {
     <tr><td>Vulnerable Persons Register consent</td><td>${sanitize(vprConsentText(c))}</td></tr>
     <tr><td>Date</td><td>${sanitize(c.ifConsentDate||'')}</td></tr>
     <tr><td>Intake Worker</td><td>${sanitize(c.ifIntakeWorker||'')}</td></tr>
+    <tr><td>Privacy explained</td><td>${c.ifConsentPrivacy?'Yes':'No'}</td></tr>
     <tr><td>Received Info Pack</td><td>${c.ifConsentPack?'Yes':'No'}</td></tr>
   </table>
   <p style="margin-top:30px;color:#999;font-size:10px">Worn Gundidj Aboriginal Co-Operative — 1-3 Rooneys Rd, Warrnambool — 03 5561 5315</p>
@@ -5053,6 +5064,8 @@ function deleteNote(noteId, clientId) {
     return;
   }
   if(!confirm('Delete this note?')) return;
+  // A record of what was removed, by whom and when (not the words). The cloud copy is kept, marked as deleted.
+  if (note) audit('Deleted note', `${noteTypeLabel(note.type).toUpperCase()} note dated ${fmtdt(note.created)}`, clientId);
   notes = notes.filter(n=>n.id!==noteId);
   FSYNC.deleteDoc('notes', noteId);   // tombstone (QA C2) — queued if offline
   saveAll();
@@ -6150,7 +6163,6 @@ function updateClientReportButtons() {
 function reportStyles() {
   return `
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
     * { box-sizing:border-box; margin:0; padding:0; }
     body { font-family:'Segoe UI',Arial,sans-serif; font-size:12px; color:#1a1a1a; background:#fff; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
     .page { max-width:820px; margin:0 auto; padding:30px; }
@@ -11989,7 +12001,7 @@ function renderAuditLog() {
     <div class="card-header">
       <div class="card-title">🔍 Audit Log <span style="font-size:12px;font-weight:400;color:var(--muted)">${auditLog.length} total entries</span></div>
       <div style="display:flex;gap:8px">
-        ${isAdmin ? `<button class="btn btn-sm btn-danger" onclick="clearAuditLog()">🗑️ Clear Log</button>` : ''}
+        ${isAdmin ? `<button class="btn btn-sm btn-danger" onclick="clearAuditLog()" title="Clears this device's view only — the cloud copy is permanent">🗑️ Clear this device's view</button>` : ''}
         <button class="btn btn-sm btn-outline" onclick="exportAuditLog()">📤 Export CSV</button>
       </div>
     </div>
@@ -12022,7 +12034,7 @@ function renderAuditLog() {
       <div class="al-cell">Action</div>
       <div class="al-cell">Detail</div>
       <div class="al-cell">Client</div>
-      <div class="al-cell">IP Address</div>
+      <div class="al-cell" title="No longer recorded — older entries only">IP (older entries)</div>
     </div>
 
     <!-- ROWS -->
@@ -12035,16 +12047,16 @@ function renderAuditLog() {
             <div class="al-cell">
               <div style="display:flex;align-items:center;gap:6px">
                 <div style="width:26px;height:26px;border-radius:50%;background:var(--primary-light);color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">${initials(e.worker||'?')}</div>
-                <span style="font-weight:600;font-size:12px">${e.worker||'—'}</span>
+                <span style="font-weight:600;font-size:12px">${sanitize(e.worker)||'—'}</span>
               </div>
             </div>
             <div class="al-cell">
-              <span style="display:inline-flex;align-items:center;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;background:${actionColour(e.action)}18;color:${actionColour(e.action)}">${e.action||'—'}</span>
+              <span style="display:inline-flex;align-items:center;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;background:${actionColour(e.action)}18;color:${actionColour(e.action)}">${sanitize(e.action)||'—'}</span>
             </div>
             <div class="al-cell" style="color:var(--text)">${sanitize(e.detail)||'—'}</div>
             <div class="al-cell">
               ${e.clientId
-                ? `<button class="btn-ghost" style="font-size:12px;padding:2px 6px" onclick="openClientProfile('${e.clientId}')">${sanitize(e.clientName||e.clientId)}</button>`
+                ? `<button class="btn-ghost" style="font-size:12px;padding:2px 6px" onclick="openClientProfile('${sanitize(e.clientId)}')">${sanitize(e.clientName||e.clientId)}</button>`
                 : `<span style="color:var(--muted)">—</span>`}
             </div>
             <div class="al-cell" style="font-size:10px;color:var(--muted);font-family:monospace">${sanitize(e.ip||'')||'—'}</div>
@@ -12090,7 +12102,7 @@ function clearAuditFilters() {
 }
 
 function clearAuditLog() {
-  if (!confirm('Clear the entire audit log? This cannot be undone.')) return;
+  if (!confirm('Clear the audit log shown on this device?\n\nThe permanent copy in the cloud cannot be deleted. It is kept, and reloads the next time you sign in.')) return;
   audit('Cleared audit log', `Removed ${auditLog.length} entries`);
   auditLog = auditLog.slice(-1); // keep the clear-log entry itself
   saveAuditLog();
@@ -12173,7 +12185,7 @@ function renderSettings() {
                 ? '<span style="color:#16a34a;font-size:12px">✓ Linked</span>'
                 : '<span style="color:#d97706;font-size:12px">○ Not linked</span>'}</td>
               <td style="padding:8px 10px;font-size:11px;color:var(--muted)">
-                ${u.lastLoginAt ? `<span title="IP: ${sanitize(u.lastLoginIP||'unknown')}">${fmtdt(u.lastLoginAt)}<br><code style="font-size:10px">${sanitize(u.lastLoginIP||'—')}</code></span>` : '—'}
+                ${u.lastLoginAt ? `<span>${fmtdt(u.lastLoginAt)}</span>` : '—'}
               </td>
               ${currentUser?.role==='sysmanager'?`<td style="padding:8px 10px;white-space:nowrap;text-align:center">
                 <button class="btn btn-sm btn-outline" style="margin-right:4px" onclick="openEditStaffModal('${u.id}')">✏️ Edit</button>
@@ -12275,27 +12287,8 @@ function renderSettings() {
     `}
   </div>
 
-  <!-- PRIVACY POLICY CARD -->
-  <div class="card" style="border-left:4px solid #7c3aed">
-    <div class="card-header">
-      <div class="card-title">🔒 Privacy &amp; Compliance (Australian Privacy Principles)</div>
-      <button class="btn btn-sm btn-primary" onclick="showPrivacyPolicy()">View Privacy Policy</button>
-    </div>
-    <p style="font-size:13px;color:var(--muted);margin-bottom:10px">
-      This system handles sensitive personal information and is subject to the <em>Privacy Act 1988</em> (Cth) and all 13 Australian Privacy Principles.
-    </p>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px">
-      <div style="background:#f0fdf4;border-radius:6px;padding:10px"><strong>✅ APP 1</strong> — Privacy policy available</div>
-      <div style="background:#f0fdf4;border-radius:6px;padding:10px"><strong>✅ APP 3</strong> — Collect only what's necessary</div>
-      <div style="background:#f0fdf4;border-radius:6px;padding:10px"><strong>✅ APP 6</strong> — No secondary use without consent</div>
-      <div style="background:#f0fdf4;border-radius:6px;padding:10px"><strong>✅ APP 11</strong> — Role-based access &amp; audit log</div>
-      <div style="background:#f0fdf4;border-radius:6px;padding:10px"><strong>✅ APP 8</strong> — ${FSYNC.isReady()?'No overseas disclosure — Cloud Sync data stored in Australia (Sydney)':'No overseas disclosure (local only)'}</div>
-      <div style="background:#f0fdf4;border-radius:6px;padding:10px"><strong>✅ APP 12/13</strong> — Data access &amp; correction on request</div>
-    </div>
-    ${FSYNC.isReady()?`<p style="font-size:11px;color:#065f46;background:#d1fae5;border-radius:6px;padding:8px 12px;margin-top:10px">
-      <strong>Data location (APP 8):</strong> Cloud Sync is enabled. Personal information is stored on Google Firebase servers located in <strong>Australia (Sydney — australia-southeast1)</strong>, so there is no cross-border disclosure. This is disclosed in the Privacy Policy available on the login screen.
-    </p>`:''}
-  </div>
+  <!-- PRIVACY CARD -->
+  ${privacyCardHTML()}
 
   <!-- OUTLOOK SYNC CARD -->
   ${outlookSettingsCardHTML()}
@@ -13220,13 +13213,20 @@ function mailCompose(opts) {
       <div class="form-group"><label for="mc-body">Message</label><textarea id="mc-body" rows="10" style="min-height:200px">
 ${sanitize(opts.body || '')}</textarea></div>
       <div class="form-group"><label for="mc-client">About a client <span style="font-weight:400;text-transform:none">(optional)</span></label>
-        <select id="mc-client">${selOpts(cl.map(c => ({ v: c.id, l: c.fullName })), opts.clientId || '', 'Not about a client')}</select>
+        <select id="mc-client" onchange="mailSafeNote()">${selOpts(cl.map(c => ({ v: c.id, l: c.fullName })), opts.clientId || '', 'Not about a client')}</select>
+        <div id="mc-safe" style="margin-top:8px"></div>
         <label style="display:flex;gap:8px;align-items:center;font-size:13px;font-weight:400;text-transform:none;letter-spacing:0;margin-top:8px"><input type="checkbox" id="mc-record" ${opts.clientId ? 'checked' : ''} style="width:auto"> Record this email as a note on the client's file</label></div>
       <p style="font-size:12px;color:var(--muted)">Sent from ${sanitize(outlookAccount()?.username || 'your Outlook')} and saved in your Sent Items. Attachments can't be added here — use Outlook for those.</p>
       <p id="mc-error" style="color:#dc2626;font-size:13px;min-height:18px"></p>
       <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-outline" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="mc-send" onclick="mailSend()">📨 Send</button></div>
     </div>`, null, '680px', true);
+  mailSafeNote();
   setTimeout(() => document.getElementById(opts.to ? 'mc-body' : 'mc-to')?.focus(), 50);
+}
+// A reminder, not a block: the intake's "safe to contact" answer is about calls and texts.
+function mailSafeNote() {
+  const el = document.getElementById('mc-safe'), c = clients.find(x => x.id === (document.getElementById('mc-client')?.value || '')); if (!el) return;
+  el.innerHTML = c && c.ifSafeContact !== 'Yes' ? `<div class="alert alert-warning" id="mc-safe-warn" style="font-size:12px;margin:0;display:block">"Safe to leave calls/texts?" on ${sanitize(c.fullName)}'s intake is <strong>${sanitize(c.ifSafeContact || 'not answered')}</strong>. Check they have agreed to email at this address, and that it is safe, before sending.</div>` : '';
 }
 function emailClient(id) {            // from a client's file
   const c = clients.find(x => x.id === id); if (!c) return;
@@ -14005,7 +14005,7 @@ function intakeLinkStatusText(c) {
 function intakeLinkMessage(c, f) {
   const days = Math.max(1, Math.ceil((_ifExpMs(f) - Date.now()) / 864e5));
   const url = intakeLinkUrl(f.linkId);
-  const long = toGsmText(`Hi ${smsFirstName(c)}, please fill in your Worn Gundidj SEWB intake form: ${url} (works ${days} days). Questions? ${ORG_PHONE}`);
+  const long = toGsmText(`Hi ${smsFirstName(c)}, please fill in your Worn Gundidj intake form: ${url} (works ${days} days). Questions? ${ORG_PHONE}`);
   return long.length <= 160 ? long : toGsmText(`Hi ${smsFirstName(c, 10)}, your Worn Gundidj intake form: ${url} (works ${days} days). Questions? ${ORG_PHONE}`);
 }
 // What the client already has on file → filled in for them.
@@ -14117,7 +14117,7 @@ async function sendIntakeLink(formId, channel) {
     return _ifRecordSend(f, c, 'text from ' + (currentUser?.name ? currentUser.name.split(' ')[0] + '’s' : 'worker’s') + ' phone to ' + _maskPhone(mob));
   }
   if (channel === 'email') {
-    openExternalLink(`mailto:${encodeURIComponent(c.email)}?subject=${encodeURIComponent('Your Worn Gundidj SEWB intake form')}&body=${encodeURIComponent(msg.replace(/ Questions\?/, '\n\nQuestions?'))}`);
+    openExternalLink(`mailto:${encodeURIComponent(c.email)}?subject=${encodeURIComponent('Your Worn Gundidj intake form')}&body=${encodeURIComponent(msg.replace(/ Questions\?/, '\n\nQuestions?'))}`);
     return _ifRecordSend(f, c, 'email');
   }
 }
@@ -15016,14 +15016,11 @@ function _resolveUserProfile(firebaseUser, email) {
   return u;
 }
 
-// ===== IP CAPTURE =====
-// Fetches the user's public IP once per session for security audit logging.
-// Uses a privacy-neutral lookup (no tracking, HTTPS only).
+// No IP lookup: the CMS used to ask an outside service (api.ipify.org, overseas)
+// for the device's public IP on every page load. That sent staff network details
+// to a third party for a value the browser reports about itself, so it proved
+// little. Sign-ins are still audited (who, when, two-step on/off).
 window._sessionIP = '';
-window._sessionIPReady = fetch('https://api.ipify.org?format=json', { cache: 'no-store' })
-  .then(r => r.json())
-  .then(d => { window._sessionIP = d.ip || ''; })
-  .catch(() => { window._sessionIP = 'unavailable'; });
 
 function _failKey(email){ return 'login_fail_'+String(email||'').toLowerCase(); }
 function _recordFailedLogin(email){ const k=_failKey(email); const r=DB.load(k,{n:0,until:0}); r.n=(r.n||0)+1; if(r.n>=5) r.until=Date.now()+15*60*1000; DB.save(k,r); }
@@ -15036,57 +15033,135 @@ function checkLogin() {
   return true;
 }
 
-function showPrivacyPolicy() {
-  showModal('🔒 Privacy Policy — Worn Gundidj Aboriginal Co-Operative', `
-    <div style="font-size:13px;line-height:1.8;color:#374151;max-height:70vh;overflow-y:auto;padding-right:8px">
-      <p style="background:#fef3c7;border:1px solid #fde68a;border-radius:6px;padding:10px 14px;margin-bottom:16px;font-size:12px">
-        This policy is made available free of charge in compliance with <strong>Australian Privacy Principle 1.5</strong>.
-        Last updated: 6 July 2026.
-      </p>
-
-      <h3 style="color:var(--primary);margin:16px 0 6px">1. About This Policy (APP 1)</h3>
-      <p>Worn Gundidj Aboriginal Co-Operative Ltd ("Worn Gundidj", "we", "us") is committed to managing personal information in an open and transparent way in accordance with the <em>Privacy Act 1988</em> (Cth) and the Australian Privacy Principles (APPs).</p>
-
-      <h3 style="color:var(--primary);margin:16px 0 6px">2. What Information We Collect (APP 3 &amp; 5)</h3>
-      <p>We collect personal information necessary to provide social and emotional wellbeing, AOD, justice, disability, cultural strengthening, and FPHO services, including:</p>
-      <ul style="margin:8px 0 8px 20px">
-        <li>Full name, date of birth, gender, contact details</li>
-        <li>Cultural background and language</li>
-        <li>Health, disability, and wellbeing information (sensitive information)</li>
-        <li>Case notes, referrals, and service records</li>
-        <li>Staff login credentials and audit logs</li>
-        <li>Device IP address (for security audit purposes)</li>
-      </ul>
-      <p>Sensitive information (health, cultural, disability) is only collected with the individual's consent and where reasonably necessary for service delivery.</p>
-
-      <h3 style="color:var(--primary);margin:16px 0 6px">3. How We Collect Information (APP 3.5 &amp; 3.6)</h3>
-      <p>Information is collected directly from individuals or, where impracticable, from referral sources, family members, or other service providers with the individual's consent. All collection is by lawful and fair means.</p>
-
-      <h3 style="color:var(--primary);margin:16px 0 6px">4. Purpose of Collection (APP 6)</h3>
-      <p>Personal information is used solely to deliver and coordinate services, maintain case records, meet reporting obligations to funding bodies, and ensure staff accountability through audit logs. Information will not be used for direct marketing.</p>
-
-      <h3 style="color:var(--primary);margin:16px 0 6px">5. Storage &amp; Security (APP 11)</h3>
-      <p>Data is stored in your browser's local storage and, when Cloud Sync is enabled, in <strong>Google Firebase Firestore</strong> hosted in the <strong>Australia (Sydney) region (australia-southeast1)</strong>. We take reasonable steps to protect information from misuse, loss, and unauthorised access through role-based access controls, session timeouts, and audit logging.</p>
-
-      <h3 style="color:var(--primary);margin:16px 0 6px">6. Overseas Disclosure (APP 8)</h3>
-      <p style="background:#d1fae5;border-left:3px solid #10b981;padding:8px 12px;border-radius:4px">
-        <strong>✅ When Cloud Sync is enabled</strong>, personal information is transmitted to and stored on Google Firebase servers located in <strong>Australia (Sydney region, australia-southeast1)</strong>. Data is not stored overseas, so there is no cross-border disclosure under APP 8. Google's privacy protections are described at <em>policies.google.com/privacy</em>.
-      </p>
-
-      <h3 style="color:var(--primary);margin:16px 0 6px">7. Access &amp; Correction (APP 12 &amp; 13)</h3>
-      <p>Individuals have the right to access personal information held about them and to request corrections. Requests should be directed to the System Manager. We will respond within 30 days. Access may be refused on limited grounds set out in APP 12.3.</p>
-
-      <h3 style="color:var(--primary);margin:16px 0 6px">8. Complaints (APP 1.2)</h3>
-      <p>Complaints about handling of personal information can be directed to the System Manager in the first instance. If unresolved, complaints may be made to the <strong>Office of the Australian Information Commissioner (OAIC)</strong> at <em>oaic.gov.au</em> or by phone on 1300 363 992.</p>
-
-      <h3 style="color:var(--primary);margin:16px 0 6px">9. Data Retention (APP 11.2)</h3>
-      <p>Personal information is retained for as long as required to deliver services and meet legal obligations. When no longer required, information is destroyed or de-identified.</p>
-
-      <h3 style="color:var(--primary);margin:16px 0 6px">10. Contact</h3>
-      <p>Worn Gundidj Aboriginal Co-Operative Ltd<br>
-      For privacy enquiries contact the System Manager via the CMS or at the organisation's registered address.</p>
+// ============================================================
+// PRIVACY
+// ============================================================
+// Laws this system is run under: the Privacy Act 1988 (Cth) and its Australian
+// Privacy Principles (APPs), including the Notifiable Data Breaches scheme, and
+// the Health Records Act 2001 (Vic) and its Health Privacy Principles (HPPs).
+// See docs/PRIVACY-ASSESSMENT.md for the assessment these functions come from.
+const RETENTION_YEARS_ADULT = 7;      // HPP 4.2: at least 7 years after the last service
+const RETENTION_CHILD_AGE = 25;       // HPP 4.2: or until a person who was a child turns 25
+const ADULT_AGE = 18;
+function _addYears(dateStr, n) { const d = new Date(String(dateStr).slice(0, 10) + 'T12:00:00Z'); if (isNaN(d)) return ''; d.setUTCFullYear(d.getUTCFullYear() + n); return d.toISOString().slice(0, 10); }
+// The last time a service was provided: the latest of the closure date, a note, or logged time.
+function lastServiceDate(c) {
+  let last = String(c.closedDate || '').slice(0, 10);
+  const see = d => { d = String(d || '').slice(0, 10); if (/^\d{4}-\d{2}-\d{2}$/.test(d) && d > last) last = d; };
+  (notes || []).forEach(n => { if (n && n.clientId === c.id) see(n.created); });
+  (timeLogs || []).forEach(t => { if (t && t.clientId === c.id) see(t.date || t.created); });
+  return /^\d{4}-\d{2}-\d{2}$/.test(last) ? last : '';
+}
+// The earliest date a closed file's record may be destroyed. { until, why }
+function retention(c) {
+  const last = lastServiceDate(c);
+  if (!last) return { until: '', why: 'No service date on file — work out the last service date before any record is destroyed.' };
+  const seven = _addYears(last, RETENTION_YEARS_ADULT), dob = /^\d{4}-\d{2}-\d{2}$/.test(String(c.dob || '')) ? c.dob : '';
+  if (!dob) return { until: seven, why: `${RETENTION_YEARS_ADULT} years after the last service (${fmt(last)}). Date of birth is not recorded — if they were under ${ADULT_AGE}, keep until they turn ${RETENTION_CHILD_AGE}.` };
+  if (last < _addYears(dob, ADULT_AGE)) return { until: _addYears(dob, RETENTION_CHILD_AGE), why: `Under ${ADULT_AGE} at the last service (${fmt(last)}): keep until they turn ${RETENTION_CHILD_AGE}.` };
+  return { until: seven, why: `${RETENTION_YEARS_ADULT} years after the last service (${fmt(last)}).` };
+}
+// Voice to text is done by the browser maker's speech service, outside the CMS.
+// The System Manager can switch it off for everyone; each worker sees the notice once.
+function voiceGate() {
+  if (privacyConfig.voiceOff) { showToast('Voice to text is switched off for Worn Gundidj (Settings → Privacy).'); return false; }
+  const key = String(currentUser?.email || currentUser?.name || '').toLowerCase(), acks = DB.load('voiceAck', {}) || {};
+  if (acks[key]) return true;
+  if (!confirm('Voice to text — please read\n\nYour browser turns speech into text by sending the sound to its maker\'s speech service (Google for Chrome, Microsoft for Edge). That happens outside the CMS and may be processed outside Australia.\n\n • Avoid saying a client\'s full name or other identifying details.\n • Don\'t use it where other people can be overheard.\n • Type instead if you are unsure.\n\nPress OK to use voice to text.')) return false;
+  acks[key] = now(); DB.save('voiceAck', acks); audit('Voice-to-text notice accepted', '');
+  return true;
+}
+function privacyContactText() { return String(privacyConfig.contact || '').trim() || 'the System Manager'; }
+async function savePrivacySettings() {
+  if (currentUser?.role !== 'sysmanager') { showToast('Only the System Manager can change privacy settings'); return; }
+  const cfg = { voiceOff: !document.getElementById('pv-voice')?.checked, contact: (document.getElementById('pv-contact')?.value || '').trim().slice(0, 200), updatedBy: currentUser?.name || '', updatedAt: now() };
+  const was = !!privacyConfig.voiceOff;
+  privacyConfig = cfg; DB.save('privacyConfig', cfg);
+  let shared = false;
+  try { if (FSYNC.isReady()) { await FSYNC.setAppConfig('privacy', cfg); shared = true; } } catch (e) { console.warn('Privacy settings not shared:', e.message); }
+  audit('Privacy settings changed', `Voice to text ${cfg.voiceOff ? 'off' : 'on'}${was !== cfg.voiceOff ? ' (changed)' : ''}${cfg.contact ? ', privacy contact set' : ''}${shared ? '' : ' (this device only)'}`);
+  showToast(shared ? '✓ Privacy settings saved for all staff' : '⚠️ Saved on this device only — Cloud Sync isn\'t connected');
+  showPage('settings');
+}
+function privacyCardHTML() {
+  const sys = currentUser?.role === 'sysmanager', row = (what, where, note) => `<tr><td style="font-weight:600">${what}</td><td>${where}</td><td style="color:var(--muted)">${note}</td></tr>`;
+  return `<div class="card" id="privacy-card" style="border-left:4px solid #7c3aed">
+    <div class="card-header">
+      <div class="card-title">🔒 Privacy</div>
+      <button class="btn btn-sm btn-primary" onclick="showPrivacyPolicy()">View Privacy Policy</button>
     </div>
-  `, null, '680px');
+    <p style="font-size:13px;color:var(--muted);margin-bottom:10px">This system holds health and other sensitive information. It is run under the <em>Privacy Act 1988</em> (Cth) — the Australian Privacy Principles and the Notifiable Data Breaches scheme — and the <em>Health Records Act 2001</em> (Vic). The CMS supports those duties; it does not meet them on its own.</p>
+    <div style="font-size:12px;font-weight:700;margin-bottom:4px">Where information goes</div>
+    <div class="table-wrap"><table style="font-size:12px">
+      ${row('Client records', 'Google Firebase, Sydney (australia-southeast1)', 'Stored in Australia.')}
+      ${row('Staff sign-in', 'Google sign-in service', 'Staff email addresses only; may be processed outside Australia.')}
+      ${row('Text messages', 'ClickSend (only if automatic texts are switched on)', 'Mobile number and the words of the text.')}
+      ${row('Outlook calendar and email', "Worn Gundidj's own Microsoft 365", 'Calendar entries carry first name and initial only. Emails are not stored in the CMS.')}
+      ${row('Voice to text', privacyConfig.voiceOff ? '<strong>Switched off</strong>' : "The browser maker's speech service (Google or Microsoft)", privacyConfig.voiceOff ? 'Nothing is sent.' : 'Spoken words; may be processed outside Australia. Each worker is shown a notice first.')}
+    </table></div>
+    <div style="font-size:12px;font-weight:700;margin:12px 0 4px">For Worn Gundidj to have in place</div>
+    <ul style="font-size:12px;line-height:1.7;margin-left:18px;color:#374151">
+      <li>A privacy policy approved by the organisation (the one here is a starting draft), and a named person for privacy questions and complaints.</li>
+      <li>A data breach response plan: assess a suspected breach within 30 days, and tell the people affected and the OAIC if serious harm is likely.</li>
+      <li>Consent and a privacy explanation at intake (the Intake section records both), and separate consent for the Vulnerable Persons Register.</li>
+      <li>Records kept at least 7 years after the last service, or until a person who was a child turns 25 — Closed Clients shows the date for each file.</li>
+      <li>Two-step sign-in for every staff member, and staff who know not to share logins or leave files open.</li>
+    </ul>
+    ${sys ? `<div style="background:var(--bg);border-radius:8px;padding:12px;margin-top:12px">
+      <label style="display:flex;gap:8px;align-items:center;font-size:13px;font-weight:400"><input type="checkbox" id="pv-voice" style="width:auto" ${privacyConfig.voiceOff ? '' : 'checked'}> Allow voice to text (🎤) on notes</label>
+      <div class="form-group" style="margin:10px 0 8px"><label for="pv-contact">Privacy contact shown in the policy</label><input id="pv-contact" maxlength="200" value="${sanitize(privacyConfig.contact || '')}" placeholder="e.g. Privacy Officer, 03 5561 5315, privacy@…"></div>
+      <button class="btn btn-sm btn-primary" onclick="savePrivacySettings()">Save privacy settings</button>
+      ${privacyConfig.updatedBy ? `<span style="font-size:11px;color:var(--muted);margin-left:8px">Last changed by ${sanitize(privacyConfig.updatedBy)} · ${fmtdt(privacyConfig.updatedAt)}</span>` : ''}
+    </div>` : ''}
+  </div>`;
+}
+function showPrivacyPolicy() {
+  const h = t => `<h3 style="color:var(--primary);margin:16px 0 6px">${t}</h3>`;
+  showModal('🔒 Privacy Policy — Worn Gundidj Aboriginal Co-Operative', `
+    <div id="privacy-policy" style="font-size:13px;line-height:1.8;color:#374151;max-height:70vh;overflow-y:auto;padding-right:8px">
+      <p style="background:#fef3c7;border:1px solid #fde68a;border-radius:6px;padding:10px 14px;margin-bottom:16px;font-size:12px">
+        Available free of charge (Australian Privacy Principle 1.5). Last updated: 11 November 2026. This describes how the client record system handles information; it should be read with Worn Gundidj's organisational privacy policy.
+      </p>
+      ${h('1. About this policy')}
+      <p>Worn Gundidj Aboriginal Co-Operative Ltd ("Worn Gundidj", "we") handles personal and health information under the <em>Privacy Act 1988</em> (Cth) and the Australian Privacy Principles (APPs), and the <em>Health Records Act 2001</em> (Vic) and its Health Privacy Principles (HPPs). Some funded programs carry further privacy conditions.</p>
+      ${h('2. What we collect')}
+      <ul style="margin:8px 0 8px 20px">
+        <li>Name, date of birth, gender, contact details and emergency contacts</li>
+        <li>Cultural background, mob and language</li>
+        <li>Health, disability, wellbeing, alcohol and other drug, justice and family information (sensitive information)</li>
+        <li>Case notes, sessions, referrals, goals, assessments and documents</li>
+        <li>Emergency planning information and, with separate consent, a Vulnerable Persons Register record</li>
+        <li>Medicare, Centrelink and NDIS numbers where a service needs them. We do not use these as our own identifier for a person.</li>
+        <li>For staff: name, work email, role, and a log of what they view and change</li>
+      </ul>
+      <p>We collect sensitive information with the person's consent, and only what is reasonably needed to provide the service. People can choose not to answer a question; where it is practical (for example a general enquiry or walk-in), a person can deal with us without giving their name.</p>
+      ${h('3. How we collect it')}
+      <p>Directly from the person where we can — in person, by phone, or through an online intake form sent to them by a private link. Sometimes from a referrer, family member or another service, with the person's consent or as the law allows. At intake we explain why we collect information, who it may be shared with, and how to see or correct it.</p>
+      ${h('4. How we use and share it')}
+      <p>To provide and coordinate services, keep an accurate record of care, meet our reporting obligations to funding bodies, and check the quality of our work. We share information outside Worn Gundidj only with consent, or where the law requires or allows it — for example to lessen a serious threat to someone's life, health or safety, to protect a child, or under a family violence or child information sharing scheme or a court order. We do not use information for marketing.</p>
+      <p>A Vulnerable Persons Register record is entered in the State's register only with the person's consent, where it can be seen by Victoria Police, the council and the Department of Families, Fairness and Housing for emergency planning and response.</p>
+      ${h('5. Storage and security')}
+      <p>Client records are stored in <strong>Google Firebase hosted in Sydney, Australia</strong>. Access needs a staff sign-in, with two-step sign-in. A client file can be limited to its assigned workers. Sessions time out, client information is cleared from a device at sign-out, and viewing, changing, exporting and printing client files are recorded in an audit log.</p>
+      ${h('6. Information handled outside Australia')}
+      <p>Client records are kept in Australia. A few supporting services may handle limited information overseas:</p>
+      <ul style="margin:8px 0 8px 20px">
+        <li><strong>Staff sign-in</strong> (Google): staff email addresses, not client records.</li>
+        <li><strong>Text messages</strong> (ClickSend), when used: the mobile number and the words of the text.</li>
+        <li><strong>Outlook calendar and email</strong> (Worn Gundidj's Microsoft 365): calendar entries show a first name and initial only; emails staff send are held in their mailbox.</li>
+        <li><strong>Voice to text</strong>, when a worker uses it: the spoken words are processed by the web browser's speech service (Google or Microsoft). ${privacyConfig.voiceOff ? 'This is currently switched off.' : 'Staff are told not to dictate identifying details.'}</li>
+      </ul>
+      ${h('7. Seeing and correcting your information')}
+      <p>You can ask to see the information we hold about you, and ask us to correct it. Contact ${sanitize(privacyContactText())}. We will respond within 30 days. Health records are not deleted when corrected: the correction is added to the record. If we cannot give access or make a change, we will explain why in writing, and you can ask for a statement of what you believe is correct to be kept with the record.</p>
+      ${h('8. How long we keep records')}
+      <p>Health records are kept for at least 7 years after the last service, or until a person who was under 18 turns 25, and then securely destroyed or de-identified unless we need to keep them longer by law.</p>
+      ${h('9. Data breaches')}
+      <p>If information is lost or accessed without authority, we assess it promptly. Where serious harm is likely, we tell the people affected and the Office of the Australian Information Commissioner.</p>
+      ${h('10. Complaints')}
+      <p>Tell us first: contact ${sanitize(privacyContactText())}. If you are not satisfied, you can complain to the <strong>Office of the Australian Information Commissioner</strong> (oaic.gov.au, 1300 363 992) or, for health information, the Victorian <strong>Health Complaints Commissioner</strong> (hcc.vic.gov.au).</p>
+      ${h('11. Contact')}
+      <p>Worn Gundidj Aboriginal Co-Operative Ltd<br>Privacy enquiries: ${sanitize(privacyContactText())}</p>
+    </div>
+  `, null, '680px', true);
 }
 
 async function checkFbConnection() {
@@ -15696,26 +15771,16 @@ function _auditLogin(u) {
     worker: u.name || 'Unknown',
     role: u.role || '',
     action: 'Login',
-    detail: `Signed in from IP: ${window._sessionIP || 'resolving…'} · ${mfa}`,
+    detail: `Signed in · ${mfa}`,
     clientId: '', clientName: '', page: 'login',
-    ip: window._sessionIP || '',
+    ip: '',
   };
-  // Update IP once resolved if it wasn't ready yet
-  window._sessionIPReady.then(() => {
-    entry.detail = `Signed in from IP: ${window._sessionIP} · ${mfa}`;
-    entry.ip = window._sessionIP;
-    saveAuditLog();
-  });
   auditLog.push(entry);
   saveAuditLog();
   // Persist last login metadata to user profile
   u.lastLoginAt = now();
-  u.lastLoginIP = window._sessionIP;
+  delete u.lastLoginIP;          // no longer collected
   saveUserProfiles();
-  window._sessionIPReady.then(() => {
-    u.lastLoginIP = window._sessionIP;
-    saveUserProfiles();
-  });
 }
 
 function _finishLogin(firebaseUser, email) {
@@ -15793,6 +15858,10 @@ async function logout(reason) {
   saveCurrentUser(null);
   DB.save('currentUser', null);
   try { mailReset(); } catch(_) {}   // email is read live and never stored, but drop what's on screen
+  // The audit log on this device names clients. Make sure it is in the cloud
+  // (while still signed in), so it can be cleared from the device below.
+  let auditInCloud = false;
+  try { if (FSYNC.isReady()) auditInCloud = (await Promise.race([FSYNC.pushAudit(), new Promise(r => setTimeout(() => r(false), 4000))])) === true; } catch(e) {}
   // Sign out of Firebase so the auth token is cleared and the login screen
   // re-prompts for credentials.
   try {
@@ -15808,6 +15877,10 @@ async function logout(reason) {
       clients=[]; notes=[]; timeLogs=[]; referrals=[];
       smsOutbox=[]; intakeForms=[];   // cloud-held (re-read at next sign-in); they carry client names and numbers
       ['clients','notes','timelogs','referrals','fphoApplications','fphoClients','resources','smsOutbox','intakeForms'].forEach(k=>DB.save(k,[]));
+      // Calendar and walk-in register (client names) are whole lists held in the cloud and re-read at sign-in.
+      calEvents=[]; walkins=[]; DB.save('calevents',[]); DB.save('walkins',[]);
+      // Audit log: cleared only once every entry is confirmed in the cloud (it is re-read at sign-in).
+      if (auditInCloud) { auditLog=[]; DB.save('auditlog',[]); }
     } else {
       console.warn('Logout: Cloud Sync not connected — local data kept to avoid destroying unsynced work.');
       alert('Note: you are not connected to Cloud Sync, so your data has been kept on this device rather than cleared (clearing it would lose anything not yet uploaded).\n\nReconnect and sign out again on a shared device.');
@@ -16375,7 +16448,7 @@ const _voiceSupported = !!(window.SpeechRecognition || window.webkitSpeechRecogn
 let _voiceActive = null;
 
 function _attachVoiceButtons() {
-  if(!_voiceSupported) return;
+  if(!_voiceSupported || privacyConfig.voiceOff) return;
   document.querySelectorAll('textarea:not([data-voice-attached])').forEach(ta => {
     ta.dataset.voiceAttached = '1';
     const wrap = document.createElement('div');
@@ -16398,6 +16471,7 @@ function _toggleVoice(ta, btn) {
     _voiceActive.recognition.stop();
     return;
   }
+  if(!voiceGate()) return;
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   const rec = new SR();
   rec.lang = 'en-AU';

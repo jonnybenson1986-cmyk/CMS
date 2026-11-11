@@ -21,7 +21,7 @@ test('sends to the client mobile from the record, in +61 format, with the templa
   const d = deps(); const r = await lib.processRequest({ kind: 'handbook', clientId: 'c1', requestedBy: 'u1' }, d);
   assert.equal(r.status, 'sent'); assert.equal(r.to, '0491 ••• 156'); assert.equal(r.providerId, 'MSG123');
   assert.equal(d.sent.length, 1); assert.equal(d.sent[0].to, '+61491570156');
-  assert.match(d.sent[0].body, /^Hi Jordy, welcome to Worn Gundidj SEWB\./);
+  assert.match(d.sent[0].body, /^Hi Jordy, welcome to Worn Gundidj\./);
   assert.ok(d.sent[0].body.includes(URL_)); assert.ok(!/Citizen|0491/.test(d.sent[0].body));
 });
 test('request text or numbers from the browser are ignored (only clientId is used)', async () => {

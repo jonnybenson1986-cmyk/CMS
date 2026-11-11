@@ -71,6 +71,10 @@
   .note.warn { background:var(--warn-bg); color:var(--warn); }
   .note.err { background:var(--err-bg); color:var(--err); }
   .note.ok { background:var(--ok-bg); color:var(--ok); }
+  .privacy { margin-top:10px; font-size:14px; }
+  .privacy summary { cursor:pointer; color:var(--primary); font-weight:600; text-decoration:underline; padding:6px 0; }
+  .privacy ul { margin:6px 0 0 18px; padding:0; color:#374151; line-height:1.55; }
+  .privacy li { margin-bottom:6px; }
   .review dl { margin:0; }
   .review .sec { border-top:1px solid var(--border); padding:12px 0 4px; }
   .review .sec:first-child { border-top:none; padding-top:0; }
@@ -112,6 +116,15 @@
   const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   let db, token = '', formRef = null, answers = {}, step = 0, expires = null, saveTimer = null, saving = false, pending = false, tries = 0;
 
+  // Collection notice (Privacy Act 1988 APP 5; Health Records Act 2001 (Vic) HPP 1.4): shown before anything is asked.
+  const privacyHTML = () => `<details class="privacy" id="privacy-notice"><summary>How we look after your information</summary>
+    <ul>
+      <li><strong>Why we ask.</strong> To understand what support you want and to plan it with you.</li>
+      <li><strong>It’s your choice.</strong> Only your name is needed to send this form. You can skip any question and talk it through with your worker instead. If we don’t have some details, we may not be able to offer every service straight away.</li>
+      <li><strong>Who sees it.</strong> Worn Gundidj staff involved in your support. We only share it outside Worn Gundidj if you agree, or if the law requires or allows it — for example, to keep you or someone else safe. Reports to the bodies that fund our services are kept to what they require.</li>
+      <li><strong>Where it’s kept.</strong> In Worn Gundidj’s secure client record system, stored in Australia. Health records are kept for at least 7 years after your last service.</li>
+      <li><strong>Your rights.</strong> You can ask to see your information, ask us to correct it, or make a complaint about how it’s been handled. Ask your worker, or call us on <a href="tel:${ORG_TEL}">${ORG_PHONE}</a>, for a copy of our privacy policy. If you’re not happy with our answer you can contact the Office of the Australian Information Commissioner (oaic.gov.au) or the Victorian Health Complaints Commissioner (hcc.vic.gov.au).</li>
+    </ul></details>`;
   const contactHTML = () => `<p class="contact">Need help or want to do this with a worker? Call <a href="tel:${ORG_TEL}">${ORG_PHONE}</a></p>`;
   function screen(icon, title, text, extra) {
     $('nav').hidden = true;
@@ -216,14 +229,15 @@
     const prog = `<div class="progress"><span>Step ${step + 1} of ${total}</span><div class="bar" aria-hidden="true"><span style="width:${pct}%"></span></div></div>`;
     if (step < REVIEW) {
       const S = STEPS[step];
-      const welcome = step === 0 ? `<div class="card" style="background:#eef7f1;border-color:#b7dcc4"><p style="margin:0"><strong>Welcome to Worn Gundidj.</strong> This form helps us get to know you before we meet. It takes about 10 minutes and <strong>saves as you go</strong> — you can stop and come back with the same link${expires ? ' until ' + esc(fmtDate(expires)) : ''}. Only answer what you’re comfortable with; your worker will go through it with you.</p><p style="margin:8px 0 0;font-size:14px;color:var(--muted)">Your information is private. It is only seen by Worn Gundidj staff and is kept on your file.</p></div>` : '';
+      const welcome = step === 0 ? `<div class="card" style="background:#eef7f1;border-color:#b7dcc4"><p style="margin:0"><strong>Welcome to Worn Gundidj.</strong> This form helps us get to know you before we meet. It takes about 10 minutes and <strong>saves as you go</strong> — you can stop and come back with the same link${expires ? ' until ' + esc(fmtDate(expires)) : ''}. Only answer what you’re comfortable with; your worker will go through it with you.</p><p style="margin:8px 0 0;font-size:14px;color:var(--muted)">Your information is kept private and secure on your Worn Gundidj file.</p>${privacyHTML()}</div>` : '';
       $('main').innerHTML = `${prog}${welcome}<div class="card"><h2 tabindex="-1" id="h">${esc(S.title)}</h2>${S.intro ? `<p class="intro">${esc(S.intro)}</p>` : ''}${S.fields.map(fieldHTML).join('')}</div>${contactHTML()}`;
     } else {
       $('main').innerHTML = `${prog}<div class="card review"><h2 tabindex="-1" id="h">Check and send</h2><p class="intro">Have a look over your answers. Tap <em>Change</em> to fix anything.</p>
         ${STEPS.map((S, i) => `<div class="sec"><div class="sec-h"><span>${esc(S.title)}</span><button class="btn link" type="button" data-goto="${i}">Change<span class="sr"> ${esc(S.title)}</span></button></div><dl>${S.fields.map(f => {
           const v = answers[f.key], shown = Array.isArray(v) ? (f.type === 'services' ? v.map(k => (I.SERVICES.find(s => s[0] === k) || [k, k])[1]) : v).join(', ') : (f.type === 'date' && v ? new Date(v + 'T00:00').toLocaleDateString('en-AU') : v);
           return `<dt>${esc(f.label)}</dt><dd class="${shown ? '' : 'empty'}">${shown ? esc(shown) : 'Not answered'}</dd>`; }).join('')}</dl></div>`).join('')}
-        <label class="decl"><input type="checkbox" id="decl"> <span>The information I’ve given is true to the best of my knowledge, and I’m happy for Worn Gundidj to add it to my file.</span></label>
+        <label class="decl"><input type="checkbox" id="decl"> <span>The information I’ve given is true to the best of my knowledge, and I’m happy for Worn Gundidj to add it to my file and use it to plan my support.</span></label>
+        ${privacyHTML()}
         <div id="send-err"></div></div>${contactHTML()}`;
       $('main').querySelectorAll('[data-goto]').forEach(b => b.addEventListener('click', () => go(Number(b.dataset.goto))));
     }

@@ -99,7 +99,7 @@ test('intake link: texted once, only for that client, only while open', async ()
   const fire = async (id, data) => { store.set(T + '/smsOutbox/' + id, data); await handleOutbox(snap(T + '/smsOutbox/' + id), 'worngundidj', env); return store.get(T + '/smsOutbox/' + id); };
   const ok = await fire('i1', { kind: 'intake', clientId: 'c1', linkId: LINK, requestedBy: 'u', requestedByName: 'Sam' });
   assert.equal(ok.status, 'sent'); assert.equal(sent.length, 1); assert.equal(sent[0].to, '+61491570156');
-  assert.equal(sent[0].body, 'Hi Jordan, please fill in your Worn Gundidj SEWB intake form: https://cms.example.org/i#' + LINK + ' (works 7 days). Questions? (03) 5561 5315');
+  assert.equal(sent[0].body, 'Hi Jordan, please fill in your Worn Gundidj intake form: https://cms.example.org/i#' + LINK + ' (works 7 days). Questions? (03) 5561 5315');
   assert.equal(lib.smsParts(sent[0].body), 1);
   assert.match((await fire('i2', { kind: 'intake', clientId: 'c1', linkId: LINK, requestedBy: 'u' })).reason, /already texted/);
   assert.match((await fire('i3', { kind: 'intake', clientId: 'c2', linkId: LINK, requestedBy: 'u' })).reason, /not found for this client/);
