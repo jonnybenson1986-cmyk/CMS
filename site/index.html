@@ -555,6 +555,9 @@
     <div class="nav-item" onclick="showPage('calendar')">
       <span class="icon">📅</span><span>Calendar</span>
     </div>
+    <div class="nav-item" onclick="showPage('email')">
+      <span class="icon">✉️</span><span>Email</span>
+    </div>
     <div class="nav-item" onclick="showPage('resources')">
       <span class="icon">🗂️</span><span>Resources</span>
     </div>
@@ -1292,7 +1295,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v104';
+const APP_VERSION = 'v105';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -1888,7 +1891,7 @@ function showPage(page) {
   setMobTab(page);
   document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
   const items = document.querySelectorAll('.nav-item');
-  const titles = { dashboard:'Dashboard', referrals:'Referral Holding Bay', clients:'Clients', sessions:'Session Log', notes:'All Case Notes', policies:'Policies & Procedures', walkins:'Walk-in Register', sewb:'SEWB Program', aod:'AOD Program', justice:'Justice Program', mensgroup:"Men's Group", cultural:'Cultural Strengthening', disability:'Disability Program', reports:'Reports', calendar:'Calendar', vpr:'Vulnerable Persons Register', auditlog:'Audit Log', settings:'Settings' };
+  const titles = { dashboard:'Dashboard', email:'Email', referrals:'Referral Holding Bay', clients:'Clients', sessions:'Session Log', notes:'All Case Notes', policies:'Policies & Procedures', walkins:'Walk-in Register', sewb:'SEWB Program', aod:'AOD Program', justice:'Justice Program', mensgroup:"Men's Group", cultural:'Cultural Strengthening', disability:'Disability Program', reports:'Reports', calendar:'Calendar', vpr:'Vulnerable Persons Register', auditlog:'Audit Log', settings:'Settings' };
   document.getElementById('page-title').textContent = titles[page] || page;
   items.forEach(el => { if(el.getAttribute('onclick')?.includes(`'${page}'`)) el.classList.add('active'); });
   if (page !== 'auditlog' && page !== currentPage) audit('Page view', titles[page] || page);
@@ -1925,7 +1928,7 @@ function showPage(page) {
     btn.onclick = openNewClientModal;
   }
 
-  const pages = { dashboard: renderDashboard, referrals: renderReferrals, clients: renderClients, closedclients: renderClosedClients, sessions: renderSessions, notes: renderAllNotes, walkins: renderWalkins, sewb: renderSEWB, aod: renderAOD, justice: renderJustice, cultural: renderCultural, mensgroup: renderMensGroup, vpr: renderVprPage, disability: renderDisability, workfoundations: renderWorkFoundations, homeownership: renderHomeOwnership, reports: renderReportsPage, calendar: renderCalendarPage, resources: renderResourcesPage, policies: renderPoliciesPage, auditlog: renderAuditLog, settings: renderSettings, chat: renderChatPage };
+  const pages = { dashboard: renderDashboard, email: renderEmailPage, referrals: renderReferrals, clients: renderClients, closedclients: renderClosedClients, sessions: renderSessions, notes: renderAllNotes, walkins: renderWalkins, sewb: renderSEWB, aod: renderAOD, justice: renderJustice, cultural: renderCultural, mensgroup: renderMensGroup, vpr: renderVprPage, disability: renderDisability, workfoundations: renderWorkFoundations, homeownership: renderHomeOwnership, reports: renderReportsPage, calendar: renderCalendarPage, resources: renderResourcesPage, policies: renderPoliciesPage, auditlog: renderAuditLog, settings: renderSettings, chat: renderChatPage };
   const fn = pages[page];
   document.getElementById('content').innerHTML = fn ? fn() : '<div class="empty-state"><p>This page could not be opened. Please refresh, or contact your system manager if it keeps happening.</p></div>';
   attachPageEvents(page);
@@ -2179,6 +2182,7 @@ function profileHeaderHTML(c) {
       <details class="pf-menu right" id="pf-actions"><summary class="btn btn-outline btn-sm">⋯ Actions ▾</summary>
         <div class="pf-menu-list" role="menu">
           <button class="pf-menu-item" role="menuitem" onclick="openEditClientModal('${id}')"><span>✏️</span><span>Edit details<small>Name, contact, programs, risk</small></span></button>
+          ${c.email ? `<button class="pf-menu-item" role="menuitem" id="pf-email" onclick="emailClient('${id}')"><span>✉️</span><span>Email client<small>From your Outlook, to ${sanitize(c.email)}</small></span></button>` : ''}
           ${['sysmanager', 'admin', 'supervisor'].includes(role) ? `<button class="pf-menu-item" role="menuitem" onclick="openAssignWorkersModal('${id}')"><span>👥</span><span>Assign workers<small>Key worker and team</small></span></button>` : ''}
           ${_canMergeClients() ? `<button class="pf-menu-item" role="menuitem" id="pf-merge" onclick="openMergeWithModal('${id}')"><span>🔗</span><span>Merge with another file<small>Combine a duplicate file into this one</small></span></button>` : ''}
           ${role === 'sysmanager' ? `<button class="pf-menu-item" role="menuitem" onclick="openRestrictAccessModal('${id}')"><span>${c.accessRestricted ? '🔒' : '🔓'}</span><span>${c.accessRestricted ? 'Access is restricted' : 'Restrict access'}<small>${c.accessRestricted ? 'Restricted to ' + (c.allowedWorkers || []).length + ' worker' + ((c.allowedWorkers || []).length !== 1 ? 's' : '') + ' + managers' : 'Limit who can open this file'}</small></span></button>` : ''}
@@ -7576,6 +7580,7 @@ function eocContactStamps(clientId, program) {
   const stamps = [];
   (notes || []).forEach(n => {
     if (!n || n.clientId !== clientId || !n.created) return;
+    if (n.contactType === 'Email') return;     // an email recorded on the file is a record, not a service contact — log a session if it was one
     const type = eocProgramOf(n.type);
     if (type !== program && !(general && eocIsGeneral(type))) return;
     const t = new Date(n.created).getTime();
@@ -12712,8 +12717,8 @@ function outlookErrorText(e) {
     AADSTS50011: `The address the CMS returns to isn't registered. In Azure → the app → Authentication, add a Single-page application redirect URI of exactly ${outlookRedirectUri()}`,
     AADSTS9002326: `The redirect URI is registered as "Web". It must be "Single-page application": Azure → the app → Authentication → delete the Web entry and add ${outlookRedirectUri()} under Single-page application.`,
     AADSTS50194: 'This app is set to your organisation only. Enter the Directory (tenant) ID from the app\'s Overview page in Settings, then try again.',
-    AADSTS65001: 'Permission to use the calendar hasn\'t been granted. An Azure administrator should open the app → API permissions → Grant admin consent for Worn Gundidj.',
-    AADSTS90094: 'Your organisation requires an administrator to approve calendar access. An Azure administrator should open the app → API permissions → Grant admin consent.',
+    AADSTS65001: 'Permission to use the calendar or email hasn\'t been granted. An Azure administrator should open the app → API permissions → Grant admin consent for Worn Gundidj.',
+    AADSTS90094: 'Your organisation requires an administrator to approve calendar and email access. An Azure administrator should open the app → API permissions → Grant admin consent.',
     AADSTS90008: 'An administrator needs to approve this app (API permissions → Grant admin consent).',
     AADSTS50020: 'That Microsoft account belongs to a different organisation. Sign in with your Worn Gundidj account.',
     AADSTS50105: 'Your account hasn\'t been given access to this app. Ask the Azure administrator to assign you (Enterprise applications → Worn Gundidj CMS → Users and groups).',
@@ -12833,10 +12838,10 @@ function outlookEventBody(e) {
   };
 }
 
-async function _graph(token, method, path, body) {
+async function _graph(token, method, path, body, extraPrefer) {
   for (let attempt = 0; attempt < 3; attempt++) {
     const res = await fetch('https://graph.microsoft.com/v1.0' + path, { method,
-      headers: Object.assign({ Authorization: 'Bearer ' + token, Prefer: `outlook.timezone="${OUTLOOK_TZ}"` }, body ? { 'Content-Type': 'application/json' } : {}),
+      headers: Object.assign({ Authorization: 'Bearer ' + token, Prefer: `outlook.timezone="${OUTLOOK_TZ}"` + (extraPrefer ? ', ' + extraPrefer : '') }, body ? { 'Content-Type': 'application/json' } : {}),
       body: body ? JSON.stringify(body) : undefined });
     if (res.status === 429 || res.status === 503) { await new Promise(r => setTimeout(r, Math.min(10, Number(res.headers.get('Retry-After')) || 2) * 1000)); continue; }
     if (res.status === 204) return {};
@@ -12989,6 +12994,13 @@ async function outlookCheck() {
     return done();
   }
 
+  // 3b. Email (a separate permission, asked for when the Email page is first used)
+  try {
+    const mt = await _mailToken(true);
+    if (!mt) add('warn', 'Email access hasn\'t been allowed yet', 'Optional — only needed for the Email page. Open Email and press "Allow email access". If Microsoft says an administrator must approve it, add Mail.Read and Mail.Send under API permissions and Grant admin consent.', `<div><button class="btn btn-sm btn-outline" onclick="closeModal();showPage('email')">Open Email</button></div>`);
+    else { await _graph(mt, 'GET', '/me/mailFolders/inbox?$select=displayName'); add('ok', 'Your Outlook email is reachable', 'The Email page can read and send as you.'); }
+  } catch (e) { add('warn', 'Microsoft refused access to your email', mailErrorText(e)); }
+
   // 4. What would be synced
   const wk = outlookRange('week'), mine = outlookCmsEvents('week'), wrongBox = outlookWrongMailbox();
   const from = wk.from, to = wk.to;
@@ -13024,7 +13036,7 @@ function outlookSettingsCardHTML() {
         <code style="background:#e2e8f0;padding:1px 6px;border-radius:3px;user-select:all">${sanitize(outlookRedirectUri())}</code>
         <button class="btn btn-sm btn-outline" style="padding:1px 8px;font-size:11px" onclick="navigator.clipboard&&navigator.clipboard.writeText('${sanitize(outlookRedirectUri())}');showToast('Copied')">Copy</button><br>
         &nbsp;&nbsp;&nbsp;(It must be under <em>Single-page application</em>, not <em>Web</em>.)<br>
-      3. <strong>API permissions</strong> → Add → Microsoft Graph → Delegated → <strong>Calendars.ReadWrite</strong> (User.Read is usually already there) → <strong>Grant admin consent for Worn Gundidj</strong>.<br>
+      3. <strong>API permissions</strong> → Add → Microsoft Graph → Delegated → <strong>Calendars.ReadWrite</strong>, <strong>Mail.Read</strong> and <strong>Mail.Send</strong> (User.Read is usually already there) → <strong>Grant admin consent for Worn Gundidj</strong>. (Mail.Read and Mail.Send are for the Email page; the calendar works without them.)<br>
       4. From the app's <strong>Overview</strong>, copy the <strong>Application (client) ID</strong> and the <strong>Directory (tenant) ID</strong> into the boxes below and Save.
     </div>
     <div class="grid-2" style="margin-top:12px">
@@ -13035,6 +13047,241 @@ function outlookSettingsCardHTML() {
     ${id ? `<span style="font-size:11px;color:var(--muted);margin-left:8px">Using ${sanitize(id)} · sign-in via ${sanitize(outlookTenant())}${outlookOrgConfig.updatedBy ? ' · set by ' + sanitize(outlookOrgConfig.updatedBy) : ''}</span>` : ''}
     </details>` : (!id ? `<p style="font-size:12px;color:var(--muted)">Ask your System Manager to complete the Outlook set-up.</p>` : '')}
   </div>`;
+}
+
+// ============================================================
+// EMAIL — the signed-in worker's own Outlook mailbox
+// ============================================================
+// Uses the same Microsoft connection as the calendar sync, asking for two more
+// permissions: Mail.Read (see the inbox and sent items) and Mail.Send. It is
+// the worker's OWN mailbox only (the email they sign in with). Messages are
+// read live from Microsoft and kept in memory while the page is open — never
+// saved in the CMS, the browser's storage or the cloud database. Message
+// text is shown as plain text, so an email can't run anything in the CMS.
+// What the CMS does keep: an audit entry when an email is sent (who, how many
+// recipients — not the address or the words), and a file note if the worker
+// chooses to record an email on a client's file.
+const MAIL_SCOPES = ['Mail.Read', 'Mail.Send', 'User.Read'];
+const MAIL_FOLDERS = { inbox: { label: 'Inbox', icon: '📥', date: 'receivedDateTime' }, sentitems: { label: 'Sent', icon: '📤', date: 'sentDateTime' } };
+const MAIL_MAX_RECIPIENTS = 25;
+let _mail = { folder: 'inbox', list: null, loading: false, error: '', consent: false, open: null, openIdx: -1, q: '', at: 0, sending: false, timer: null };
+function mailReset() { _mail = { folder: 'inbox', list: null, loading: false, error: '', consent: false, open: null, openIdx: -1, q: '', at: 0, sending: false, timer: _mail.timer }; }
+const _EMAIL_RE = /^[^\s@<>,;"()]+@[^\s@<>,;"()]+\.[^\s@<>,;"()]{2,}$/;
+// "a@b.com; C <c@d.org>, e@f.com" → ['a@b.com','c@d.org','e@f.com'], and any entries that aren't addresses.
+function parseRecipients(text) {
+  const ok = [], bad = [];
+  String(text || '').split(/[;,\n]+/).map(s => s.trim()).filter(Boolean).forEach(s => {
+    const m = s.match(/<([^<>]+)>\s*$/), a = (m ? m[1] : s).trim();
+    if (_EMAIL_RE.test(a)) { if (!ok.some(x => x.toLowerCase() === a.toLowerCase())) ok.push(a); } else bad.push(s);
+  });
+  return { ok, bad };
+}
+// Why email isn't usable yet, or '' when it is.
+function mailBlocker() {
+  if (!outlookClientId()) return 'setup';
+  if (!outlookAccount()) return 'connect';
+  if (outlookWrongMailbox()) return 'wrong';
+  return '';
+}
+function mailErrorText(e) {
+  if (e && (e.status === 403 || e.status === 401)) return 'Microsoft hasn\'t given the CMS permission to use your email. An Azure administrator should open the app → API permissions → add Microsoft Graph → Delegated → Mail.Read and Mail.Send → Grant admin consent. Then press Allow email access.';
+  if (e && e.status === 429) return 'Microsoft is busy — try again in a minute.';
+  if (e && /Failed to fetch|NetworkError/i.test(e.message || '')) return 'Couldn\'t reach Microsoft — check the internet connection.';
+  return e && e.status ? `Outlook said: ${String(e.message || e.status).slice(0, 160)}` : outlookErrorText(e);
+}
+// A token for mail. silentOnly: never open a sign-in window (used when the page loads on its own).
+async function _mailToken(silentOnly) {
+  const msalApp = _getMsalInstance(); if (!msalApp) return null;
+  await msalApp.initialize();
+  const saved = outlookAccount();
+  const account = msalApp.getAllAccounts().find(a => !saved || a.homeAccountId === saved.homeAccountId || a.username === saved.username) || msalApp.getAllAccounts()[0];
+  if (!account) { _mail.error = 'Your Outlook connection has expired on this device. Press Connect to Outlook.'; return null; }
+  try { return (await msalApp.acquireTokenSilent({ scopes: MAIL_SCOPES, account })).accessToken; } catch (e) { if (silentOnly) return null; }
+  try { return (await msalApp.acquireTokenPopup({ scopes: MAIL_SCOPES, account })).accessToken; }
+  catch (e) { console.warn('Mail token failed:', e); _mail.error = outlookErrorText(e); return null; }
+}
+async function mailAllow() {            // the "Allow email access" button: a click, so the sign-in window can open
+  _mail.error = ''; const t = await _mailToken(false);
+  if (t) { _mail.consent = false; audit('Email access allowed', ''); mailLoad(); } else if (currentPage === 'email') showPage('email');
+}
+async function mailLoad(quiet) {
+  if (_mail.loading || mailBlocker()) return;
+  _mail.loading = true; if (!quiet) { _mail.error = ''; mailRefreshView(); }
+  try {
+    const token = await _mailToken(true);
+    if (!token) { _mail.consent = !_mail.error; _mail.list = _mail.list || []; return; }
+    const f = MAIL_FOLDERS[_mail.folder] || MAIL_FOLDERS.inbox, q = _mail.q.replace(/["\\]/g, ' ').trim();
+    const sel = 'id,subject,from,toRecipients,receivedDateTime,sentDateTime,isRead,bodyPreview,hasAttachments';
+    const path = `/me/mailFolders/${_mail.folder}/messages?$top=30&$select=${sel}` + (q ? `&$search=${encodeURIComponent('"' + q + '"')}` : `&$orderby=${f.date} desc`);
+    const data = await _graph(token, 'GET', path);
+    _mail.list = (data.value || []).map(m => ({ id: m.id, subject: m.subject || '', from: m.from && m.from.emailAddress || {}, to: (m.toRecipients || []).map(r => r.emailAddress || {}),
+      at: m[f.date] || m.receivedDateTime || m.sentDateTime || '', unread: m.isRead === false && _mail.folder === 'inbox', preview: m.bodyPreview || '', attach: !!m.hasAttachments }));
+    _mail.at = Date.now(); _mail.consent = false; _mail.error = '';
+  } catch (e) { console.warn('Mail load failed:', e); _mail.error = mailErrorText(e); _mail.list = _mail.list || []; }
+  finally { _mail.loading = false; mailRefreshView(); }
+}
+function mailRefreshView() { if (currentPage === 'email' && document.getElementById('mail-root')) { const el = document.getElementById('mail-root'); el.innerHTML = mailViewHTML(); } }
+function mailSetFolder(k) { if (!MAIL_FOLDERS[k]) return; _mail.folder = k; _mail.list = null; _mail.open = null; _mail.openIdx = -1; _mail.q = ''; mailLoad(); }
+function mailSearch() { _mail.q = (document.getElementById('mail-q')?.value || '').trim(); _mail.list = null; _mail.open = null; _mail.openIdx = -1; mailLoad(); }
+const _MAIL_LINK_OK = /^https:\/\/([a-z0-9-]+\.)*(office\.com|office365\.com|outlook\.com|live\.com|microsoft\.com)\//i;
+async function mailOpen(i) {
+  const m = (_mail.list || [])[i]; if (!m) return;
+  _mail.openIdx = i; _mail.open = { loading: true, id: m.id }; mailRefreshView();
+  try {
+    const token = await _mailToken(true); if (!token) throw new Error('No access');
+    const d = await _graph(token, 'GET', `/me/messages/${encodeURIComponent(m.id)}?$select=subject,from,toRecipients,ccRecipients,receivedDateTime,sentDateTime,body,webLink,hasAttachments`, null, 'outlook.body-content-type="text"');
+    if (_mail.open && _mail.open.id === m.id) _mail.open = { id: m.id, idx: i, subject: d.subject || '', from: d.from && d.from.emailAddress || {}, to: (d.toRecipients || []).map(r => r.emailAddress || {}), cc: (d.ccRecipients || []).map(r => r.emailAddress || {}),
+      at: d.receivedDateTime || d.sentDateTime || m.at, body: String(d.body && d.body.content || ''), webLink: _MAIL_LINK_OK.test(d.webLink || '') ? d.webLink : '', attach: !!d.hasAttachments };
+  } catch (e) { if (_mail.open && _mail.open.id === m.id) _mail.open = { id: m.id, error: mailErrorText(e) }; }
+  mailRefreshView();
+}
+function _addrLabel(a) { return a && (a.name && a.name !== a.address ? `${a.name} <${a.address || ''}>` : (a.address || a.name || '')) || ''; }
+function _mailClientFor(addr) {
+  const k = String(addr || '').trim().toLowerCase(); if (!k) return null;
+  return visibleClients(clients).find(c => String(c.email || '').trim().toLowerCase() === k) || null;
+}
+function mailViewHTML() {
+  const f = MAIL_FOLDERS[_mail.folder], list = _mail.list, o = _mail.open;
+  const rows = !list ? '' : list.length ? list.map((m, i) => {
+    const who = _mail.folder === 'sentitems' ? (m.to.map(a => a.name || a.address).filter(Boolean).join(', ') || '(no recipient)') : (m.from.name || m.from.address || '(unknown sender)');
+    return `<div class="mail-row${m.unread ? ' unread' : ''}${i === _mail.openIdx ? ' active' : ''}" data-i="${i}" onclick="mailOpen(${i})" tabindex="0" onkeydown="if(event.key==='Enter')mailOpen(${i})">
+      <div class="mail-top"><span class="mail-who">${sanitize(who)}</span><span class="mail-when">${sanitize(fmtdt(m.at))}</span></div>
+      <div class="mail-sub">${m.attach ? '📎 ' : ''}${sanitize(m.subject || '(no subject)')}</div><div class="mail-prev">${sanitize(m.preview.replace(/\s+/g, ' ').slice(0, 110))}</div></div>`;
+  }).join('') : `<div class="empty-state" style="padding:28px"><div class="icon">${f.icon}</div><p>${_mail.q ? 'Nothing matches that search.' : 'Nothing here.'}</p></div>`;
+  let pane;
+  if (!o) pane = `<div class="empty-state" style="padding:60px 20px"><div class="icon">✉️</div><p>Choose an email to read it.</p></div>`;
+  else if (o.loading) pane = `<div class="empty-state" style="padding:60px 20px"><p>Opening…</p></div>`;
+  else if (o.error) pane = `<div class="alert alert-warning" style="margin:16px">${sanitize(o.error)}</div>`;
+  else {
+    const mine = String(outlookAccount()?.username || '').toLowerCase();
+    const client = _mailClientFor(o.from.address) || (o.to.length === 1 ? _mailClientFor(o.to[0].address) : null);
+    pane = `<div class="mail-read"><h3 style="margin:0 0 8px;font-size:16px">${sanitize(o.subject || '(no subject)')}</h3>
+      <div style="font-size:12px;color:var(--muted);line-height:1.6;margin-bottom:10px"><strong style="color:var(--text)">From:</strong> ${sanitize(_addrLabel(o.from))}<br><strong style="color:var(--text)">To:</strong> ${sanitize(o.to.map(_addrLabel).join(', '))}${o.cc.length ? `<br><strong style="color:var(--text)">Cc:</strong> ${sanitize(o.cc.map(_addrLabel).join(', '))}` : ''}<br>${sanitize(fmtdt(o.at))}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+        <button class="btn btn-sm btn-primary" onclick="mailReply(false)">↩️ Reply</button>
+        ${o.to.length + o.cc.length > 1 ? `<button class="btn btn-sm btn-outline" onclick="mailReply(true)">↩️ Reply all</button>` : ''}
+        ${client ? `<button class="btn btn-sm btn-outline" onclick="mailFileToClient('${sanitize(client.id)}')" title="Adds this email to ${sanitize(client.fullName)}'s file as a note">📁 Record on ${sanitize(_shortClientName(client) || 'client')}'s file</button>` : ''}
+        ${o.webLink ? `<a class="btn btn-sm btn-outline" style="text-decoration:none" href="${sanitize(o.webLink)}" target="_blank" rel="noopener noreferrer">Open in Outlook ↗</a>` : ''}
+      </div>
+      ${o.attach ? `<div class="alert alert-info" style="font-size:12px;padding:8px 12px">📎 This email has attachments. Open it in Outlook to see or save them.</div>` : ''}
+      <pre class="mail-body">${sanitize(o.body.trim() || '(no text)')}</pre></div>`;
+  }
+  return `<div class="mail-bar">
+      <div style="display:flex;gap:6px">${Object.entries(MAIL_FOLDERS).map(([k, v]) => `<button class="btn btn-sm ${_mail.folder === k ? 'btn-primary' : 'btn-outline'}" data-mail-folder="${k}" onclick="mailSetFolder('${k}')">${v.icon} ${v.label}</button>`).join('')}</div>
+      <input id="mail-q" type="search" placeholder="Search this folder…" value="${sanitize(_mail.q)}" onkeydown="if(event.key==='Enter')mailSearch()" style="max-width:260px" aria-label="Search email">
+      <button class="btn btn-sm btn-outline" onclick="mailSearch()">Search</button>
+      <span style="flex:1"></span>
+      <span style="font-size:11px;color:var(--muted)">${_mail.loading ? 'Loading…' : _mail.at ? 'Updated ' + new Date(_mail.at).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' }) : ''}</span>
+      <button class="btn btn-sm btn-outline" onclick="mailLoad()" ${_mail.loading ? 'disabled' : ''}>🔄 Refresh</button>
+      <button class="btn btn-sm btn-primary" onclick="mailCompose()">✉️ New email</button>
+    </div>
+    ${_mail.consent ? `<div class="alert alert-warning" id="mail-consent" style="margin:12px 16px;display:block"><strong>One more step.</strong> Microsoft needs you to allow the CMS to read and send email as you. <div style="margin-top:8px"><button class="btn btn-sm btn-primary" style="background:#0078d4;border-color:#0078d4" onclick="mailAllow()">🔓 Allow email access</button></div></div>` : ''}
+    ${_mail.error ? `<div class="alert alert-warning" id="mail-error" style="margin:12px 16px;display:block">${sanitize(_mail.error)}</div>` : ''}
+    <div class="mail-split"><div class="mail-list" id="mail-list">${list ? rows : `<div class="empty-state" style="padding:28px"><p>${_mail.consent || _mail.error ? '' : 'Loading your email…'}</p></div>`}</div><div class="mail-pane" id="mail-pane">${pane}</div></div>`;
+}
+function renderEmailPage() {
+  const b = mailBlocker();
+  if (b) {
+    const sys = currentUser?.role === 'sysmanager', me = currentUser?.email || 'your email';
+    const msg = b === 'setup' ? `Outlook hasn't been set up for the CMS yet. ${sys ? 'Enter the Azure Application (client) ID in Settings → Outlook Calendar Sync.' : 'Ask your System Manager to finish the Outlook set-up (Settings → Outlook Calendar Sync).'}`
+      : b === 'wrong' ? `Outlook here is connected as ${outlookWrongMailbox()}, but you're signed in to the CMS as ${me}. Email only works with your own mailbox — Disconnect (Settings → Outlook) and connect ${me}.`
+      : `Connect your Outlook to read and send email here. It is your own Worn Gundidj mailbox (${me}) — nobody else can see it through the CMS.`;
+    return `<div class="card" style="max-width:640px;margin:30px auto;text-align:center;padding:32px"><div style="font-size:40px">✉️</div><h3 style="margin:8px 0">Email</h3><p style="font-size:13px;color:var(--muted)">${sanitize(msg)}</p>
+      ${b === 'connect' ? `<button class="btn btn-primary" style="background:#0078d4;border-color:#0078d4" onclick="outlookConnect().then(()=>showPage('email'))">🔗 Connect to Outlook</button>` : b === 'setup' && sys ? `<button class="btn btn-primary" onclick="showPage('settings')">Open Settings</button>` : ''}</div>`;
+  }
+  if (!_mail.timer) _mail.timer = setInterval(() => { if (currentPage === 'email' && document.getElementById('mail-root') && !document.querySelector('#modal-container .modal-overlay') && !_mail.q && document.visibilityState !== 'hidden') mailLoad(true); }, 120000);
+  if (!_mail.list && !_mail.loading) setTimeout(mailLoad, 0); else if (_mail.list && Date.now() - _mail.at > 60000) setTimeout(() => mailLoad(true), 0);
+  return `<style>
+    .mail-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid var(--border)}
+    .mail-split{display:grid;grid-template-columns:minmax(260px,380px) 1fr;min-height:520px}
+    .mail-list{border-right:1px solid var(--border);overflow-y:auto;max-height:70vh}
+    .mail-pane{overflow-y:auto;max-height:70vh}
+    .mail-row{padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer}
+    .mail-row:hover,.mail-row.active{background:var(--bg,#f5f1ea)} .mail-row.unread .mail-who,.mail-row.unread .mail-sub{font-weight:700}
+    .mail-top{display:flex;justify-content:space-between;gap:8px;font-size:13px} .mail-who{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .mail-when{font-size:11px;color:var(--muted);flex:none} .mail-sub{font-size:13px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .mail-prev{font-size:12px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .mail-read{padding:16px} .mail-body{white-space:pre-wrap;word-break:break-word;font:inherit;font-size:13px;line-height:1.6;margin:0}
+    @media (max-width:760px){.mail-split{grid-template-columns:1fr}.mail-list{max-height:40vh;border-right:none;border-bottom:1px solid var(--border)}}
+  </style>
+  <div class="alert alert-info" style="font-size:12px">✉️ Your own Outlook mailbox (${sanitize(outlookAccount()?.username || '')}). Emails are read live from Microsoft and are not stored in the CMS. Don't put more client detail in an email than you need to.</div>
+  <div class="card" style="padding:0;overflow:hidden" id="mail-root">${mailViewHTML()}</div>`;
+}
+
+// ---- writing and sending ----
+function mailCompose(opts) {
+  opts = opts || {};
+  const cl = visibleClients(clients).filter(c => (c.status || 'active') !== 'closed').sort((a, b) => String(a.fullName || '').localeCompare(String(b.fullName || '')));
+  showModal('✉️ New email', `
+    <div id="mail-compose" data-client="${sanitize(opts.clientId || '')}">
+      <div class="form-group"><label for="mc-to">To</label><input id="mc-to" value="${sanitize(opts.to || '')}" placeholder="name@example.com — separate several with commas" autocomplete="off" spellcheck="false"></div>
+      <div class="form-group"><label for="mc-cc">Cc</label><input id="mc-cc" value="${sanitize(opts.cc || '')}" autocomplete="off" spellcheck="false"></div>
+      <div class="form-group"><label for="mc-subject">Subject</label><input id="mc-subject" value="${sanitize(opts.subject || '')}"></div>
+      <div class="form-group"><label for="mc-body">Message</label><textarea id="mc-body" rows="10" style="min-height:200px">
+${sanitize(opts.body || '')}</textarea></div>
+      <div class="form-group"><label for="mc-client">About a client <span style="font-weight:400;text-transform:none">(optional)</span></label>
+        <select id="mc-client">${selOpts(cl.map(c => ({ v: c.id, l: c.fullName })), opts.clientId || '', 'Not about a client')}</select>
+        <label style="display:flex;gap:8px;align-items:center;font-size:13px;font-weight:400;text-transform:none;letter-spacing:0;margin-top:8px"><input type="checkbox" id="mc-record" ${opts.clientId ? 'checked' : ''} style="width:auto"> Record this email as a note on the client's file</label></div>
+      <p style="font-size:12px;color:var(--muted)">Sent from ${sanitize(outlookAccount()?.username || 'your Outlook')} and saved in your Sent Items. Attachments can't be added here — use Outlook for those.</p>
+      <p id="mc-error" style="color:#dc2626;font-size:13px;min-height:18px"></p>
+      <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-outline" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="mc-send" onclick="mailSend()">📨 Send</button></div>
+    </div>`, null, '680px', true);
+  setTimeout(() => document.getElementById(opts.to ? 'mc-body' : 'mc-to')?.focus(), 50);
+}
+function emailClient(id) {            // from a client's file
+  const c = clients.find(x => x.id === id); if (!c) return;
+  if (!c.email) { showToast('This client has no email address on file.'); return; }
+  const b = mailBlocker();
+  if (b) { showToast(b === 'wrong' ? 'Outlook is connected as someone else — see Email.' : 'Connect your Outlook first (Email page).'); showPage('email'); return; }
+  mailCompose({ to: c.email, clientId: id });
+}
+function mailReply(all) {
+  const o = _mail.open; if (!o || !o.id || o.error || o.loading) return;
+  const me = String(outlookAccount()?.username || '').toLowerCase();
+  const sent = _mail.folder === 'sentitems';
+  const to = sent ? o.to.map(a => a.address) : [o.from.address];
+  const cc = all ? o.to.concat(o.cc).map(a => a.address).filter(a => a && a.toLowerCase() !== me && !to.some(t => String(t).toLowerCase() === String(a).toLowerCase())) : [];
+  const quoted = '\n\n— On ' + fmtdt(o.at) + ', ' + _addrLabel(o.from) + ' wrote:\n' + o.body.trim().split('\n').map(l => '> ' + l).join('\n');
+  const client = _mailClientFor(o.from.address);
+  mailCompose({ to: to.filter(Boolean).join(', '), cc: cc.join(', '), subject: /^re:/i.test(o.subject) ? o.subject : 'RE: ' + o.subject, body: quoted, clientId: client ? client.id : '' });
+  setTimeout(() => { const b = document.getElementById('mc-body'); if (b) { b.focus(); b.setSelectionRange(0, 0); } }, 80);
+}
+async function mailSend() {
+  if (_mail.sending) return;
+  const v = id => (document.getElementById(id)?.value || '').trim(), err = m => { const e = document.getElementById('mc-error'); if (e) e.textContent = m; return false; };
+  const to = parseRecipients(v('mc-to')), cc = parseRecipients(v('mc-cc')), subject = v('mc-subject'), body = document.getElementById('mc-body')?.value || '';
+  if (to.bad.length || cc.bad.length) return err(`These don't look like email addresses: ${to.bad.concat(cc.bad).join(', ')}`);
+  if (!to.ok.length) return err('Add at least one recipient.');
+  if (to.ok.length + cc.ok.length > MAIL_MAX_RECIPIENTS) return err(`That's more than ${MAIL_MAX_RECIPIENTS} recipients. Send it in smaller groups.`);
+  if (!subject) return err('Add a subject.');
+  if (!body.trim()) return err('The message is empty.');
+  if (mailBlocker()) return err('Connect your own Outlook first (Email page).');
+  const clientId = v('mc-client'), client = clientId ? clients.find(x => x.id === clientId) : null, record = !!document.getElementById('mc-record')?.checked && !!client;
+  const btn = document.getElementById('mc-send'); _mail.sending = true; if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+  try {
+    const token = await _mailToken(false); if (!token) { err(_mail.error || 'Microsoft didn\'t give access to send email.'); return false; }
+    await _graph(token, 'POST', '/me/sendMail', { message: { subject, body: { contentType: 'text', content: body },
+      toRecipients: to.ok.map(a => ({ emailAddress: { address: a } })), ccRecipients: cc.ok.map(a => ({ emailAddress: { address: a } })) }, saveToSentItems: true });
+  } catch (e) { console.warn('Send failed:', e); err('Not sent. ' + mailErrorText(e)); return false; }
+  finally { _mail.sending = false; if (btn && btn.isConnected) { btn.disabled = false; btn.textContent = '📨 Send'; } }
+  audit('Email sent', `${to.ok.length + cc.ok.length} recipient${to.ok.length + cc.ok.length !== 1 ? 's' : ''}`, client ? client.id : undefined);
+  if (record) {
+    notes.push({ id: uid(), clientId: client.id, type: 'general', contactType: 'Email', created: now(), worker: currentUser?.name || '',
+      text: `Email sent to ${to.ok.concat(cc.ok).join(', ')}\nSubject: ${subject}\n\n${body}` });
+    saveAll();
+  }
+  closeModal();
+  showToast(record ? `✓ Email sent and recorded on ${client.fullName}'s file` : '✓ Email sent');
+  if (currentPage === 'email' && _mail.folder === 'sentitems') setTimeout(() => mailLoad(true), 1500);
+  return true;
+}
+function mailFileToClient(clientId) {
+  const o = _mail.open, c = clients.find(x => x.id === clientId); if (!o || !o.id || o.error || !c) return;
+  if (!confirm(`Add this email to ${c.fullName}'s file as a note?\n\nThe words of the email are copied into the CMS.`)) return;
+  notes.push({ id: uid(), clientId: c.id, type: 'general', contactType: 'Email', created: now(), worker: currentUser?.name || '',
+    text: `Email ${_mail.folder === 'sentitems' ? 'sent to' : 'received from'} ${_mail.folder === 'sentitems' ? o.to.map(_addrLabel).join(', ') : _addrLabel(o.from)} — ${fmtdt(o.at)}\nSubject: ${o.subject}\n\n${o.body.trim()}` });
+  audit('Email recorded on client file', '', c.id);
+  saveAll(); showToast(`✓ Recorded on ${c.fullName}'s file`);
 }
 
 function applySidebarBg() {
@@ -15545,6 +15792,7 @@ async function logout(reason) {
   }
   saveCurrentUser(null);
   DB.save('currentUser', null);
+  try { mailReset(); } catch(_) {}   // email is read live and never stored, but drop what's on screen
   // Sign out of Firebase so the auth token is cleared and the login screen
   // re-prompts for credentials.
   try {
@@ -15593,7 +15841,7 @@ const RESTRICTABLE_PAGES = {
   sessions:'Session Log', sewb:'SEWB Program', aod:'AOD Program', justice:'Justice Program',
   cultural:'Cultural Strengthening', mensgroup:"Men's Group", disability:'Disability Program',
   workfoundations:'Work Foundations', homeownership:'First Peoples Home Ownership',
-  policies:'Policies & Procedures', calendar:'Calendar', resources:'Resources', reports:'Reports', vpr:'Vulnerable Persons Register', auditlog:'Audit Log',
+  policies:'Policies & Procedures', calendar:'Calendar', email:'Email', resources:'Resources', reports:'Reports', vpr:'Vulnerable Persons Register', auditlog:'Audit Log',
 };
 function _myHiddenPages(){
   if(!currentUser || currentUser.role==='sysmanager') return [];
