@@ -10,6 +10,7 @@ node tests/browser/regression.cjs       # counting rules, Log Session, second wo
 node tests/browser/familyviolence.cjs   # Family Violence session type → SEWB
 node tests/browser/datahealth.cjs       # Data Health score, scorecard, document types
 node tests/browser/email.cjs            # Email page: inbox, read, reply, send (Microsoft Graph is stubbed)
+node tests/browser/privacy.cjs          # privacy: sign-out clean-up, audit trail, voice notice, retention, notices
 node tests/browser/vpr.cjs              # Vulnerable Persons Register: screening, auto add/remove, Admin page
 node --test tests/unit/data-health.test.js   # the scoring engine on its own (no browser)
 node --test tests/unit/vpr.test.js           # the VPR rules on their own (no browser)

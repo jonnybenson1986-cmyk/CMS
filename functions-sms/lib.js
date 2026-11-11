@@ -71,15 +71,15 @@ function _fit(variants) {
 function handbookMessage(client, handbookUrl) {
   const n = firstName(client), s = firstName(client, 10);
   return _fit([
-    `Hi ${n}, welcome to Worn Gundidj SEWB. Your Participant Handbook: ${handbookUrl} Questions? Call ${ORG_PHONE}`,
-    `Hi ${s}, your Worn Gundidj SEWB handbook: ${handbookUrl} Questions? ${ORG_PHONE}`,
-    `Worn Gundidj SEWB handbook: ${handbookUrl} Questions? ${ORG_PHONE}`,
+    `Hi ${n}, welcome to Worn Gundidj. Your Participant Handbook: ${handbookUrl} Questions? Call ${ORG_PHONE}`,
+    `Hi ${s}, your Worn Gundidj handbook: ${handbookUrl} Questions? ${ORG_PHONE}`,
+    `Worn Gundidj handbook: ${handbookUrl} Questions? ${ORG_PHONE}`,
   ]);
 }
 function intakeMessage(client, linkUrl, days) {
   const n = firstName(client), s = firstName(client, 10), d = Math.max(1, Math.round(days || 7));
   return _fit([
-    `Hi ${n}, please fill in your Worn Gundidj SEWB intake form: ${linkUrl} (works ${d} days). Questions? ${ORG_PHONE}`,
+    `Hi ${n}, please fill in your Worn Gundidj intake form: ${linkUrl} (works ${d} days). Questions? ${ORG_PHONE}`,
     `Hi ${s}, your Worn Gundidj intake form: ${linkUrl} (works ${d} days). Questions? ${ORG_PHONE}`,
     `Worn Gundidj intake form: ${linkUrl} Questions? ${ORG_PHONE}`,
   ]);

@@ -42,13 +42,9 @@
         https://securetoken.googleapis.com
         https://login.microsoftonline.com
         https://graph.microsoft.com
-        https://api.ipify.org
         https://*.firebasestorage.googleapis.com
         https://www.google.com
-        https://www.recaptcha.net
-        https://www.google-analytics.com
-        https://analytics.google.com
-        https://region1.google-analytics.com;
+        https://www.recaptcha.net;
       img-src 'self' data: https:;
       font-src 'self' data:;
       media-src 'self';
