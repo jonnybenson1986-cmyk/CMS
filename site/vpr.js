@@ -35,20 +35,24 @@
 
   // The four mandatory eligibility criteria (Guidance, p.3) and what to consider (p.4).
   const CRITERIA = [
-    { key: 'c1', n: 1, label: 'Frail and/or physically or cognitively impaired', consider: [
+    { key: 'c1', n: 1, label: 'Frail and/or physically or cognitively impaired',
+      means: 'The person is frail, or has a physical or cognitive impairment, to the degree that it would reduce their capacity to act in an emergency. They would likely need extra time or help to respond.', consider: [
       'Level of frailty or physical impairment that would likely reduce their capacity to act during an emergency.',
       'Likely to require increased time and/or assistance to respond in an emergency.',
       'Inability to make an independent decision due to cognitive or other impairment.' ] },
-    { key: 'c2', n: 2, label: 'Unable to comprehend warnings and directions and/or respond in an emergency situation', consider: [
+    { key: 'c2', n: 2, label: 'Unable to comprehend warnings and directions and/or respond in an emergency situation',
+      means: 'The person cannot understand emergency warnings and directions, or cannot act on them — for example because of a cognitive or other impairment, a speech or hearing impediment, limited English, or no access to a vehicle.', consider: [
       'Inability to make an independent decision due to cognitive or other impairment.',
       'Unable to understand or respond to emergency warnings or directions, such as speech/hearing impediment and poor use and/or understanding of English.',
       'Does not drive or have access to a vehicle.' ] },
-    { key: 'c3', n: 3, label: 'Cannot identify personal or community support networks to help them in an emergency', consider: [
+    { key: 'c3', n: 3, label: 'Cannot identify personal or community support networks to help them in an emergency',
+      means: 'The person has nobody who could help them in an emergency — no family, friend, carer, neighbour, community or service connection nearby. For example, they live alone, or with someone as vulnerable as they are.', consider: [
       'Lives alone, or with someone with a similar or greater degree of vulnerability.',
       'No family, friend, carer or next of kin, or social/community networks in the local area able to assist.',
       'No near neighbours, or no connection with neighbours or the local community.',
       'No local networks or service providers.' ] },
-    { key: 'c4', n: 4, label: 'Consents to be on the VPR', consider: [
+    { key: 'c4', n: 4, label: 'Consents to be on the VPR',
+      means: 'The person (or their authorised representative) has given informed consent to be listed — in writing or verbally, and recorded. Being listed is voluntary and they can ask to be removed at any time. No consent, no listing.', consider: [
       'Informed consent is required before a person can be registered, and for them to remain on it.',
       'Being listed is voluntary; the person can ask to be removed at any time.' ] },
   ];
