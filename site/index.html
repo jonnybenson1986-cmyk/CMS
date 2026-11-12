@@ -1298,7 +1298,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v109';
+const APP_VERSION = 'v110';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -13153,8 +13153,8 @@ function mailViewHTML() {
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
         <button class="btn btn-sm btn-primary" onclick="mailReply(false)">↩️ Reply</button>
         ${o.to.length + o.cc.length > 1 ? `<button class="btn btn-sm btn-outline" onclick="mailReply(true)">↩️ Reply all</button>` : ''}
-        ${client ? (mailAlreadyFiled(o.id, client.id) ? `<span class="tag" id="mail-filed" style="background:#d1fae5;color:#065f46;align-self:center">✓ On ${sanitize(_shortClientName(client) || 'client')}'s file</span>`
-          : `<button class="btn btn-sm btn-outline" onclick="mailFileToClient('${sanitize(client.id)}')" title="Adds this email to ${sanitize(client.fullName)}'s file as a note and logs ${MAIL_CONTACT_MINUTES} minutes of email contact">📁 Record on ${sanitize(_shortClientName(client) || 'client')}'s file</button>`) : ''}
+        <button class="btn btn-sm btn-outline" id="mail-record-btn" onclick="mailFileToClient('${client && !mailAlreadyFiled(o.id, client.id) ? sanitize(client.id) : ''}')" title="Adds this email to a client's file as a note and logs ${MAIL_CONTACT_MINUTES} minutes of email contact">📁 Record on ${client && !mailAlreadyFiled(o.id, client.id) ? sanitize(_shortClientName(client) || 'client') + "'s file" : "a client's file"}</button>
+        ${mailFiledClients(o.id).map(fc => `<span class="tag mail-filed" style="background:#d1fae5;color:#065f46;align-self:center">✓ On ${sanitize(_shortClientName(fc) || 'client')}'s file</span>`).join('')}
         ${o.webLink ? `<a class="btn btn-sm btn-outline" style="text-decoration:none" href="${sanitize(o.webLink)}" target="_blank" rel="noopener noreferrer">Open in Outlook ↗</a>` : ''}
       </div>
       ${o.attach ? `<div class="alert alert-info" style="font-size:12px;padding:8px 12px">📎 This email has attachments. Open it in Outlook to see or save them.</div>` : ''}
@@ -13315,21 +13315,65 @@ function mailTimeFieldsHTML(c, prefix) {
     <div class="form-group" style="margin:0"><label for="${prefix}-mins">Minutes of email contact</label><input type="number" id="${prefix}-mins" min="1" max="${MAIL_MAX_MINUTES}" step="1" value="${MAIL_CONTACT_MINUTES}"></div>
   </div>`;
 }
+// Clients this email has already been recorded against.
+function mailFiledClients(emailId) {
+  if (!emailId) return [];
+  const ids = new Set(notes.filter(n => n && n.emailId === emailId).map(n => n.clientId));
+  return clients.filter(c => ids.has(c.id));
+}
+// Search the clients this worker can see — open files first, then closed — by name, preferred name, client ID or email.
+const MAIL_FILE_MAX_RESULTS = 8;
+function mailClientSearch(q) {
+  const words = String(q || '').toLowerCase().split(/\s+/).filter(Boolean); if (!words.length) return [];
+  const closed = c => (c.status || 'active') === 'closed' ? 1 : 0;
+  return visibleClients(clients).filter(c => { const hay = [c.fullName, c.preferredName, c.clientId, c.email].filter(Boolean).join(' ').toLowerCase(); return words.every(w => hay.includes(w)); })
+    .sort((a, b) => closed(a) - closed(b) || String(a.fullName || '').localeCompare(String(b.fullName || '')));
+}
+let _mailFileClient = '';       // the client chosen in the "Record email on file" form
+function mailFileSearch() {
+  const box = document.getElementById('mf-results'); if (!box) return;
+  const q = document.getElementById('mf-search')?.value || '', found = mailClientSearch(q), o = _mail.open || {};
+  if (!q.trim()) { box.innerHTML = ''; return; }
+  if (!found.length) { box.innerHTML = `<div class="mf-none" style="font-size:12px;color:var(--muted);padding:8px 2px">No client matches "${sanitize(q.trim())}". Check the spelling, or search by client ID or email.</div>`; return; }
+  box.innerHTML = `<div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-top:6px">${found.slice(0, MAIL_FILE_MAX_RESULTS).map(c => { const filed = mailAlreadyFiled(o.id, c.id);
+    return `<button type="button" class="mf-result" data-id="${sanitize(c.id)}" ${filed ? 'disabled' : ''} onclick="mailFileChoose('${sanitize(c.id)}')" style="display:block;width:100%;text-align:left;background:#fff;border:none;border-bottom:1px solid var(--border);padding:8px 12px;cursor:${filed ? 'default' : 'pointer'};font:inherit;font-size:13px;${filed ? 'opacity:.55' : ''}">
+      <strong>${sanitize(c.fullName)}</strong>${(c.status || 'active') === 'closed' ? ' <span class="tag tag-closed" style="font-size:10px">closed</span>' : ''}${filed ? ' <span style="font-size:11px;color:#065f46">✓ already on this file</span>' : ''}
+      <div style="font-size:11px;color:var(--muted)">${[c.dob ? 'DOB ' + fmt(c.dob) : '', c.clientId ? 'ID ' + c.clientId : '', c.email || ''].filter(Boolean).map(sanitize).join(' · ') || '—'}</div></button>`; }).join('')}
+    ${found.length > MAIL_FILE_MAX_RESULTS ? `<div style="font-size:11px;color:var(--muted);padding:6px 12px">${found.length - MAIL_FILE_MAX_RESULTS} more — keep typing to narrow it down.</div>` : ''}</div>`;
+}
+function mailFileChoose(id) {
+  const c = visibleClients(clients).find(x => x.id === id), el = document.getElementById('mf-chosen'), tm = document.getElementById('mf-time'); if (!el || !tm) return;
+  _mailFileClient = c ? c.id : '';
+  const pick = document.getElementById('mf-pick'); if (pick) pick.style.display = c ? 'none' : '';
+  const err = document.getElementById('mf-error'); if (err) err.textContent = '';
+  if (!c) { el.innerHTML = ''; tm.innerHTML = ''; const inp = document.getElementById('mf-search'); if (inp) { inp.value = ''; inp.focus(); } mailFileSearch(); return; }
+  el.innerHTML = `<div id="mf-client" data-id="${sanitize(c.id)}" style="display:flex;align-items:center;gap:10px;border:1px solid #a7f3d0;background:#ecfdf5;border-radius:8px;padding:8px 12px">
+    <div class="avatar" style="width:32px;height:32px;font-size:12px;flex:none">${sanitize(initials(c.fullName || '?'))}</div>
+    <div style="flex:1;min-width:0"><strong style="font-size:13px">${sanitize(c.fullName)}</strong>${(c.status || 'active') === 'closed' ? ' <span class="tag tag-closed" style="font-size:10px">closed</span>' : ''}<div style="font-size:11px;color:var(--muted)">${[c.dob ? 'DOB ' + fmt(c.dob) : '', c.clientId ? 'ID ' + c.clientId : ''].filter(Boolean).map(sanitize).join(' · ')}</div></div>
+    <button type="button" class="btn btn-sm btn-outline" onclick="mailFileChoose('')">Change</button></div>`;
+  tm.innerHTML = mailTimeFieldsHTML(c, 'mf');
+}
+// "Record on a client's file": on every email. Opens with the matching client chosen, if there is one.
 function mailFileToClient(clientId) {
-  const o = _mail.open, c = clients.find(x => x.id === clientId); if (!o || !o.id || o.error || !c) return;
-  if (mailAlreadyFiled(o.id, c.id)) { showToast(`This email is already on ${c.fullName}'s file.`); return; }
+  const o = _mail.open; if (!o || !o.id || o.error || o.loading) return;
   const sent = _mail.folder === 'sentitems', who = sent ? o.to.map(_addrLabel).join(', ') : _addrLabel(o.from);
-  showModal('📁 Record email on file', `
-    <div id="mail-file" data-client="${sanitize(c.id)}">
-      <p style="font-size:13px;margin-bottom:10px">Adds this email to <strong>${sanitize(c.fullName)}</strong>'s file as a note and logs the time as email contact.</p>
-      <div style="background:var(--bg);border-radius:8px;padding:10px 12px;font-size:12px;color:var(--muted)"><strong style="color:var(--text)">${sanitize(o.subject || '(no subject)')}</strong><br>${sent ? 'Sent to' : 'From'} ${sanitize(who)} · ${sanitize(fmtdt(o.at))}</div>
-      ${mailTimeFieldsHTML(c, 'mf')}
-      <p style="font-size:12px;color:var(--muted);margin-top:10px">The words of the email are copied into the CMS. The time counts toward the program's hours and contacts.</p>
+  _mailFileClient = '';
+  showModal('📁 Record email on a client\'s file', `
+    <div id="mail-file">
+      <div style="background:var(--bg);border-radius:8px;padding:10px 12px;font-size:12px;color:var(--muted);margin-bottom:12px"><strong style="color:var(--text)">${sanitize(o.subject || '(no subject)')}</strong><br>${sent ? 'Sent to' : 'From'} ${sanitize(who)} · ${sanitize(fmtdt(o.at))}</div>
+      <div class="form-group" style="margin-bottom:8px"><label for="mf-search">Client</label>
+        <div id="mf-pick"><input id="mf-search" type="search" placeholder="Search by name, client ID or email…" oninput="mailFileSearch()" autocomplete="off" spellcheck="false"><div id="mf-results"></div></div>
+        <div id="mf-chosen"></div></div>
+      <div id="mf-time"></div>
+      <p style="font-size:12px;color:var(--muted);margin-top:10px">The email is added to the client's file as a note, and the time is logged as email contact — it shows in the Session Log and counts toward the program's hours and contacts. The words of the email are copied into the CMS.</p>
       <p id="mf-error" style="color:#dc2626;font-size:13px;min-height:18px"></p>
     </div>`, () => {
+      const err = m => { const e = document.getElementById('mf-error'); if (e) e.textContent = m; return false; };
+      const c = visibleClients(clients).find(x => x.id === _mailFileClient);
+      if (!c) return err('Choose the client first — search by name above.');
       const mins = _mailMinutes(document.getElementById('mf-mins')?.value);
-      if (!mins) { document.getElementById('mf-error').textContent = `Enter the minutes (1–${MAIL_MAX_MINUTES}).`; return false; }
-      if (mailAlreadyFiled(o.id, c.id)) { showToast(`This email is already on ${c.fullName}'s file.`); return true; }
+      if (!mins) return err(`Enter the minutes (1–${MAIL_MAX_MINUTES}).`);
+      if (mailAlreadyFiled(o.id, c.id)) return err(`This email is already on ${c.fullName}'s file.`);
       const r = mailRecordOnFile(c, { emailId: o.id, subject: o.subject, minutes: mins, program: document.getElementById('mf-program')?.value,
         text: `Email ${sent ? 'sent to' : 'received from'} ${who} — ${fmtdt(o.at)}\nSubject: ${o.subject}\n\n${o.body.trim()}` });
       showToast(_mailRecordedToast(c, r));
@@ -13337,6 +13381,8 @@ function mailFileToClient(clientId) {
       return true;
     }, '560px');
   const btn = document.querySelector('#modal-container .modal-footer .btn-primary'); if (btn) btn.textContent = '📁 Record and log time';
+  const pre = clientId && visibleClients(clients).find(x => x.id === clientId);
+  if (pre && !mailAlreadyFiled(o.id, pre.id)) mailFileChoose(pre.id); else setTimeout(() => document.getElementById('mf-search')?.focus(), 50);
 }
 
 function applySidebarBg() {
