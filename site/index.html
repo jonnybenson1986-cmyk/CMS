@@ -1298,7 +1298,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v106';
+const APP_VERSION = 'v107';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -17412,8 +17412,30 @@ function renderVprPage() {
   else table = `<table><thead><tr><th>Client</th><th>1. Frail / impaired</th><th>2. Can't respond</th><th>3. No support network</th><th>4. Consent</th><th></th></tr></thead><tbody>
     ${g[_vprTab].length ? g[_vprTab].map(c => { const cr = WG_VPR.criteria(vprOf(c)); return `<tr class="vpr-row" data-id="${sanitize(c.id)}">${nameCell(c)}${cr.map(x => `<td style="font-size:12px;color:${x.met ? '#065f46' : 'var(--muted)'}">${x.met ? '✓ Met' : sanitize(x.why)}</td>`).join('')}<td>${open(c)}</td></tr>`; }).join('') : empty(6, _vprTab === 'screening' ? 'No screenings are part-way through.' : 'Nobody has been screened as not eligible.')}</tbody></table>`;
   return `
-  <div class="alert alert-info"><div>🚨 People who would need tailored advice or help to evacuate in an emergency, and have nobody to help them. A person is listed only while <strong>all four criteria</strong> are met — frail or impaired; unable to understand warnings or respond; no personal or community support; and they consent. They come off automatically when a criterion is no longer met, they withdraw consent, or their file is closed — their records are kept. Being listed does not guarantee assistance in an emergency.</div></div>
+  <section class="card vpr-criteria" id="vpr-criteria" aria-labelledby="vpr-crit-h" style="border-left:4px solid #dc2626">
+    <div class="card-header" style="flex-wrap:wrap;gap:6px"><div class="card-title" id="vpr-crit-h">📋 Who counts as a vulnerable person for this register</div><span style="font-size:12px;font-weight:700;color:#991b1b;background:#fef2f2;border-radius:12px;padding:3px 12px">All four criteria must be met</span></div>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:12px">A person is on the register only while <strong>all four</strong> of these are true and their file is open. If any one stops being true, they come off.</p>
+    <div class="grid-2">${WG_VPR.CRITERIA.map(x => `
+      <div class="vpr-crit-def" data-crit="${x.key}" style="border:1px solid var(--border);border-radius:8px;padding:12px 14px">
+        <div style="display:flex;gap:10px;align-items:flex-start"><span style="flex:none;width:26px;height:26px;border-radius:50%;background:#dc2626;color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center;font-size:13px">${x.n}</span>
+          <div><div style="font-weight:700;font-size:13px">${sanitize(x.label)}</div><p style="font-size:12px;color:#374151;margin:6px 0 0;line-height:1.6">${sanitize(x.means)}</p></div></div>
+        <details style="margin-top:8px"><summary style="cursor:pointer;font-size:12px;color:var(--primary);font-weight:600">What to consider</summary><ul style="font-size:12px;color:var(--muted);margin:6px 0 0 18px;line-height:1.6">${x.consider.map(t => `<li>${sanitize(t)}</li>`).join('')}</ul></details>
+      </div>`).join('')}</div>
+    <p style="font-size:11px;color:var(--muted);margin-top:10px">Source: DFFH <em>Vulnerable People in Emergencies Policy</em> v4.0 and the guidance on managing Vulnerable Persons Registers. Being listed does not guarantee assistance in an emergency.</p>
+  </section>
+  <div class="alert alert-info"><div>🚨 People who would need tailored advice or help to evacuate in an emergency, and have nobody to help them. A person is listed only while <strong>all four criteria</strong> above are met. They come off automatically when a criterion is no longer met, they withdraw consent, or their file is closed — their records are kept. Being listed does not guarantee assistance in an emergency.</div></div>
   <div class="alert alert-warning" style="font-size:13px">This is Worn Gundidj's own register. Victoria Police and the council see only the State's VPR database (vpr.mecccentral.com) — each person here must also be entered and re-validated there.</div>
+  <details class="card vpr-scope" style="padding:14px 18px">
+    <summary style="cursor:pointer;font-weight:700;font-size:14px">🗺️ Where the register fits among vulnerable people</summary>
+    <p style="font-size:12px;color:var(--muted);margin:10px 0 12px">Reference diagram from the DFFH <em>Vulnerable People in Emergencies Policy</em> v4.0. The register is the smallest group: it holds only people who meet all four criteria and have consented. Many vulnerable people receiving services will not qualify, because they have support around them, and people in facilities are covered by facility arrangements.</p>
+    <figure style="margin:0;text-align:center"><img src="vpr-scope.png" alt="Diagram. Outer circle: at-risk communities and people, outside the policy's scope but targeted through activities and strategies. Inside it, vulnerable persons, divided into those receiving services and those not receiving services. Separately, vulnerable people in facilities. The Vulnerable Persons Register is a small subset of vulnerable persons." style="max-width:100%;height:auto;border-radius:6px" loading="lazy">
+    <figcaption style="font-size:11px;color:var(--muted);margin-top:6px">Source: DFFH, Vulnerable People in Emergencies Policy v4.0 — reproduced for reference.</figcaption></figure>
+    <ul style="font-size:12px;line-height:1.7;margin:12px 0 0 18px;color:#374151">
+      <li><strong>At-risk communities and people</strong> — outside the policy's scope, but reached through the wider emergency planning.</li>
+      <li><strong>Vulnerable persons</strong> — the policy's group. Some receive services from us, and some do not.</li>
+      <li><strong>Vulnerable Persons Register</strong> — only people who meet all four criteria, consent to be listed, and have a current, open file here.</li>
+    </ul>
+  </details>
   <div class="grid-4" style="margin-bottom:20px">
     <div class="stat-card"><div class="label">On the register</div><div class="value" style="color:#dc2626" id="vpr-count-on">${g.on.length}</div></div>
     <div class="stat-card"><div class="label">Need re-validation</div><div class="value" style="color:${due ? '#d97706' : 'inherit'}">${due}</div></div>

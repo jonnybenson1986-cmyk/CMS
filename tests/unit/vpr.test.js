@@ -82,3 +82,8 @@ test('the lists match the guidance', () => {
   assert.deepStrictEqual(V.CONSIDERATIONS.map(g => g.items.length), [5, 5, 8, 8]);
   assert.strictEqual(V.COMMENT_PROMPTS.length, 4);
 });
+test('every criterion has a plain-English definition and consider-list for the register page', () => {
+  V.CRITERIA.forEach(c => { assert.ok(typeof c.means === 'string' && c.means.length > 60, c.key + ' means'); assert.ok(c.consider.length > 0, c.key + ' consider'); });
+  assert.match(V.CRITERIA[3].means, /voluntary/i);
+  assert.match(V.CRITERIA[0].means, /extra time or help/);
+});
