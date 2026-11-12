@@ -4,6 +4,8 @@ const {start}=require('./harness.cjs');
 const SEED=new Function('w',`
   w('clients','a',{id:'a',fullName:'Jordan Citizen',status:'active',sewb:true,email:'jordan.citizen@example.com',dob:'1985-03-14',created:'2026-09-01T09:00'});
   w('clients','b',{id:'b',fullName:'Alex Sample',status:'active',sewb:true,created:'2026-01-01T09:00'});
+  w('clients','c',{id:'c',fullName:'Casey Example',status:'active',sewb:true,aod:true,email:'casey.example@example.com',ifSafeContact:'Yes',created:'2026-01-01T09:00'});
+  w('clients','d',{id:'d',fullName:'Drew Noprogram',status:'active',homeOwnership:true,email:'drew.noprogram@example.com',ifSafeContact:'Yes',created:'2026-01-01T09:00'});
 `);
 const ME='jon.benson@worngundidj.org.au';
 const MSGS=[
@@ -76,20 +78,55 @@ const connect=p=>p.evaluate(ME=>{ outlookOrgConfig={clientId:'11111111-2222-3333
   await p.fill('#mc-to',Array.from({length:26},(_,i)=>`p${i}@example.com`).join(', ')); await p.fill('#mc-body','x'); await p.click('#mc-send'); await T(100);
   ok('E16 more than 25 recipients is refused', /more than 25/.test(await p.textContent('#mc-error')) && st.sent.length===0);
   // send
-  const sewbBefore=await p.evaluate(()=>JSON.stringify(clientEpisodeStats('a','sewb')));
-  await p.fill('#mc-to','Jordan Citizen <jordan.citizen@example.com>; JORDAN.citizen@example.com'); await p.fill('#mc-cc','boss@example.org'); await p.fill('#mc-body','Thursday works. See you then.'); await p.click('#mc-send'); await T(600);
+  const sewbBefore=await p.evaluate(()=>clientEpisodeStats('a','sewb').totalContacts);
+  const tf=await p.evaluate(()=>({prog:[...document.querySelectorAll('#mc-program option')].map(o=>o.value), sel:document.getElementById('mc-program')?.value, mins:document.getElementById('mc-mins')?.value}));
+  ok('E17a recording is ticked for a client email, and offers the client\'s program with 15 minutes filled in', tf.prog.join()==='sewb,general' && tf.sel==='sewb' && tf.mins==='15', JSON.stringify(tf));
+  await p.fill('#mc-to','Jordan Citizen <jordan.citizen@example.com>; JORDAN.citizen@example.com'); await p.fill('#mc-cc','boss@example.org'); await p.fill('#mc-body','Thursday works. See you then.');
+  await p.fill('#mc-mins','0'); await p.click('#mc-send'); await T(100);
+  ok('E17b no minutes → not sent, asks for the minutes', /minutes of email contact/.test(await p.textContent('#mc-error')) && st.sent.length===0);
+  await p.fill('#mc-mins','15'); await p.click('#mc-send'); await T(600);
   const sent=st.sent[0];
   ok('E17 Send posts one email: recipients tidied and de-duplicated, saved to Sent Items, plain text', st.sent.length===1 && sent.message.toRecipients.length===1 && sent.message.toRecipients[0].emailAddress.address==='jordan.citizen@example.com' && sent.message.ccRecipients[0].emailAddress.address==='boss@example.org' && sent.saveToSentItems===true && sent.message.body.contentType==='text' && sent.message.subject==='RE: Appointment time', JSON.stringify(sent));
-  ok('E18 the form closes with a confirmation', await p.evaluate(()=>!document.querySelector('#modal-container .modal-overlay')) && /Email sent and recorded on Jordan Citizen's file/.test(await toasts()));
+  ok('E18 the form closes and confirms: sent, recorded, 15 min logged to SEWB', await p.evaluate(()=>!document.querySelector('#modal-container .modal-overlay')) && /Email sent\. Recorded on Jordan Citizen's file — 15 min logged to SEWB/.test(await toasts()), await toasts());
   const n=await p.evaluate(()=>notes.filter(x=>x.clientId==='a'&&x.contactType==='Email'));
-  ok('E19 it was recorded on the client\'s file as a general "Email" note', n.length===1 && n[0].type==='general' && /Thursday works/.test(n[0].text) && /Subject: RE: Appointment time/.test(n[0].text));
-  ok('E20 an email note does not count as a program contact', await p.evaluate(()=>JSON.stringify(clientEpisodeStats('a','sewb')))===sewbBefore);
+  ok('E19 it is on the client\'s file as an "Email" note under SEWB', n.length===1 && n[0].type==='sewb' && /Thursday works/.test(n[0].text) && /Subject: RE: Appointment time/.test(n[0].text));
+  const tl=await p.evaluate(()=>timeLogs.filter(t=>t.clientId==='a').map(t=>({m:t.minutes,p:t.program,prog:timeLogProgram(t),type:t.type,act:t.activity,src:t.source,date:t.date,from:t.fromNoteId,w:t.worker,notes:t.notes,today:today()})));
+  ok('E20 15 minutes of email contact is logged for the client, against SEWB, linked to the note', tl.length===1 && tl[0].m===15 && tl[0].p==='sewb' && tl[0].prog==='sewb' && tl[0].type==='Email' && tl[0].act==='Email' && tl[0].date===tl[0].today && tl[0].from===n[0].id && tl[0].w==='Jon Benson' && /^Email: RE: Appointment time/.test(tl[0].notes), JSON.stringify(tl));
+  ok('E20b it counts as ONE SEWB contact (not two for the note and its time)', await p.evaluate(()=>clientEpisodeStats('a','sewb').totalContacts)===sewbBefore+1);
   const au=await p.evaluate(()=>auditLog.filter(a=>a.action==='Email sent'));
   ok('E21 the audit log says an email was sent — with the count and the client, not the address or the words', au.length===1 && au[0].detail==='2 recipients' && au[0].clientId==='a' && !/@|Thursday|Appointment/.test(JSON.stringify(au[0])), JSON.stringify(au[0]));
-  // record received
+  ok('E21b …and that it was recorded on the file with the time and program', await p.evaluate(()=>auditLog.some(a=>a.action==='Email recorded on client file'&&a.detail==='15 min · SEWB'&&a.clientId==='a')));
+  // record a received email
   await p.evaluate(()=>mailOpen(1)); await T(400);
-  await p.evaluate(()=>mailFileToClient('a')); await T(100);
-  ok('E22 "Record on file" saves the received email as a note', await p.evaluate(()=>notes.filter(x=>x.clientId==='a'&&x.contactType==='Email').length===2 && /received from Jordan Citizen/.test(notes.filter(x=>x.contactType==='Email').pop().text)));
+  await p.click('#mail-pane .btn:has-text("Record on")'); await T(250);
+  const mf=await p.evaluate(()=>({open:!!document.getElementById('mail-file'), prog:[...document.querySelectorAll('#mf-program option')].map(o=>o.textContent), mins:document.getElementById('mf-mins')?.value, btn:document.querySelector('#modal-container .modal-footer .btn-primary')?.textContent, txt:document.getElementById('mail-file')?.innerText||''}));
+  ok('E22 "Record on file" asks which program and shows 15 minutes before saving', mf.open && mf.prog.join('|')==='SEWB|General — no program' && mf.mins==='15' && /Record and log time/.test(mf.btn) && /Appointment time/.test(mf.txt), JSON.stringify(mf));
+  await p.fill('#mf-mins',''); await p.click('#modal-container .modal-footer .btn-primary'); await T(150);
+  ok('E22a blank minutes → stays open and asks', await p.evaluate(()=>!!document.getElementById('mail-file') && /Enter the minutes/.test(document.getElementById('mf-error').textContent) && notes.filter(x=>x.clientId==='a'&&x.contactType==='Email').length===1));
+  await p.fill('#mf-mins','15'); await p.click('#modal-container .modal-footer .btn-primary'); await T(400);
+  const r2=await p.evaluate(()=>{ const ns=notes.filter(x=>x.clientId==='a'&&x.contactType==='Email'), ts=timeLogs.filter(t=>t.clientId==='a'); return { n:ns.length, last:ns[ns.length-1], t:ts.length, total:ts.reduce((a,t)=>a+t.minutes,0), linked:ts[ts.length-1].fromNoteId===ns[ns.length-1].id, closed:!document.querySelector('#modal-container .modal-overlay') }; });
+  ok('E22b saving adds the note (received from the client) and another 15 minutes — 30 in total', r2.closed && r2.n===2 && /received from Jordan Citizen/.test(r2.last.text) && r2.last.type==='sewb' && r2.last.emailId==='AAA=2' && r2.t===2 && r2.total===30 && r2.linked && /Recorded on Jordan Citizen's file — 15 min logged to SEWB/.test(await toasts()), JSON.stringify({n:r2.n,t:r2.t,total:r2.total}));
+  ok('E22c the same email cannot be recorded (and timed) twice: the button becomes "On …\'s file"', await p.evaluate(()=>{ const had=!!document.getElementById('mail-filed') && ![...document.querySelectorAll('#mail-pane .btn')].some(b=>/Record on/.test(b.textContent)); mailFileToClient('a'); return had && !document.getElementById('mail-file') && timeLogs.filter(t=>t.clientId==='a').length===2; }) && /already on Jordan Citizen's file/.test(await toasts()));
+  // a client in two programs: the worker chooses; time goes only to that program
+  const before=await p.evaluate(()=>({aod:clientEpisodeStats('c','aod').totalContacts,sewb:clientEpisodeStats('c','sewb').totalContacts}));
+  await p.evaluate(()=>emailClient('c')); await T(250);
+  ok('E22d a client in SEWB and AOD: both are offered', await p.evaluate(()=>[...document.querySelectorAll('#mc-program option')].map(o=>o.value).join()==='sewb,aod,general'));
+  await p.selectOption('#mc-program','aod'); await p.fill('#mc-mins','20'); await p.fill('#mc-subject','Your appointment'); await p.fill('#mc-body','See you Friday.');
+  await p.selectOption('#mc-client','c'); await T(100);
+  ok('E22e what was chosen stays put while the form is open', await p.evaluate(()=>document.getElementById('mc-program').value==='aod' && document.getElementById('mc-mins').value==='20'));
+  await p.click('#mc-send'); await T(600);
+  const rc=await p.evaluate(()=>({t:timeLogs.filter(t=>t.clientId==='c').map(t=>[t.minutes,t.program]), n:notes.filter(x=>x.clientId==='c').map(x=>x.type), aod:clientEpisodeStats('c','aod').totalContacts, sewb:clientEpisodeStats('c','sewb').totalContacts}));
+  ok('E22f 20 minutes go to AOD — one AOD contact, SEWB unchanged', rc.t.length===1 && rc.t[0][0]===20 && rc.t[0][1]==='aod' && rc.n.join()==='aod' && rc.aod===before.aod+1 && rc.sewb===before.sewb, JSON.stringify({rc,before}));
+  // no time-taking program → General; and unticking records nothing (clients with no program at all are put under SEWB by the CMS)
+  await p.evaluate(()=>emailClient('d')); await T(250);
+  ok('E22g a client only in Home Ownership (no program that takes time): time is logged as General', await p.evaluate(()=>[...document.querySelectorAll('#mc-program option')].map(o=>o.value).join()==='general'), await p.evaluate(()=>JSON.stringify({o:[...document.querySelectorAll('#mc-program option')].map(o=>o.value), open:!!document.getElementById('mail-compose'), cl:document.getElementById('mc-client')?.value, d:clients.find(x=>x.id==='d')})));
+  await p.fill('#mc-subject','Hello'); await p.fill('#mc-body','Hi Drew.'); await p.click('#mc-send'); await T(600);
+  ok('E22h …with no program on the time entry', await p.evaluate(()=>{ const t=timeLogs.filter(t=>t.clientId==='d'); return t.length===1 && t[0].minutes===15 && !t[0].program && notes.filter(x=>x.clientId==='d')[0].type==='general'; }));
+  await p.evaluate(()=>emailClient('d')); await T(250);
+  await p.uncheck('#mc-record'); await T(100);
+  ok('E22i unticking "record" hides the time boxes', await p.evaluate(()=>!document.getElementById('mc-mins') && !document.getElementById('mc-program')));
+  await p.fill('#mc-subject','Hello again'); await p.fill('#mc-body','Hi.'); await p.click('#mc-send'); await T(600);
+  ok('E22j …and the email is sent with nothing added to the file and no time logged', st.sent.length===4 && await p.evaluate(()=>timeLogs.filter(t=>t.clientId==='d').length===1 && notes.filter(x=>x.clientId==='d').length===1));
 
   // folders and search
   await p.click('[data-mail-folder="sentitems"]'); await T(500);

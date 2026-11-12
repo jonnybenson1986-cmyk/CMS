@@ -1298,7 +1298,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v108';
+const APP_VERSION = 'v109';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -7592,7 +7592,7 @@ function eocContactStamps(clientId, program) {
   const stamps = [];
   (notes || []).forEach(n => {
     if (!n || n.clientId !== clientId || !n.created) return;
-    if (n.contactType === 'Email') return;     // an email recorded on the file is a record, not a service contact — log a session if it was one
+    if (n.contactType === 'Email') return;     // an email on the file counts through its time entry (logged when it is recorded), not through the note — so once, and not at all if no time was logged
     const type = eocProgramOf(n.type);
     if (type !== program && !(general && eocIsGeneral(type))) return;
     const t = new Date(n.created).getTime();
@@ -13153,7 +13153,8 @@ function mailViewHTML() {
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
         <button class="btn btn-sm btn-primary" onclick="mailReply(false)">↩️ Reply</button>
         ${o.to.length + o.cc.length > 1 ? `<button class="btn btn-sm btn-outline" onclick="mailReply(true)">↩️ Reply all</button>` : ''}
-        ${client ? `<button class="btn btn-sm btn-outline" onclick="mailFileToClient('${sanitize(client.id)}')" title="Adds this email to ${sanitize(client.fullName)}'s file as a note">📁 Record on ${sanitize(_shortClientName(client) || 'client')}'s file</button>` : ''}
+        ${client ? (mailAlreadyFiled(o.id, client.id) ? `<span class="tag" id="mail-filed" style="background:#d1fae5;color:#065f46;align-self:center">✓ On ${sanitize(_shortClientName(client) || 'client')}'s file</span>`
+          : `<button class="btn btn-sm btn-outline" onclick="mailFileToClient('${sanitize(client.id)}')" title="Adds this email to ${sanitize(client.fullName)}'s file as a note and logs ${MAIL_CONTACT_MINUTES} minutes of email contact">📁 Record on ${sanitize(_shortClientName(client) || 'client')}'s file</button>`) : ''}
         ${o.webLink ? `<a class="btn btn-sm btn-outline" style="text-decoration:none" href="${sanitize(o.webLink)}" target="_blank" rel="noopener noreferrer">Open in Outlook ↗</a>` : ''}
       </div>
       ${o.attach ? `<div class="alert alert-info" style="font-size:12px;padding:8px 12px">📎 This email has attachments. Open it in Outlook to see or save them.</div>` : ''}
@@ -13215,7 +13216,8 @@ ${sanitize(opts.body || '')}</textarea></div>
       <div class="form-group"><label for="mc-client">About a client <span style="font-weight:400;text-transform:none">(optional)</span></label>
         <select id="mc-client" onchange="mailSafeNote()">${selOpts(cl.map(c => ({ v: c.id, l: c.fullName })), opts.clientId || '', 'Not about a client')}</select>
         <div id="mc-safe" style="margin-top:8px"></div>
-        <label style="display:flex;gap:8px;align-items:center;font-size:13px;font-weight:400;text-transform:none;letter-spacing:0;margin-top:8px"><input type="checkbox" id="mc-record" ${opts.clientId ? 'checked' : ''} style="width:auto"> Record this email as a note on the client's file</label></div>
+        <label style="display:flex;gap:8px;align-items:center;font-size:13px;font-weight:400;text-transform:none;letter-spacing:0;margin-top:8px"><input type="checkbox" id="mc-record" ${opts.clientId ? 'checked' : ''} style="width:auto" onchange="mailSafeNote()"> Record this email on the client's file and log the time</label>
+        <div id="mc-time"></div></div>
       <p style="font-size:12px;color:var(--muted)">Sent from ${sanitize(outlookAccount()?.username || 'your Outlook')} and saved in your Sent Items. Attachments can't be added here — use Outlook for those.</p>
       <p id="mc-error" style="color:#dc2626;font-size:13px;min-height:18px"></p>
       <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-outline" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="mc-send" onclick="mailSend()">📨 Send</button></div>
@@ -13226,6 +13228,8 @@ ${sanitize(opts.body || '')}</textarea></div>
 // A reminder, not a block: the intake's "safe to contact" answer is about calls and texts.
 function mailSafeNote() {
   const el = document.getElementById('mc-safe'), c = clients.find(x => x.id === (document.getElementById('mc-client')?.value || '')); if (!el) return;
+  const tm = document.getElementById('mc-time'), rec = !!document.getElementById('mc-record')?.checked;
+  if (tm) { const key = c && rec ? c.id : ''; if (tm.dataset.client !== key) { tm.dataset.client = key; tm.innerHTML = key ? mailTimeFieldsHTML(c, 'mc') : ''; } }   // keep what was typed unless the client changes
   el.innerHTML = c && c.ifSafeContact !== 'Yes' ? `<div class="alert alert-warning" id="mc-safe-warn" style="font-size:12px;margin:0;display:block">"Safe to leave calls/texts?" on ${sanitize(c.fullName)}'s intake is <strong>${sanitize(c.ifSafeContact || 'not answered')}</strong>. Check they have agreed to email at this address, and that it is safe, before sending.</div>` : '';
 }
 function emailClient(id) {            // from a client's file
@@ -13257,6 +13261,8 @@ async function mailSend() {
   if (!body.trim()) return err('The message is empty.');
   if (mailBlocker()) return err('Connect your own Outlook first (Email page).');
   const clientId = v('mc-client'), client = clientId ? clients.find(x => x.id === clientId) : null, record = !!document.getElementById('mc-record')?.checked && !!client;
+  const recMins = record ? _mailMinutes(v('mc-mins')) : 0, recProgram = v('mc-program');
+  if (record && !recMins) return err(`Enter the minutes of email contact (1–${MAIL_MAX_MINUTES}).`);
   const btn = document.getElementById('mc-send'); _mail.sending = true; if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
   try {
     const token = await _mailToken(false); if (!token) { err(_mail.error || 'Microsoft didn\'t give access to send email.'); return false; }
@@ -13265,23 +13271,72 @@ async function mailSend() {
   } catch (e) { console.warn('Send failed:', e); err('Not sent. ' + mailErrorText(e)); return false; }
   finally { _mail.sending = false; if (btn && btn.isConnected) { btn.disabled = false; btn.textContent = '📨 Send'; } }
   audit('Email sent', `${to.ok.length + cc.ok.length} recipient${to.ok.length + cc.ok.length !== 1 ? 's' : ''}`, client ? client.id : undefined);
-  if (record) {
-    notes.push({ id: uid(), clientId: client.id, type: 'general', contactType: 'Email', created: now(), worker: currentUser?.name || '',
-      text: `Email sent to ${to.ok.concat(cc.ok).join(', ')}\nSubject: ${subject}\n\n${body}` });
-    saveAll();
-  }
+  let rec = null;
+  if (record) rec = mailRecordOnFile(client, { subject, minutes: recMins, program: recProgram, text: `Email sent to ${to.ok.concat(cc.ok).join(', ')}\nSubject: ${subject}\n\n${body}` });
   closeModal();
-  showToast(record ? `✓ Email sent and recorded on ${client.fullName}'s file` : '✓ Email sent');
+  showToast(rec ? `✓ Email sent. ${_mailRecordedToast(client, rec).slice(2)}` : '✓ Email sent');
   if (currentPage === 'email' && _mail.folder === 'sentitems') setTimeout(() => mailLoad(true), 1500);
   return true;
 }
+// ---- recording an email on a client's file ----
+// An email recorded on a file is a contact: it saves the note AND logs time
+// (15 minutes unless changed) against the program chosen, exactly like a
+// session logged with a duration. The time entry is what counts toward the
+// program's hours and contacts — once, never twice with its note.
+const MAIL_CONTACT_MINUTES = 15;
+const MAIL_MAX_MINUTES = 480;
+// The programs this client is in that time can be logged against, then "General".
+function mailProgramsFor(c) {
+  const mine = PROFILE_PROGRAMS.filter(p => EOC_TIME_PROGRAMS.includes(p.key) && c && programEnrolled(c, p)).map(p => ({ v: p.key, l: p.label }));
+  return mine.concat([{ v: 'general', l: 'General — no program' }]);
+}
+function mailProgramLabel(key) { const p = PROFILE_PROGRAMS.find(x => x.key === key); return p ? p.label : 'General'; }
+function _mailMinutes(v) { const n = Math.round(Number(v)); return Number.isFinite(n) && n > 0 ? Math.min(n, MAIL_MAX_MINUTES) : 0; }
+function mailAlreadyFiled(emailId, clientId) { return !!emailId && notes.some(n => n && n.emailId === emailId && n.clientId === clientId); }
+// Saves the note and its time entry. Returns { note, minutes, program }.
+function mailRecordOnFile(c, o) {
+  const program = mailProgramsFor(c).some(p => p.v === o.program) ? o.program : 'general', worker = currentUser?.name || '';
+  const note = { id: uid(), clientId: c.id, type: program, contactType: 'Email', created: now(), worker, text: o.text };
+  if (o.emailId) note.emailId = o.emailId;                       // so the same email isn't recorded (and timed) twice
+  notes.push(note);
+  const minutes = _mailMinutes(o.minutes);
+  if (minutes) timeLogs.push(Object.assign({ id: uid(), clientId: c.id, date: today(), minutes, activity: 'Email', type: 'Email', source: 'Email', worker,
+    notes: ('Email: ' + (o.subject || '(no subject)')).slice(0, 100), fromNoteId: note.id }, program !== 'general' ? { program } : {}));
+  audit('Email recorded on client file', `${minutes} min · ${mailProgramLabel(program)}`, c.id);
+  saveAll();
+  return { note, minutes, program };
+}
+function _mailRecordedToast(c, r) { return `✓ Recorded on ${c.fullName}'s file${r.minutes ? ` — ${r.minutes} min logged to ${mailProgramLabel(r.program)}` : ''}`; }
+// The program and minutes boxes (used by both the "record" form and New email).
+function mailTimeFieldsHTML(c, prefix) {
+  const progs = mailProgramsFor(c);
+  return `<div class="grid-2" style="margin-top:8px">
+    <div class="form-group" style="margin:0"><label for="${prefix}-program">Program the time goes to</label><select id="${prefix}-program">${selOpts(progs, progs[0].v)}</select></div>
+    <div class="form-group" style="margin:0"><label for="${prefix}-mins">Minutes of email contact</label><input type="number" id="${prefix}-mins" min="1" max="${MAIL_MAX_MINUTES}" step="1" value="${MAIL_CONTACT_MINUTES}"></div>
+  </div>`;
+}
 function mailFileToClient(clientId) {
   const o = _mail.open, c = clients.find(x => x.id === clientId); if (!o || !o.id || o.error || !c) return;
-  if (!confirm(`Add this email to ${c.fullName}'s file as a note?\n\nThe words of the email are copied into the CMS.`)) return;
-  notes.push({ id: uid(), clientId: c.id, type: 'general', contactType: 'Email', created: now(), worker: currentUser?.name || '',
-    text: `Email ${_mail.folder === 'sentitems' ? 'sent to' : 'received from'} ${_mail.folder === 'sentitems' ? o.to.map(_addrLabel).join(', ') : _addrLabel(o.from)} — ${fmtdt(o.at)}\nSubject: ${o.subject}\n\n${o.body.trim()}` });
-  audit('Email recorded on client file', '', c.id);
-  saveAll(); showToast(`✓ Recorded on ${c.fullName}'s file`);
+  if (mailAlreadyFiled(o.id, c.id)) { showToast(`This email is already on ${c.fullName}'s file.`); return; }
+  const sent = _mail.folder === 'sentitems', who = sent ? o.to.map(_addrLabel).join(', ') : _addrLabel(o.from);
+  showModal('📁 Record email on file', `
+    <div id="mail-file" data-client="${sanitize(c.id)}">
+      <p style="font-size:13px;margin-bottom:10px">Adds this email to <strong>${sanitize(c.fullName)}</strong>'s file as a note and logs the time as email contact.</p>
+      <div style="background:var(--bg);border-radius:8px;padding:10px 12px;font-size:12px;color:var(--muted)"><strong style="color:var(--text)">${sanitize(o.subject || '(no subject)')}</strong><br>${sent ? 'Sent to' : 'From'} ${sanitize(who)} · ${sanitize(fmtdt(o.at))}</div>
+      ${mailTimeFieldsHTML(c, 'mf')}
+      <p style="font-size:12px;color:var(--muted);margin-top:10px">The words of the email are copied into the CMS. The time counts toward the program's hours and contacts.</p>
+      <p id="mf-error" style="color:#dc2626;font-size:13px;min-height:18px"></p>
+    </div>`, () => {
+      const mins = _mailMinutes(document.getElementById('mf-mins')?.value);
+      if (!mins) { document.getElementById('mf-error').textContent = `Enter the minutes (1–${MAIL_MAX_MINUTES}).`; return false; }
+      if (mailAlreadyFiled(o.id, c.id)) { showToast(`This email is already on ${c.fullName}'s file.`); return true; }
+      const r = mailRecordOnFile(c, { emailId: o.id, subject: o.subject, minutes: mins, program: document.getElementById('mf-program')?.value,
+        text: `Email ${sent ? 'sent to' : 'received from'} ${who} — ${fmtdt(o.at)}\nSubject: ${o.subject}\n\n${o.body.trim()}` });
+      showToast(_mailRecordedToast(c, r));
+      setTimeout(mailRefreshView, 0);
+      return true;
+    }, '560px');
+  const btn = document.querySelector('#modal-container .modal-footer .btn-primary'); if (btn) btn.textContent = '📁 Record and log time';
 }
 
 function applySidebarBg() {
