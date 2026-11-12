@@ -62,7 +62,7 @@ const connect=p=>p.evaluate(ME=>{ outlookOrgConfig={clientId:'11111111-2222-3333
   await p.click('.mail-row[data-i="1"]'); await T(400);
   const o2=await p.evaluate(()=>({link:!!document.querySelector('#mail-pane a[href^="javascript"]')||[...document.querySelectorAll('#mail-pane a')].some(a=>/javascript/i.test(a.getAttribute('href')||'')), btns:[...document.querySelectorAll('#mail-pane .btn')].map(b=>b.innerText.trim())}));
   ok('E10 a non-Microsoft link in the message is never made clickable', !o2.link && !o2.btns.some(t=>/Open in Outlook/.test(t)), o2.btns.join('|'));
-  ok('E11 a message from a client offers "Record on …\'s file"; Reply all appears when there are several recipients', o2.btns.some(t=>/Record on Jordan C\.'s file/.test(t)) && o2.btns.includes('↩️ Reply all'), o2.btns.join('|'));
+  ok('E11 a message from a client offers "Record on Jordan C.\'s file" (that client ready-chosen); Reply all appears when there are several recipients', o2.btns.some(t=>/Record on Jordan C\.'s file/.test(t)) && o2.btns.includes('↩️ Reply all'), o2.btns.join('|'));
 
   // reply
   await p.click('#mail-pane .btn-primary'); await T(250);
@@ -106,7 +106,35 @@ const connect=p=>p.evaluate(ME=>{ outlookOrgConfig={clientId:'11111111-2222-3333
   await p.fill('#mf-mins','15'); await p.click('#modal-container .modal-footer .btn-primary'); await T(400);
   const r2=await p.evaluate(()=>{ const ns=notes.filter(x=>x.clientId==='a'&&x.contactType==='Email'), ts=timeLogs.filter(t=>t.clientId==='a'); return { n:ns.length, last:ns[ns.length-1], t:ts.length, total:ts.reduce((a,t)=>a+t.minutes,0), linked:ts[ts.length-1].fromNoteId===ns[ns.length-1].id, closed:!document.querySelector('#modal-container .modal-overlay') }; });
   ok('E22b saving adds the note (received from the client) and another 15 minutes — 30 in total', r2.closed && r2.n===2 && /received from Jordan Citizen/.test(r2.last.text) && r2.last.type==='sewb' && r2.last.emailId==='AAA=2' && r2.t===2 && r2.total===30 && r2.linked && /Recorded on Jordan Citizen's file — 15 min logged to SEWB/.test(await toasts()), JSON.stringify({n:r2.n,t:r2.t,total:r2.total}));
-  ok('E22c the same email cannot be recorded (and timed) twice: the button becomes "On …\'s file"', await p.evaluate(()=>{ const had=!!document.getElementById('mail-filed') && ![...document.querySelectorAll('#mail-pane .btn')].some(b=>/Record on/.test(b.textContent)); mailFileToClient('a'); return had && !document.getElementById('mail-file') && timeLogs.filter(t=>t.clientId==='a').length===2; }) && /already on Jordan Citizen's file/.test(await toasts()));
+  ok('E22c once recorded it shows "✓ On Jordan C.\'s file", and that client can\'t be chosen again for the same email', await p.evaluate(()=>{ const tag=[...document.querySelectorAll('#mail-pane .mail-filed')].map(t=>t.textContent).join('|'); mailFileToClient('a'); const noPre=!document.getElementById('mf-client'); document.getElementById('mf-search').value='jordan'; mailFileSearch(); const r=document.querySelector('.mf-result[data-id=a]'); const ok=/On Jordan C\.'s file/.test(tag) && noPre && !!r && r.disabled && /already on this file/.test(r.textContent); closeModal(); return ok && timeLogs.filter(t=>t.clientId==='a').length===2; }));
+  // ---- every email can be recorded, against any client ----
+  await p.evaluate(()=>mailOpen(0)); await T(400);     // from pat@example.org — not a client's address
+  ok('E22k an email from someone who is not a client still has "Record on a client\'s file"', await p.evaluate(()=>/Record on a client's file/.test(document.getElementById('mail-record-btn')?.textContent||'')));
+  await p.click('#mail-record-btn'); await T(250);
+  ok('E22l the form opens with a client search and nobody chosen; saving without a client is refused', await p.evaluate(()=>!!document.getElementById('mf-search') && !document.getElementById('mf-client') && !document.getElementById('mf-mins')) && await (async()=>{ await p.click('#modal-container .modal-footer .btn-primary'); await T(100); return p.evaluate(()=>!!document.getElementById('mail-file') && /Choose the client first/.test(document.getElementById('mf-error').textContent)); })());
+  await p.fill('#mf-search','zzzz'); await T(100);
+  const none=await p.evaluate(()=>document.querySelector('#mf-results .mf-none')?.textContent||'');
+  await p.fill('#mf-search','SAMPLE alex'); await T(100);
+  const found=await p.evaluate(()=>[...document.querySelectorAll('.mf-result')].map(b=>b.dataset.id));
+  await p.fill('#mf-search','e'); await T(100);
+  const many=await p.evaluate(()=>[...document.querySelectorAll('.mf-result')].map(b=>b.dataset.id));
+  ok('E22m search finds clients by any part of the name, in any order and case; no match says so', /No client matches "zzzz"/.test(none) && found.join()==='b' && many.length>=3 && many.includes('a') && many.includes('c'), JSON.stringify({none,found,many}));
+  await p.fill('#mf-search','casey.example@'); await T(100);
+  ok('E22n …and by email address', await p.evaluate(()=>[...document.querySelectorAll('.mf-result')].map(b=>b.dataset.id).join()==='c'));
+  await p.click('.mf-result[data-id=c]'); await T(150);
+  const ch=await p.evaluate(()=>({name:document.getElementById('mf-client')?.innerText||'', prog:[...document.querySelectorAll('#mf-program option')].map(o=>o.value), mins:document.getElementById('mf-mins')?.value, searchHidden:document.getElementById('mf-pick').style.display==='none'}));
+  ok('E22o choosing a client shows them, their programs and 15 minutes', /Casey Example/.test(ch.name) && ch.prog.join()==='sewb,aod,general' && ch.mins==='15' && ch.searchHidden, JSON.stringify(ch));
+  await p.click('#mf-client .btn'); await T(100);
+  ok('E22p "Change" goes back to the search', await p.evaluate(()=>!document.getElementById('mf-client') && document.getElementById('mf-pick').style.display!=='none' && !document.getElementById('mf-mins')));
+  await p.fill('#mf-search','alex'); await T(100); await p.click('.mf-result[data-id=b]'); await T(150);
+  await p.click('#modal-container .modal-footer .btn-primary'); await T(400);
+  const rb=await p.evaluate(()=>{ const n=notes.filter(x=>x.clientId==='b'&&x.contactType==='Email'), t=timeLogs.filter(x=>x.clientId==='b'); return { n:n.length, type:n[0]&&n[0].type, text:n[0]&&n[0].text, id:n[0]&&n[0].emailId, t:t.length, m:t[0]&&t[0].minutes, p:t[0]&&t[0].program, linked:t[0]&&n[0]&&t[0].fromNoteId===n[0].id, closed:!document.querySelector('#modal-container .modal-overlay'), xss:!!window.__xss }; });
+  ok('E22q the email is saved to that client\'s file with 15 minutes against their program', rb.closed && rb.n===1 && rb.type==='sewb' && /received from Pat/.test(rb.text) && /Subject: Quarterly/.test(rb.text) && rb.id==='AAA=1' && rb.t===1 && rb.m===15 && rb.p==='sewb' && rb.linked && !rb.xss && /Recorded on Alex Sample's file — 15 min logged to SEWB/.test(await toasts()), JSON.stringify(rb));
+  ok('E22r the email now shows "✓ On Alex S.\'s file" and can still be recorded on another client\'s file', await p.evaluate(()=>/On Alex S\.'s file/.test([...document.querySelectorAll('#mail-pane .mail-filed')].map(t=>t.textContent).join('|')) && !!document.getElementById('mail-record-btn')));
+  await p.evaluate(()=>showPage('sessions')); await T(300);
+  const sl=await p.evaluate(()=>{ const card=[...document.querySelectorAll('#sessions-list .session-card')].find(c=>/Alex Sample/.test(c.innerText)&&/Quarterly/.test(c.innerText)); return card?{chip:card.querySelector('.time-chip')?.textContent||'', txt:card.innerText.slice(0,200), img:!!card.querySelector('img[src="x"]')}:null; });
+  ok('E22s the Session Log lists it for that client with "15 min" and Email as the contact type', !!sl && sl.chip==='15 min' && /Email/.test(sl.txt) && /SEWB/.test(sl.txt) && !sl.img, JSON.stringify(sl));
+  await p.evaluate(()=>showPage('email')); await T(500);
   // a client in two programs: the worker chooses; time goes only to that program
   const before=await p.evaluate(()=>({aod:clientEpisodeStats('c','aod').totalContacts,sewb:clientEpisodeStats('c','sewb').totalContacts}));
   await p.evaluate(()=>emailClient('c')); await T(250);
@@ -146,7 +174,7 @@ const connect=p=>p.evaluate(ME=>{ outlookOrgConfig={clientId:'11111111-2222-3333
 
   // privacy
   const ls=await p.evaluate(()=>Object.keys(localStorage).map(k=>localStorage.getItem(k)).join('\n'));
-  ok('E28 nothing from the mailbox is kept in the browser\'s storage', !/Quarterly|Please send the figures|Newsletter|pat@example\.org|Sent one/.test(ls));
+  ok('E28 emails that were not recorded on a file are not kept in the browser\'s storage', !/Newsletter|news@example\.net|Sent one/.test(ls));
   await p.evaluate(()=>showPage('email')); await T(500);
   await p.evaluate(()=>logout('idle')); await T(500);
   ok('E29 signing out drops the mailbox from memory', await p.evaluate(()=>_mail.list===null && _mail.open===null));
