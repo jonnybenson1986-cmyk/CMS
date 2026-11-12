@@ -565,7 +565,7 @@
       <span class="icon">📈</span><span>Reports</span>
     </div>
     <div class="nav-item" onclick="showPage('vpr')">
-      <span class="icon">🚨</span><span>Vulnerable Persons Register</span>
+      <span class="icon">🚨</span><span>Vulnerable Persons Register</span><span id="vpr-nav-badge" style="display:none;margin-left:auto;background:#dc2626;color:#fff;font-size:10px;font-weight:700;border-radius:10px;padding:1px 7px"></span>
     </div>
     <div class="nav-item" onclick="showPage('auditlog')">
       <span class="icon">🔍</span><span>Audit Log</span>
@@ -877,7 +877,7 @@ const FSYNC = (() => {
     };
     _listeners.push(col('clients').onSnapshot(snap=>{ if(!trust(snap))return; clients=_keep(clients,_live(snap.docs.map(d=>d.data())));DB.save('clients',clients);
       try { if (typeof migrateSewbUmbrella === 'function') migrateSewbUmbrella('live sync'); } catch(e){ console.warn('SEWB umbrella:', e.message); }
-      refresh(); }, e=>console.warn('clients listener:',e.message)));
+      refresh(); try { vprUpdateBadge(); } catch(_){} }, e=>console.warn('clients listener:',e.message)));
     _listeners.push(col('notes').onSnapshot(snap=>{ if(!trust(snap))return; notes=_keep(notes,_live(snap.docs.map(d=>d.data())));DB.save('notes',notes); }, e=>console.warn('notes listener:',e.message)));
     _listeners.push(col('timelogs').onSnapshot(snap=>{ if(!trust(snap))return; timeLogs=_keep(timeLogs,_live(snap.docs.map(d=>d.data())));DB.save('timelogs',timeLogs); }, e=>console.warn('timelogs listener:',e.message)));
     _listeners.push(col('referrals').onSnapshot(snap=>{ if(!trust(snap))return; referrals=_keep(referrals,_live(snap.docs.map(d=>d.data())));DB.save('referrals',referrals); if(currentPage==='referrals')setTimeout(()=>showPage('referrals'),50); }, e=>console.warn('referrals listener:',e.message)));
@@ -1298,7 +1298,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v110';
+const APP_VERSION = 'v111';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -1939,6 +1939,7 @@ function showPage(page) {
   const fn = pages[page];
   document.getElementById('content').innerHTML = fn ? fn() : '<div class="empty-state"><p>This page could not be opened. Please refresh, or contact your system manager if it keeps happening.</p></div>';
   attachPageEvents(page);
+  try { vprUpdateBadge(); } catch (_) {}
 }
 
 function attachPageEvents(page) {
@@ -1981,6 +1982,7 @@ function renderDashboard() {
   </div>`;
 
   return `
+  ${vprAlertsCardHTML()}
   ${alertHTML}
   ${returnedIntakeFormsCardHTML()}
   ${renderCompletenessDashboard()}
@@ -3007,20 +3009,8 @@ function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
       <div class="form-group"><label>Additional feedback on previous experience</label><textarea id="if-prevFeedback" style="min-height:60px">${sanitize(c.ifPrevFeedback||'')}</textarea></div>
     </div>
 
-    <!-- EMERGENCY PLANNING (Vulnerable People in Emergencies Policy) -->
-    <div class="card">
-      <div class="card-header"><div class="card-title">🚨 Emergency planning</div><button class="btn btn-sm btn-outline" onclick="gotoProfileSection('vpr')">Emergency plan &amp; VPR screening →</button></div>
-      <p style="font-size:12px;color:var(--muted);margin-bottom:12px">Ask every client. Everyone should have their own plan for fire, flood, heatwave or storm. These answers show whether a Vulnerable Persons Register (VPR) screening is needed.</p>
-      <div class="grid-3">
-        <div class="form-group"><label for="if-emergencyPlan">Do you have a personal emergency plan?</label>
-          <select id="if-emergencyPlan">${selOpts(['Yes','No'], c.ifEmergencyPlan, 'Select…')}</select></div>
-        <div class="form-group"><label for="if-emergencyAssist">Would you need help to leave home or act in an emergency?</label>
-          <select id="if-emergencyAssist">${selOpts(['Yes','No'], c.ifEmergencyAssist, 'Select…')}</select></div>
-        <div class="form-group"><label for="if-emergencyHelp">Is there family, a friend or a neighbour nearby who could help you?</label>
-          <select id="if-emergencyHelp">${selOpts(['Yes','No'], c.ifEmergencyHelp, 'Select…')}</select></div>
-      </div>
-      <div class="vpr-intake-status" style="font-size:12px;margin-top:4px;color:${vprOnRegister(c) ? '#991b1b' : 'var(--muted)'}">${sanitize(vprIntakeStatusText(c))}</div>
-    </div>
+    <!-- EMERGENCY PLANNING + VPR SCREENING (Vulnerable People in Emergencies Policy) -->
+    ${vprIntakeCardHTML(c)}
 
     <!-- CONSENT -->
     <div class="card">
@@ -4000,6 +3990,7 @@ function saveIntake(id, quiet=false) {
   c.ifServices = {};
   svcKeys.forEach(k => { c.ifServices[k] = document.getElementById(`if-svc-${k}`)?.checked||false; });
 
+  const vprChange = vprIntakeCollect(c);          // VPR screening on the intake: all four met → on the register
   if (!quiet) audit('Saved intake form', c.fullName||'', id);
   else if (!_intakeAuto || _intakeAuto.clientId !== id || !_intakeAuto.audited) {   // once per sitting, not every keystroke pause
     audit('Intake autosaved', c.fullName||'', id);
@@ -4007,6 +3998,7 @@ function saveIntake(id, quiet=false) {
   }
   if (!quiet && _intakeAuto && _intakeAuto.clientId === id) _intakeAuto.last = _intakeSig();
   saveAll(); if(!quiet) showToast('Intake form saved ✓');
+  if (vprChange) { showToast(vprChange === 'added' ? `🚨 ${c.fullName} meets all four criteria — added to the Vulnerable Persons Register. Managers and supervisors have been notified.` : `${c.fullName} removed from the Vulnerable Persons Register — records kept`); if (!quiet) _refreshClientFile(id); }
   if(!quiet) handbookAfterIntake(c);   // offer the handbook text once there's a mobile and consent to texts
   const hs = document.querySelector('.handbook-status');
   if (hs) { const st = handbookStatus(c); hs.textContent = st.text; hs.style.color = st.ok ? '#065f46' : 'var(--muted)'; }
@@ -17249,12 +17241,143 @@ function vprSync(c, why) {
     v.listed = true; v.listedAt = now(); v.removedAt = ''; v.removedReason = '';
     _vprLog(v, 'Added to the register', why || 'All four criteria met');
     audit('VPR: added to register', c.fullName, c.id);
+    // Notify System Managers, admins and supervisors: an alert that stays on their dashboard,
+    // and on the register's menu item, until one of them marks it as seen.
+    v.alert = { at: now(), by: _vprWho(), why: why || 'All four criteria met' }; v.ackAt = ''; v.ackBy = '';
+    _vprLog(v, 'Managers and supervisors notified', '');
+    audit('VPR: managers and supervisors notified', c.fullName, c.id);
+    setTimeout(vprUpdateBadge, 0);
     return 'added';
   }
+  delete v.alert;                                                  // nothing to review once they are off the register
+  setTimeout(vprUpdateBadge, 0);
   v.listed = false; v.removedAt = now(); v.removedReason = why || WG_VPR.offReason(c);
   _vprLog(v, 'Removed from the register', v.removedReason);
   audit('VPR: removed from register', `${c.fullName} — ${v.removedReason}`, c.id);
   return 'removed';
+}
+// ---- notifying managers and supervisors ----
+// People added to the register that no manager or supervisor has marked as seen yet.
+function vprAlerts() {
+  if (!vprReady() || !vprPageAllowed()) return [];
+  return visibleClients(clients).filter(c => vprOf(c).alert && vprOnRegister(c)).sort((a, b) => String(vprOf(b).alert.at || '').localeCompare(String(vprOf(a).alert.at || '')));
+}
+const _vprToasted = new Set();     // alerts already announced in this session
+function vprUpdateBadge() {
+  const b = document.getElementById('vpr-nav-badge'); if (!b) return;
+  const list = vprAlerts(), n = list.length, me = _vprWho();
+  // Tell a manager or supervisor once, when an addition made by someone else reaches this device.
+  list.filter(c => { const k = c.id + '|' + vprOf(c).alert.at; if (_vprToasted.has(k)) return false; _vprToasted.add(k); return vprOf(c).alert.by !== me; })
+    .slice(0, 3).forEach(c => showToast(`🚨 ${c.fullName} was added to the Vulnerable Persons Register${vprOf(c).alert.by ? ' by ' + vprOf(c).alert.by : ''} — see the dashboard`));
+  b.textContent = n || ''; b.style.display = n ? '' : 'none';
+  b.title = n ? `${n} ${n === 1 ? 'person' : 'people'} added to the register — not yet seen by a manager or supervisor` : '';
+}
+function vprAck(id) {
+  const c = clients.find(x => x.id === id); if (!c || !vprPageAllowed() || !vprOf(c).alert) return;
+  const v = c.vpr; delete v.alert; v.ackAt = now(); v.ackBy = _vprWho();
+  _vprLog(v, 'Seen by ' + (currentUser?.role === 'supervisor' ? 'supervisor' : 'manager'), '');
+  audit('VPR: addition marked as seen', c.fullName, id);
+  saveAll(); vprUpdateBadge(); showToast(`Marked as seen — ${c.fullName}`);
+  if (currentPage === 'dashboard' || currentPage === 'vpr') showPage(currentPage);
+}
+// The dashboard card managers and supervisors see.
+function vprAlertsCardHTML() {
+  const list = vprAlerts(); if (!list.length) return '';
+  return `<div class="card" id="vpr-alerts" style="margin-bottom:16px;border-left:4px solid #dc2626">
+    <div class="card-header"><div class="card-title">🚨 Added to the Vulnerable Persons Register</div><button class="btn btn-sm btn-outline" onclick="showPage('vpr')">Open the register →</button></div>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:8px">${list.length === 1 ? 'This person meets' : 'These people meet'} all four criteria and ${list.length === 1 ? 'has' : 'have'} been added automatically. Check the screening and consent, enter ${list.length === 1 ? 'them' : 'each one'} in the council's VPR database, then mark as seen.</p>
+    ${list.map(c => { const a = vprOf(c).alert; return `<div class="vpr-alert-row" data-id="${sanitize(c.id)}" style="display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--border);flex-wrap:wrap">
+      <span style="width:8px;height:8px;border-radius:50%;background:#dc2626;flex:none"></span>
+      <span style="flex:1;min-width:200px;font-size:13px"><strong>${sanitize(c.fullName)}</strong><span style="color:var(--muted)"> — added ${sanitize(fmtdt(a.at))}${a.by ? ' by ' + sanitize(a.by) : ''}${a.why ? ' · ' + sanitize(a.why) : ''}</span></span>
+      <button class="btn btn-sm btn-outline" onclick="openClientProfile('${sanitize(c.id)}','vpr')">Review</button>
+      <button class="btn btn-sm btn-primary" onclick="vprAck('${sanitize(c.id)}')">✓ Seen</button></div>`; }).join('')}
+  </div>`;
+}
+
+// ---- screening on the intake ----
+// The same record as the "Emergency plan & VPR" section (client.vpr), asked at intake.
+function vprIntakeCardHTML(c) {
+  if (!vprReady()) return '';
+  const v = vprOf(c), id = sanitize(c.id);
+  const yn = k => ['Yes', 'No', ''].map(o => `<label style="display:flex;align-items:center;gap:5px;font-size:13px;font-weight:400;text-transform:none;letter-spacing:0"><input type="radio" name="ifv-${k}" value="${o}" style="width:auto" onchange="vprIntakeLive()" ${(v[k] || '') === o ? 'checked' : ''}> ${o || 'Not assessed'}</label>`).join('');
+  return `<div class="card" id="ifv-box" data-client="${id}">
+      <div class="card-header"><div class="card-title">🚨 Emergency planning &amp; Vulnerable Persons Register screening</div><button type="button" class="btn btn-sm btn-outline" onclick="gotoProfileSection('vpr')">Full emergency plan &amp; VPR record →</button></div>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:12px">Ask every client. Everyone should have their own plan for fire, flood, heatwave or storm.</p>
+      <div class="grid-3">
+        <div class="form-group"><label for="if-emergencyPlan">Do you have a personal emergency plan?</label>
+          <select id="if-emergencyPlan">${selOpts(['Yes','No'], c.ifEmergencyPlan, 'Select…')}</select></div>
+        <div class="form-group"><label for="if-emergencyAssist">Would you need help to leave home or act in an emergency?</label>
+          <select id="if-emergencyAssist">${selOpts(['Yes','No'], c.ifEmergencyAssist, 'Select…')}</select></div>
+        <div class="form-group"><label for="if-emergencyHelp">Is there family, a friend or a neighbour nearby who could help you?</label>
+          <select id="if-emergencyHelp">${selOpts(['Yes','No'], c.ifEmergencyHelp, 'Select…')}</select></div>
+      </div>
+      <div style="font-weight:700;font-size:13px;margin:8px 0 4px">Screening for the Vulnerable Persons Register</div>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:10px">Answer each of the four criteria. If <strong>all four</strong> are met, the person is added to the register when the intake is saved, and System Managers, admins and supervisors are notified. The register is a last resort: being listed does not guarantee assistance in an emergency.</p>
+      ${WG_VPR.CRITERIA.filter(x => x.key !== 'c4').map(x => `
+      <div class="ifv-crit" data-crit="${x.key}" style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px">
+        <div style="font-weight:600;font-size:13px">${x.n}. ${sanitize(x.label)}</div>
+        <p style="font-size:12px;color:var(--muted);margin:4px 0 8px;line-height:1.5">${sanitize(x.means)}</p>
+        <div style="display:flex;gap:16px;flex-wrap:wrap" role="radiogroup" aria-label="Criterion ${x.n}">${yn(x.key)}</div>
+      </div>`).join('')}
+      <div class="ifv-crit" data-crit="c4" style="border:1px solid var(--border);border-radius:8px;padding:10px 12px">
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span style="font-weight:600;font-size:13px;flex:1">4. Consents to be on the VPR</span>
+          <button type="button" class="btn btn-sm btn-outline" onclick="printVprConsent('${id}')">🖨️ Print consent form</button></div>
+        <p style="font-size:12px;color:var(--muted);margin:4px 0 8px;line-height:1.5">${sanitize(WG_VPR.CRITERIA[3].means)}</p>
+        <div class="grid-2">
+          <div class="form-group"><label for="ifv-consent">Consent</label><select id="ifv-consent" onchange="vprIntakeConsentChanged()">${selOpts([{ v: 'Yes', l: 'Yes — consents' }, { v: 'No', l: 'No — does not consent' }, { v: 'Withdrawn', l: 'Withdrawn — asked to be removed' }], v.consent, 'Not yet asked')}</select></div>
+          <div class="form-group"><label for="ifv-consentMethod">How consent was given</label><select id="ifv-consentMethod" onchange="vprIntakeLive()">${selOpts(WG_VPR.CONSENT_METHODS.map(m => ({ v: m.key, l: m.label })), v.consentMethod, 'Select…')}</select></div>
+          <div class="form-group"><label for="ifv-consentDate">Date of consent</label><input type="date" id="ifv-consentDate" value="${sanitize(v.consentDate || '')}" onchange="vprIntakeLive()"></div>
+          <div class="form-group"><label for="ifv-consentBy">Consent obtained / witnessed by</label><input id="ifv-consentBy" value="${sanitize(v.consentBy || '')}" oninput="vprIntakeLive()"></div>
+        </div>
+        <div class="form-group" style="margin-bottom:0"><label for="ifv-repName">Authorised representative's name <span style="font-weight:400;text-transform:none">(only if they consented for the person)</span></label><input id="ifv-repName" value="${sanitize(v.repName || '')}" oninput="vprIntakeLive()"></div>
+      </div>
+      <div id="ifv-result" role="status" style="margin-top:10px">${vprIntakeResultHTML(c, v)}</div>
+      <div class="vpr-intake-status" style="font-size:12px;margin-top:6px;color:${vprOnRegister(c) ? '#991b1b' : 'var(--muted)'}">${sanitize(vprIntakeStatusText(c))}</div>
+    </div>`;
+}
+// What is ticked on the intake's screening right now (not yet saved).
+function _vprIntakeRead(box) {
+  const r = k => box.querySelector(`input[name="ifv-${k}"]:checked`)?.value || '', g = k => (document.getElementById('ifv-' + k)?.value || '').trim();
+  return { c1: r('c1'), c2: r('c2'), c3: r('c3'), consent: g('consent'), consentMethod: g('consentMethod'), consentDate: g('consentDate'), consentBy: g('consentBy'), repName: g('repName') };
+}
+function vprIntakeResultHTML(c, v) {
+  const crit = WG_VPR.criteria(v), met = crit.filter(x => x.met).length, closed = (c.status || 'active') === 'closed';
+  if (met === 4) return `<div class="alert alert-warning" id="ifv-all4" style="margin:0;display:block;border-left-color:#dc2626;background:#fef2f2;color:#7f1d1d"><strong>All four criteria are met.</strong> ${closed ? 'This file is closed, so they are not added to the register.' : vprOnRegister(c) ? `${sanitize(c.fullName)} is on the Vulnerable Persons Register.` : `${sanitize(c.fullName)} will be added to the Vulnerable Persons Register when you save, and System Managers, admins and supervisors will be notified.`}</div>`;
+  if (!WG_VPR.screened(v) && !v.consent) return `<div style="font-size:12px;color:var(--muted)">Not screened yet.</div>`;
+  return `<div style="font-size:12px;color:#92400e"><strong>${met} of 4 criteria met</strong> — not added to the register. Still needed: ${crit.filter(x => !x.met).map(x => `${x.n} (${sanitize(x.why)})`).join('; ')}.</div>`;
+}
+function vprIntakeLive() {
+  const box = document.getElementById('ifv-box'), out = document.getElementById('ifv-result'), c = box && clients.find(x => x.id === box.dataset.client); if (!c || !out) return;
+  out.innerHTML = vprIntakeResultHTML(c, Object.assign({}, vprOf(c), _vprIntakeRead(box)));
+}
+// Choosing "Yes — consents" now: fill in today's date and the worker, which can be changed.
+function vprIntakeConsentChanged() {
+  if (document.getElementById('ifv-consent')?.value === 'Yes') {
+    const d = document.getElementById('ifv-consentDate'), by = document.getElementById('ifv-consentBy');
+    if (d && !d.value) d.value = today();
+    if (by && !by.value.trim()) by.value = currentUser?.name || '';
+  }
+  vprIntakeLive();
+}
+// Called by saveIntake. Writes the screening to client.vpr — only when the intake's
+// screening card for THIS client is on screen — then brings the register into line.
+// Returns 'added', 'removed' or null.
+function vprIntakeCollect(c) {
+  const box = document.getElementById('ifv-box'); if (!vprReady() || !box || box.dataset.client !== c.id) return null;
+  const vals = _vprIntakeRead(box);
+  if (!c.vpr && !Object.values(vals).some(Boolean)) return null;          // nothing answered: don't start a record
+  const v = c.vpr = c.vpr || {}, beforeConsent = v.consent || '';
+  const changed = Object.keys(vals).some(k => (v[k] || '') !== vals[k]);
+  if (changed) {
+    Object.assign(v, vals); v.updatedAt = now(); v.updatedBy = _vprWho();
+    if (v.consent !== beforeConsent && v.consent) {
+      const m = WG_VPR.CONSENT_METHODS.find(x => x.key === v.consentMethod);
+      _vprLog(v, v.consent === 'Yes' ? 'Consent recorded' : v.consent === 'Withdrawn' ? 'Consent withdrawn' : 'Consent not given', v.consent === 'Yes' ? [m && m.label, v.consentDate && fmt(v.consentDate), v.consentBy && 'by ' + v.consentBy].filter(Boolean).join(', ') : '');
+    }
+    _vprLog(v, 'Screened at intake', `${WG_VPR.criteria(v).filter(x => x.met).length} of 4 criteria met`);
+    audit('VPR screening saved at intake', c.fullName, c.id);
+  }
+  return vprSync(c, WG_VPR.onRegister(c) ? 'All four criteria met at intake' : undefined);
 }
 function vprConsentText(c) {
   if (!vprReady()) return 'not available';
@@ -17505,7 +17628,7 @@ function renderVprPage() {
       <td style="font-size:12px">${sanitize(m ? m.label.split(' (')[0] : '')}<br>${v.consentDate ? fmt(v.consentDate) : ''}</td>
       <td style="font-size:12px">${v.councilEntered ? `${fmt(v.councilEntered)}${v.councilRef ? '<br>' + sanitize(v.councilRef) : ''}` : '<span style="color:#92400e;font-weight:600">Not entered</span>'}</td>
       <td>${_vprPill(vprValidation(c))}</td>
-      <td style="white-space:nowrap">${open(c)} <button class="btn btn-sm btn-primary" onclick="vprRevalidate('${sanitize(c.id)}')">Re-validate</button></td></tr>`; }).join('') : empty(8, 'Nobody is on the register. People are added automatically when all four criteria are met on their file.')}</tbody></table>`;
+      <td style="white-space:nowrap">${v.alert ? `<span class="tag vpr-new" style="background:#fee2e2;color:#991b1b;margin-right:4px" title="Added ${sanitize(fmtdt(v.alert.at))}${v.alert.by ? ' by ' + sanitize(v.alert.by) : ''} — not yet seen by a manager or supervisor">New</span><button class="btn btn-sm btn-outline" onclick="vprAck('${sanitize(c.id)}')">✓ Seen</button> ` : ''}${open(c)} <button class="btn btn-sm btn-primary" onclick="vprRevalidate('${sanitize(c.id)}')">Re-validate</button></td></tr>`; }).join('') : empty(8, 'Nobody is on the register. People are added automatically when all four criteria are met on their file.')}</tbody></table>`;
   else if (_vprTab === 'removed') table = `<table><thead><tr><th>Person</th><th>On the register</th><th>Removed</th><th>Reason</th><th>File</th><th></th></tr></thead><tbody>
     ${g.removed.length ? g.removed.map(c => { const v = vprOf(c); return `<tr class="vpr-row" data-id="${sanitize(c.id)}">${nameCell(c)}<td style="font-size:12px">${v.listedAt ? fmt(v.listedAt) : '—'}</td><td style="font-size:12px">${v.removedAt ? fmt(v.removedAt) : (c.closedDate ? fmt(c.closedDate) : '—')}</td><td style="font-size:12px">${sanitize(v.removedReason || WG_VPR.offReason(c))}</td><td><span class="tag ${(c.status || 'active') === 'closed' ? 'tag-closed' : 'tag-active'}">${sanitize(c.status || 'active')}</span></td><td>${open(c)}</td></tr>`; }).join('') : empty(6, 'Nobody has been removed from the register.')}</tbody></table>`;
   else if (_vprTab === 'unscreened') table = `<table><thead><tr><th>Client</th><th>Needs help in an emergency?</th><th>Someone nearby to help?</th><th></th></tr></thead><tbody>

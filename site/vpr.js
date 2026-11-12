@@ -28,6 +28,8 @@
 //   councilEntered, councilRef                   entered in the council's VPR database
 //   lastValidated                                last confirmed still eligible + consenting
 //   listed, listedAt, removedAt, removedReason   register membership (set by the CMS)
+//   alert                 { at, by, why }            raised when added; cleared when a manager or supervisor marks it seen
+//   ackAt, ackBy                                 who marked the addition as seen, and when
 //   history               [{ at, by, action, detail }]
 // No dependencies: runs the same in the browser and in Node (tests).
 (function (root) {
