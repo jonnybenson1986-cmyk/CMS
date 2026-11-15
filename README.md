@@ -41,6 +41,10 @@ site/                       ← the website (all Netlify serves)
   intake/                   Intake form field list + logo, shared with the CMS
   data-health.js            Data Health schema + scoring (what a client file must hold)
   vpr.js                    Vulnerable Persons Register rules (four criteria, consent, revalidation)
+  consent.html              The client's own consent form, opened from a link (/c#…)
+  consent/consent-text.js   The consent wording (informed consent, choices, rights) — one place
+  forms/wg-forms.css        The look of the client forms (the Emergency Contacts sheet's style)
+  forms/signing.js          The signature pad (finger, stylus, mouse) and the "who is signing" block
   auth-redirect.html        Where Microsoft returns after Outlook sign-in
   handbook/                 SEWB Participant Handbook (PDF)
   vendor/firebase/          Self-hosted Firebase SDK (compat build)
@@ -229,8 +233,50 @@ phone or computer: client file → **Intake** tab → **📲 Intake form by link
   date of birth is on file the form's id is SHA-256(link + ":" + DOB), so the
   link alone doesn't open it. A signed-out visitor can only open a form whose id
   they know — never list — only before it expires, can change only the intake
-  answers, and can send it once. Tested against the Firestore emulator
-  (`tests/rules`).
+  answers, and can send it once, **signed** (see below). Tested against the
+  Firestore emulator (`tests/rules`).
+* **Signing.** The last step is *Sign your form*: a signature box that takes a
+  finger, a stylus or a mouse (`site/forms/signing.js`), or — for anyone who
+  can't draw one — a typed name. They can also sign for someone else as a
+  parent, guardian or authorised representative, and name a support person or
+  interpreter. The signature is a small PNG (a few KB) sent with the form; the
+  rules refuse a submit without a well-formed one. The worker sees it in the
+  review, it is kept on the file (`intakeSignature`) and printed with the intake.
+  **📱 Open on this device** opens the link here, to hand a phone or tablet to the client.
+
+## ✍️ Consent form by link (informed consent)
+
+client file → **Intake** tab → *Consent* card → **✍️ Send / sign a consent form**,
+or the **✍️ Consent forms** section of the file.
+
+* The client's page (`site/consent.html`, served at `/c`) first explains what
+  **informed consent** means (told · understand · your choice · you can change
+  your mind, and who can sign for someone under 18 or who can't decide), then
+  asks them to tap Yes or No on six choices — one is needed to give support, five
+  are their own — when information can be shared without consent, their rights,
+  four things to confirm, and a place to sign. Nothing is pre-ticked. A
+  **🔊 Read this form to me** button reads the wording aloud on the phone.
+* **The wording is a plain-English draft** in `site/consent/consent-text.js`
+  (`WG_CONSENT`). Worn Gundidj's management must approve it before it goes to
+  clients. Change `VERSION` when it changes — every signed form records the
+  version it was signed under.
+* Send it by copy, text from the worker's phone, **email from the worker's own
+  Outlook** (the Email page; no time is logged for it), or **📱 Open on this
+  device** to hand a phone or tablet to the client. The link works 3, 7 or 14 days
+  and asks for the client's date of birth (when one is on file).
+* The client gets their own copy to save or print when they send it.
+* When it comes back: a message, a card on the Dashboard, a line on the Intake.
+  **Check and file it** shows who signed (and warns if the name isn't the
+  client's), the signature and each choice. Filing puts a **signed record on the
+  profile** (`consentRecords`: printable, counts as the signed consent document
+  for Data Health) and fills in the intake's consent ticks from their choices.
+  A later form replaces the ticks; earlier signed forms stay on file.
+* Rules: `consentLinks` / `consentForms` in `firestore.rules` (and `.strict`),
+  same pattern as the intake. The client can send only the answer keys in
+  `consent-text.js`, once, signed. **Publish the new rules before sending links**
+  (the deploy workflow does it when this is merged to `main`).
+* Printed intake and signed consent use the look of the *Emergency Contacts &
+  Supports* sheet (`site/forms/wg-forms.css` for the client pages).
 
 ## Publishing and texts
 

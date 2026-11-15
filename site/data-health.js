@@ -171,7 +171,8 @@
     const hit = DOC_TYPES.find(t => t.match && t.match.test(String(file.name || '')));
     return hit ? hit.key : '';
   }
-  function hasDoc(c, type) { return (c.attachments || []).some(f => docTypeOf(f) === type); }
+  // Files attached to the client, and forms signed on screen (c.consentRecords, each with docType 'consent').
+  function hasDoc(c, type) { return (c.attachments || []).some(f => docTypeOf(f) === type) || (c.consentRecords || []).some(r => r && r.docType === type); }
 
   function applies(when, c, h) {
     if (when == null) return true;

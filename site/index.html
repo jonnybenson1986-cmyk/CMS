@@ -631,6 +631,7 @@
 <script src="intake/intake-fields.js"></script>
 <script src="data-health.js"></script>
 <script src="vpr.js"></script>
+<script src="consent/consent-text.js"></script>
 <script>
 // ===== DATA LAYER =====
 const DB = {
@@ -894,6 +895,7 @@ const FSYNC = (() => {
     }));
     // 📲 Intake forms sent by link: staff see all of them (the rules keep signed-out visitors to one form by id).
     _listeners.push(col('intakeForms').onSnapshot(snap=>{ intakeForms = snap.docs.map(d=>{ const x=d.data(); const e=x.expiresAt; return Object.assign({id:d.id}, x, { expiresAt: e && e.toDate ? e.toDate().toISOString() : e }); }); DB.save('intakeForms', intakeForms); try{ _intakeFormsRefresh(); }catch(_){} }, e=>console.warn('intakeForms listener:', e.message)));
+    _listeners.push(col('consentForms').onSnapshot(snap=>{ consentForms = snap.docs.map(d=>{ const x=d.data(); const e=x.expiresAt; return Object.assign({id:d.id}, x, { expiresAt: e && e.toDate ? e.toDate().toISOString() : e }); }); DB.save('consentForms', consentForms); try{ _consentFormsRefresh(); }catch(_){} }, e=>console.warn('consentForms listener:', e.message)));
     _listeners.push(col('smsUsage').doc(smsBudgetMonth()).onSnapshot(doc=>{ smsUsageMonth = doc.exists ? doc.data() : null; DB.save('smsUsageMonth', smsUsageMonth); try{ _smsRefresh(); }catch(_){} }, e=>console.warn('smsUsage listener:', e.message)));
     _listeners.push(col('smsOutbox').onSnapshot(snap=>{ smsOutbox=snap.docs.map(d=>Object.assign({id:d.id},d.data())); DB.save('smsOutbox',smsOutbox); try{ _smsRefresh(); }catch(_){} }, e=>{ window._smsListenErr=e.code||e.message; console.warn('smsOutbox listener:',e.message); }));
     // Outlook set-up: appConfig/outlook, mirrored to staff/outlookSetup (readable under the rules
@@ -1256,6 +1258,20 @@ const FSYNC = (() => {
     await col('intakeForms').doc(formId).update(patch);
     if (linkId && patch.status) await col('intakeLinks').doc(linkId).update({ status:patch.status });
   }
+  // ✍️ Consent form by link — same shape as the intake form above (consentLinks + consentForms).
+  async function createConsentForm(formId, form, link) {
+    if(!db) throw new Error('Not connected to the cloud');
+    const b = db.batch();
+    b.set(col('consentLinks').doc(form.linkId), Object.assign({}, link, { expiresAt:_ts(link.expiresAt) }));
+    b.set(col('consentForms').doc(formId), Object.assign({}, form, { expiresAt:_ts(form.expiresAt) }));
+    await b.commit();
+  }
+  async function updateConsentForm(formId, patch, linkId) {
+    if(!db) throw new Error('Not connected to the cloud');
+    await col('consentForms').doc(formId).update(patch);
+    if (linkId && patch.status) await col('consentLinks').doc(linkId).update({ status:patch.status });
+  }
+  async function cancelConsentForm(formId, linkId) { await updateConsentForm(formId, { status:'cancelled', cancelledAt:new Date().toISOString() }, linkId); }
   async function cancelIntakeForm(formId, linkId) { await updateIntakeForm(formId, { status:'cancelled', cancelledAt:new Date().toISOString() }, linkId); }
   async function setSmsConfig(cfg) { if(!db) throw new Error('Not connected to the cloud'); await col('smsConfig').doc('settings').set(cfg); }
   // Returns where it was saved. The Outlook set-up also goes to staff/outlookSetup (see the listener).
@@ -1272,7 +1288,7 @@ const FSYNC = (() => {
   return { init, isReady, pushAll, pushClients, pushNotes, pushReferrals, pushWorkers, pushTasks, pushAudit, pushBrokerage, deleteDoc, getCfg, saveCfg, showSetupModal, clearConfig,
     storageReady, uploadFile, deleteStorageFile, getStorageURL, pushPolicies,
     pushFpho, pushWalkins, pushCalEvents, pushResources, resyncAll, pushStaff, fetchStaff, staffSyncStatus, queueSms, setSmsConfig, setAppConfig, submitIdea, updateIdea,
-    createIntakeForm, updateIntakeForm, cancelIntakeForm };
+    createIntakeForm, updateIntakeForm, cancelIntakeForm, createConsentForm, updateConsentForm, cancelConsentForm };
 })();
 
 let clients = DB.load('clients', []);
@@ -1298,7 +1314,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v111';
+const APP_VERSION = 'v112';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -1985,6 +2001,7 @@ function renderDashboard() {
   ${vprAlertsCardHTML()}
   ${alertHTML}
   ${returnedIntakeFormsCardHTML()}
+  ${returnedConsentFormsCardHTML()}
   ${renderCompletenessDashboard()}
   <div class="grid-4" style="margin-bottom:20px">
     <div class="stat-card"><div class="label">Active Clients</div><div class="value" style="color:var(--primary-light)">${active}</div><div class="sub">${clients.length} total</div></div>
@@ -2148,7 +2165,7 @@ function profileSectionGroups(c, counts) {
   const hr = homeRiskStatus(c).ok ? '' : ' ⚠️';
   return [
     ['Client file', [{ v:'overview', l:'🏠 Overview' }, { v:'summary', l:'📄 Summary' }, { v:'demographics', l:'👤 Personal details' }, { v:'keyworkers', l:'👷 Key workers' }]],
-    ['Case work', [{ v:'intake', l:'📋 Intake form' }, { v:'notes', l:`📝 Case notes (${counts.notes})` }, { v:'goals', l:`🎯 Goals & progress (${counts.goals})` }, { v:'time', l:`⏱️ Time (${counts.time})` }, { v:'files', l:`📎 Files (${counts.files})` }]],
+    ['Case work', [{ v:'intake', l:'📋 Intake form' }, { v:'consents', l:`✍️ Consent forms (${consentRecordsOf(c).length})` }, { v:'notes', l:`📝 Case notes (${counts.notes})` }, { v:'goals', l:`🎯 Goals & progress (${counts.goals})` }, { v:'time', l:`⏱️ Time (${counts.time})` }, { v:'files', l:`📎 Files (${counts.files})` }]],
     ['Safety & feedback', [{ v:'safety', l:'🛡️ Safety plan' }, { v:'homerisk', l:`🏠 Home risk assessment${hr}` }, { v:'vpr', l:`🚨 Emergency plan & VPR${vprOnRegister(c) ? ' — on register' : ''}` }, { v:'feedback', l:'⭐ Feedback' }]],
     enrolled.length ? ['Programs — enrolled', enrolled] : null,
     other.length ? ['Programs — not enrolled', other] : null,
@@ -2320,6 +2337,7 @@ function renderProfileTab(tab, c, clientNotes, clientTime) {
 }
 function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
   if(tab === 'vpr') return renderVprTab(c);
+  if(tab === 'consents') return renderConsentsTab(c);
   if(tab === 'overview') {
     const totalMins = clientTime.reduce((a,t)=>a+(t.minutes||0),0);
     const recent = clientNotes.slice(0,3);
@@ -2747,6 +2765,7 @@ function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
     ${(() => { const f = currentIntakeForm(c.id), st = intakeFormState(f); return st === 'submitted'
       ? `<div class="alert alert-warning" style="font-size:13px;margin:-6px 0 14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span style="flex:1">📲 ${sanitize(smsFirstName(c))} filled in their intake form ${fmtdt(f.submittedAt)}. Review their answers before adding them here.</span><button class="btn btn-sm btn-primary" onclick="openIntakeReviewModal('${sanitize(f.id)}')">Review answers →</button></div>`
       : `<div class="intake-link-status" data-client="${sanitize(c.id)}" style="font-size:12px;margin:-8px 0 14px;color:var(--muted)">${sanitize(intakeLinkStatusText(c))}</div>`; })()}
+    ${c.intakeSignature ? `<div class="intake-signed" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;font-size:12px;margin:-6px 0 14px;color:var(--muted)"><span>✍️ Intake signed by ${_sigWho(c.intakeSignature)} on ${sanitize(fmtdt(c.intakeSignature.at))}${c.intakeSignature.method === 'typed' ? ' (typed name)' : ' on their phone'}</span><span style="width:140px">${_sigImg(c.intakeSignature, 140)}</span></div>` : ''}
 
     <!-- CLIENT DETAILS -->
     <div class="card">
@@ -3016,6 +3035,11 @@ function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
     <div class="card">
       <div class="card-header"><div class="card-title">✍️ Consent — Worn Gundidj Services</div></div>
       <div class="alert alert-info" style="margin-bottom:16px">The following consents must be discussed with the client. Tick each item once explained and agreed.</div>
+      <div class="cf-intake-line" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--bg);border-radius:8px;padding:10px 12px;margin:-4px 0 14px;font-size:13px">
+        <span style="flex:1;min-width:220px">✍️ <strong>Online consent form</strong> — the client reads what informed consent means, chooses and signs on their phone.<br><span class="consent-link-status" data-client="${sanitize(c.id)}" style="font-size:12px;color:var(--muted)">${sanitize(consentLinkStatusText(c))}</span></span>
+        <button type="button" class="btn btn-sm btn-primary" id="cf-intake-btn" onclick="openConsentLinkModal('${sanitize(c.id)}')">✍️ Send / sign a consent form</button>
+        ${consentRecordsOf(c).length ? `<button type="button" class="btn btn-sm btn-outline" onclick="gotoProfileSection('consents')">View signed (${consentRecordsOf(c).length})</button>` : ''}
+      </div>
       <div style="display:grid;gap:10px">
         ${consentCheck(c, 'ifConsentInfo', 'Information shared with other WG programs (with consent)')}
         ${consentCheck(c, 'ifConsentAudit', 'Information may be audited for quality and funding assessments')}
@@ -4317,58 +4341,34 @@ function handbookSendoutBodyHTML() {
 
 function printIntake(id) {
   const c = clients.find(cl=>cl.id===id); if(!c) return;
-  const win = window.open('','_blank');
-  if(!win){ showToast('⚠️ Pop-up blocked — allow pop-ups for this site to open documents'); return; }
-  const brandIntake = printBrandHeader('#1a3a2a');
-  win.document.write(`<html><head><title>WG Intake — ${sanitize(c.fullName)}</title>
-  <style>body{font-family:Arial,sans-serif;font-size:12px;padding:20px;color:#111;-webkit-print-color-adjust:exact;print-color-adjust:exact}h2{font-size:16px;margin:16px 0 6px}h3{font-size:13px;margin:12px 0 4px;color:#2d6a4f}table{width:100%;border-collapse:collapse}td{padding:5px 8px;border:1px solid #ddd;vertical-align:top}td:first-child{font-weight:bold;width:35%;background:#f9f9f9}.chk{display:inline-block;width:12px;height:12px;border:1px solid #666;margin-right:4px}${brandIntake.css}</style>
-  </head><body>
-  ${brandIntake.html}
-  <h1 style="font-size:20px;color:#1a3a2a">Worn Gundidj — Client Intake Form</h1>
-  <p style="color:#666">Printed: ${new Date().toLocaleDateString('en-AU')} &bull; Client: ${sanitize(c.fullName)}</p>
-  <hr>
-  <h2>Client Details</h2>
+  const row = (k, v) => `<tr><td class="k">${k}</td><td>${sanitize(v||'')}</td></tr>`;
+  const sig = c.intakeSignature, rec = consentRecordsOf(c)[0];
+  audit('Printed client intake form', c.fullName, id);
+  const body = `
+  <table><tr><td class="k">Client</td><td>${sanitize(c.fullName)}</td></tr><tr><td class="k">Printed</td><td>${new Date().toLocaleDateString('en-AU')}</td></tr></table>
+  <h2 class="bar">Client details</h2>
   <table>
-    <tr><td>Full Name</td><td>${sanitize(c.fullName||'')}</td></tr>
-    <tr><td>Preferred Name</td><td>${sanitize(c.preferredName||'')}</td></tr>
-    <tr><td>Date of Birth</td><td>${sanitize(c.dob||'')}</td></tr>
-    <tr><td>Address</td><td>${sanitize(c.address||'')}</td></tr>
-    <tr><td>Phone</td><td>${sanitize(c.phone||'')} (Safe to contact: ${sanitize(c.ifSafeContact||'—')})</td></tr>
-    <tr><td>Email</td><td>${sanitize(c.email||'')}</td></tr>
-    <tr><td>Gender</td><td>${sanitize(c.gender||'')}</td></tr>
-    <tr><td>LGBTIQA+SB</td><td>${sanitize(c.ifLgbtiqa||'')}</td></tr>
-    <tr><td>Mob / Language Group</td><td>${sanitize(c.mob||'')}</td></tr>
-    <tr><td>Languages</td><td>${sanitize(c.languages||'')}</td></tr>
-    <tr><td>Interpreter Required</td><td>${sanitize(c.interpreter||'')}</td></tr>
-    <tr><td>Marital Status</td><td>${sanitize(c.ifMarital||'')}</td></tr>
-    <tr><td>Emergency Contact 1</td><td>${sanitize(c.ifEc1name||'')} — ${sanitize(c.ifEc1rel||'')} — ${sanitize(c.ifEc1phone||'')}</td></tr>
-    <tr><td>Emergency Contact 2</td><td>${sanitize(c.ifEc2name||'')} — ${sanitize(c.ifEc2rel||'')} — ${sanitize(c.ifEc2phone||'')}</td></tr>
+    ${row('Full Name', c.fullName)}${row('Preferred Name', c.preferredName)}${row('Date of Birth', c.dob)}${row('Address', c.address)}
+    ${row('Phone', `${c.phone||''} (Safe to contact: ${c.ifSafeContact||'—'})`)}${row('Email', c.email)}${row('Gender', c.gender)}${row('LGBTIQA+SB', c.ifLgbtiqa)}
+    ${row('Mob / Language Group', c.mob)}${row('Languages', c.languages)}${row('Interpreter Required', c.interpreter)}${row('Marital Status', c.ifMarital)}
+    ${row('Emergency Contact 1', `${c.ifEc1name||''} — ${c.ifEc1rel||''} — ${c.ifEc1phone||''}`)}${row('Emergency Contact 2', `${c.ifEc2name||''} — ${c.ifEc2rel||''} — ${c.ifEc2phone||''}`)}
   </table>
-  <h2>Goals</h2>
+  <h2 class="bar teal">Goals</h2>
+  <table>${row('Short-term', c.ifGoalShort)}${row('Medium-term', c.ifGoalMedium)}${row('Longer-term', c.ifGoalLong)}</table>
+  <h2 class="bar ochre">Emergency planning</h2>
   <table>
-    <tr><td>Short-term</td><td>${sanitize(c.ifGoalShort||'')}</td></tr>
-    <tr><td>Medium-term</td><td>${sanitize(c.ifGoalMedium||'')}</td></tr>
-    <tr><td>Longer-term</td><td>${sanitize(c.ifGoalLong||'')}</td></tr>
+    ${row('Has a personal emergency plan', c.ifEmergencyPlan)}${row('Would need help in an emergency', c.ifEmergencyAssist)}
+    ${row('Family, friend or neighbour nearby who could help', c.ifEmergencyHelp)}${row('Vulnerable Persons Register', vprIntakeStatusText(c))}
   </table>
-  <h2>Emergency planning</h2>
+  <h2 class="bar">Consent</h2>
   <table>
-    <tr><td>Has a personal emergency plan</td><td>${sanitize(c.ifEmergencyPlan||'')}</td></tr>
-    <tr><td>Would need help in an emergency</td><td>${sanitize(c.ifEmergencyAssist||'')}</td></tr>
-    <tr><td>Family, friend or neighbour nearby who could help</td><td>${sanitize(c.ifEmergencyHelp||'')}</td></tr>
-    <tr><td>Vulnerable Persons Register</td><td>${sanitize(vprIntakeStatusText(c))}</td></tr>
+    ${row('Signed', c.ifConsentSigned ? 'Yes — ' + (c.ifClientSig||'') : 'Not yet')}${row('Vulnerable Persons Register consent', vprConsentText(c))}
+    ${row('Date', c.ifConsentDate)}${row('Intake Worker', c.ifIntakeWorker)}${row('Privacy explained', c.ifConsentPrivacy ? 'Yes' : 'No')}${row('Received Info Pack', c.ifConsentPack ? 'Yes' : 'No')}
+    ${rec ? row('Consent form signed online', `${rec.signedName} — ${fmtdt(rec.signedAt)} (wording ${rec.version||''})`) : ''}
   </table>
-  <h2>Consent</h2>
-  <table>
-    <tr><td>Signed</td><td>${c.ifConsentSigned?'Yes — '+sanitize(c.ifClientSig||''):'Not yet'}</td></tr>
-    <tr><td>Vulnerable Persons Register consent</td><td>${sanitize(vprConsentText(c))}</td></tr>
-    <tr><td>Date</td><td>${sanitize(c.ifConsentDate||'')}</td></tr>
-    <tr><td>Intake Worker</td><td>${sanitize(c.ifIntakeWorker||'')}</td></tr>
-    <tr><td>Privacy explained</td><td>${c.ifConsentPrivacy?'Yes':'No'}</td></tr>
-    <tr><td>Received Info Pack</td><td>${c.ifConsentPack?'Yes':'No'}</td></tr>
-  </table>
-  <p style="margin-top:30px;color:#999;font-size:10px">Worn Gundidj Aboriginal Co-Operative — 1-3 Rooneys Rd, Warrnambool — 03 5561 5315</p>
-  </body></html>`);
-  win.print();
+  ${sig ? `<h2 class="bar teal">Client signature</h2><div class="box sig">${_sigImg(sig, 280)}<p style="margin:8px 0 0"><strong>${sanitize(sig.name)}</strong>${sig.role === 'representative' ? ` — signing for someone else, as their ${sanitize(sig.relationship||'authorised representative')}` : ''}</p><p style="margin:2px 0 0">Signed ${sanitize(fmtdt(sig.at))} · ${sig.method === 'typed' ? 'typed name' : 'drawn on screen'}</p></div>` : ''}
+  <p class="note">Confidential client information.</p>`;
+  _openPrintWindow(wgPrintDoc('WG Intake — ' + c.fullName, 'Client Intake Form', 'Social & Emotional Wellbeing Team · Worn Gundidj Aboriginal Co-operative', body, { help: true }));
 }
 
 // ===== KEY WORKERS MODAL =====
@@ -13195,8 +13195,9 @@ function renderEmailPage() {
 }
 
 // ---- writing and sending ----
+let _mailSentHook = null;       // something to do once THIS compose window's email has been sent (e.g. note that a link was emailed)
 function mailCompose(opts) {
-  opts = opts || {};
+  opts = opts || {}; _mailSentHook = opts.onSent || null;
   const cl = visibleClients(clients).filter(c => (c.status || 'active') !== 'closed').sort((a, b) => String(a.fullName || '').localeCompare(String(b.fullName || '')));
   showModal('✉️ New email', `
     <div id="mail-compose" data-client="${sanitize(opts.clientId || '')}">
@@ -13208,7 +13209,7 @@ ${sanitize(opts.body || '')}</textarea></div>
       <div class="form-group"><label for="mc-client">About a client <span style="font-weight:400;text-transform:none">(optional)</span></label>
         <select id="mc-client" onchange="mailSafeNote()">${selOpts(cl.map(c => ({ v: c.id, l: c.fullName })), opts.clientId || '', 'Not about a client')}</select>
         <div id="mc-safe" style="margin-top:8px"></div>
-        <label style="display:flex;gap:8px;align-items:center;font-size:13px;font-weight:400;text-transform:none;letter-spacing:0;margin-top:8px"><input type="checkbox" id="mc-record" ${opts.clientId ? 'checked' : ''} style="width:auto" onchange="mailSafeNote()"> Record this email on the client's file and log the time</label>
+        <label style="display:flex;gap:8px;align-items:center;font-size:13px;font-weight:400;text-transform:none;letter-spacing:0;margin-top:8px"><input type="checkbox" id="mc-record" ${opts.clientId && opts.record !== false ? 'checked' : ''} style="width:auto" onchange="mailSafeNote()"> Record this email on the client's file and log the time</label>
         <div id="mc-time"></div></div>
       <p style="font-size:12px;color:var(--muted)">Sent from ${sanitize(outlookAccount()?.username || 'your Outlook')} and saved in your Sent Items. Attachments can't be added here — use Outlook for those.</p>
       <p id="mc-error" style="color:#dc2626;font-size:13px;min-height:18px"></p>
@@ -13266,6 +13267,7 @@ async function mailSend() {
   let rec = null;
   if (record) rec = mailRecordOnFile(client, { subject, minutes: recMins, program: recProgram, text: `Email sent to ${to.ok.concat(cc.ok).join(', ')}\nSubject: ${subject}\n\n${body}` });
   closeModal();
+  { const h = _mailSentHook; _mailSentHook = null; if (h) { try { h(); } catch (e) { console.warn('after-send hook:', e); } } }
   showToast(rec ? `✓ Email sent. ${_mailRecordedToast(client, rec).slice(2)}` : '✓ Email sent');
   if (currentPage === 'email' && _mail.folder === 'sentitems') setTimeout(() => mailLoad(true), 1500);
   return true;
@@ -14156,6 +14158,7 @@ function _ifLiveHTML(c, f) {
     <div class="form-group"><label for="if-url">Link</label><div style="display:flex;gap:6px"><input id="if-url" readonly value="${sanitize(url)}" style="font-family:monospace;font-size:12px" onfocus="this.select()"><button class="btn btn-sm btn-outline" onclick="sendIntakeLink('${sanitize(f.id)}','copy')">📋 Copy</button></div></div>
     ${!safe && mob ? `<div class="alert alert-warning" style="font-size:12px">"Safe to leave calls/texts?" is <strong>${sanitize(c.ifSafeContact || 'not answered')}</strong>. Only text the link if they’ve agreed to texts.</div>` : ''}
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
+      <button class="btn btn-outline" id="if-open" onclick="sendIntakeLink('${sanitize(f.id)}','open')" title="Opens the form here. Hand the phone or tablet to ${sanitize(smsFirstName(c))} to fill in and sign.">📱 Open on this device</button>
       ${smsAutoOn() ? `<button class="btn btn-primary" id="if-auto" ${safe && mob ? '' : 'disabled'} onclick="sendIntakeLink('${sanitize(f.id)}','auto')">📤 Text it automatically</button>` : ''}
       <button class="btn ${smsAutoOn() ? 'btn-outline' : 'btn-primary'}" id="if-sms" ${mob ? '' : 'disabled'} onclick="sendIntakeLink('${sanitize(f.id)}','sms')">💬 Text from my phone</button>
       ${c.email ? `<button class="btn btn-outline" onclick="sendIntakeLink('${sanitize(f.id)}','email')">✉️ Email it</button>` : ''}
@@ -14196,6 +14199,10 @@ async function sendIntakeLink(formId, channel) {
   if (channel === 'copy') {
     try { await navigator.clipboard.writeText(url); showToast('Link copied'); } catch (_) { document.getElementById('if-url')?.select(); showToast('Select the link and copy it'); }
     return _ifRecordSend(f, c, 'link copied');
+  }
+  if (channel === 'open') {
+    window.open(url, '_blank', 'noopener');
+    return _ifRecordSend(f, c, 'opened on this device for the client to fill in and sign');
   }
   if (channel === 'auto') {
     if (!smsAutoOn()) { showToast('Automatic texts are off'); return; }
@@ -14253,6 +14260,11 @@ function _ifRows(c, form) {
     return { f, cur, ans, changed: norm(cur) !== norm(ans), cleared: norm(ans) === '' && norm(cur) !== '' };
   });
 }
+// The client's signature on their intake form (signed on their phone), for the worker to see.
+function _ifSignatureHTML(form) {
+  const S = form && form.signature; if (!S || !S.name) return '';
+  return `<div id="if-signature" style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin:0 0 12px;background:#fff"><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Signed by the client${S.method === 'typed' ? ' (typed name)' : ' on screen'}</div>${_sigImg(S, 240)}<div style="font-size:13px;margin-top:6px">${_sigWho(S)}${S.at ? ` <span style="color:var(--muted)">· ${sanitize(fmtdt(S.at))}</span>` : ''}${S.supportPerson ? `<br><span style="color:var(--muted)">Support person or interpreter: ${sanitize(S.supportPerson)}</span>` : ''}</div></div>`;
+}
 function openIntakeReviewModal(formId) {
   const form = intakeForms.find(x => x.id === formId); if (!form) return;
   const c = clients.find(x => x.id === form.clientId); if (!c) return;
@@ -14260,6 +14272,7 @@ function openIntakeReviewModal(formId) {
   const byStep = WG_INTAKE.STEPS.map(S => ({ S, rows: changed.filter(r => S.fields.includes(r.f)) })).filter(x => x.rows.length);
   const done = form.status === 'applied';
   const html = `<p style="font-size:13px;margin:0 0 10px"><strong>${sanitize(c.fullName)}</strong> filled in their intake form${form.submittedAt ? ' on ' + fmtdt(form.submittedAt) : ''}${form.answers && form.answers.declaration ? ' and confirmed it is true to the best of their knowledge' : ''}. ${done ? `<span class="idea-chip" style="background:#d1fae5;color:#065f46">Added to the intake ${fmt(form.appliedAt)}${form.appliedBy ? ' by ' + sanitize(form.appliedBy) : ''}</span>` : 'Tick the answers to add to the intake, then go through them with the client.'}</p>
+    ${_ifSignatureHTML(form)}
     ${changed.length ? byStep.map(({ S, rows }) => `<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin:12px 0 6px">${sanitize(S.title)}</div>
       ${rows.map(r => `<label class="if-rev-row" style="display:grid;grid-template-columns:24px 1fr;gap:8px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;cursor:pointer;background:#fff">
         <input type="checkbox" class="if-use" data-key="${sanitize(r.f.key)}" ${done ? 'disabled' : ''} ${!r.cleared ? 'checked' : ''} style="margin-top:3px">
@@ -14284,6 +14297,13 @@ async function applyIntakeForm(formId) {
   });
   const at = now(), keys = rows.map(r => r.f.key);
   c.intakeByClient = { formId, submittedAt: form.submittedAt || '', appliedAt: at, appliedBy: currentUser?.name || '', answers: keys.length, declaration: !!(form.answers && form.answers.declaration) };
+  if (form.signature && form.signature.name) {       // the client signed their intake on their phone: keep it with the file
+    const S = form.signature;
+    c.intakeSignature = { formId, name: S.name, role: S.role || 'self', method: S.method || 'typed', at: S.at || form.submittedAt || at };
+    if (S.role === 'representative') c.intakeSignature.relationship = S.relationship || '';
+    if (S.supportPerson) c.intakeSignature.supportPerson = S.supportPerson;
+    if (S.method === 'drawn' && _PNG_OK.test(S.image || '')) c.intakeSignature.image = S.image;
+  }
   try { if (typeof applySewbUmbrella === 'function') applySewbUmbrella(c); } catch (_) {}
   saveAll();
   try { await FSYNC.updateIntakeForm(formId, { status: 'applied', appliedAt: at, appliedBy: currentUser?.name || '', appliedKeys: keys }, form.linkId); }
@@ -14315,6 +14335,342 @@ function _intakeFormsRefresh(prev) {
   document.querySelectorAll('.intake-link-status').forEach(el => { const c = clients.find(x => x.id === el.dataset.client); if (c) el.textContent = intakeLinkStatusText(c); });
   if (currentPage === 'dashboard' && !document.querySelector('#modal-container .modal-overlay')) {
     const card = document.getElementById('if-returned-card'), html = returnedIntakeFormsCardHTML();
+    if (!!card !== !!html || (card && card.outerHTML.length !== html.length)) showPage('dashboard');
+  }
+}
+
+// ============================================================
+// ✍️ CONSENT FORM BY LINK — informed consent, signed on the client's phone
+// ============================================================
+// The same idea as the intake form by link above. A worker makes a consent form
+// for ONE client and sends them a link — copy, text from the worker's phone,
+// email (from the worker's Outlook, see the Email page), or "open on this
+// device" to hand a phone or tablet to the client. The client (consent.html)
+// reads what informed consent means, makes each choice, and signs with a finger.
+// The signed form comes back here; the worker checks it and files it:
+//   • a signed record goes on the client's profile (c.consentRecords) — shown in
+//     the "Consent forms" section, printable, and it counts as the signed
+//     consent document for Data Health;
+//   • the consent tick-boxes on the intake are filled in from the client's choices.
+// The wording is in consent/consent-text.js (WG_CONSENT); see firestore.rules for what
+// a signed-out client may write. Nothing is filed until a worker presses the button.
+let consentForms = DB.load('consentForms', []) || [];
+let _cfSeenSubmitted = null, _cfOpenClient = '';
+const CF_DAYS = [3, 7, 14];
+const CF_STATE = {
+  open:      ['Link sent — not signed yet',               '#1e40af', '#dbeafe'],
+  submitted: ['Signed by the client — check and file it', '#991b1b', '#fee2e2'],
+  applied:   ['Filed on the profile',                     '#065f46', '#d1fae5'],
+  expired:   ['Link expired',                             '#4b5563', '#f3f4f6'],
+  cancelled: ['Link cancelled',                           '#4b5563', '#f3f4f6'],
+};
+const _PNG_OK = /^data:image\/png;base64,[A-Za-z0-9+/=]+$/;
+function consentLinkUrl(token) { return location.origin + '/c#' + token; }
+function consentFormState(f) {
+  if (!f) return 'none';
+  if (['applied', 'cancelled', 'submitted'].includes(f.status)) return f.status;
+  return _ifExpMs(f) <= Date.now() ? 'expired' : 'open';
+}
+function consentFormsFor(clientId) { return (consentForms || []).filter(f => f && f.clientId === clientId).sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''))); }
+function currentConsentForm(clientId) { return consentFormsFor(clientId)[0] || null; }
+function returnedConsentForms() { return (consentForms || []).filter(f => f && f.status === 'submitted' && (clients || []).some(c => c.id === f.clientId && canViewClient(c))); }
+function consentRecordsOf(c) { return ((c && c.consentRecords) || []).slice().sort((a, b) => String(b.signedAt || '').localeCompare(String(a.signedAt || ''))); }
+function _cfChip(st) { const s = CF_STATE[st]; return s ? `<span class="idea-chip" style="color:${s[1]};background:${s[2]}">${s[0]}</span>` : ''; }
+// The signature as an image (drawn) or in a script font (typed). Only a real PNG data URL is ever used as an image source.
+function _sigImg(sig, w) {
+  w = w || 260;
+  if (sig && sig.method === 'drawn' && _PNG_OK.test(sig.image || '')) return `<img src="${sig.image}" alt="Signature of ${sanitize(sig.name)}" style="max-width:${w}px;width:100%;height:auto;display:block;border-bottom:1px solid #111">`;
+  return `<div style="font:italic 26px/1.2 'Brush Script MT','Segoe Script',cursive;border-bottom:1px solid #111;padding:4px 2px;max-width:${w}px;word-break:break-word">${sanitize(sig && sig.name)}</div>`;
+}
+function _sigWho(sig) {
+  return `${sanitize(sig.name)}${sig.role === 'representative' ? ` <span style="color:var(--muted)">— signing for someone else, as their ${sanitize(sig.relationship || 'authorised representative')}</span>` : ''}`;
+}
+function consentLinkStatusText(c) {
+  const f = currentConsentForm(c.id), st = consentFormState(f), recs = consentRecordsOf(c);
+  if (st === 'none' || st === 'applied') return recs.length ? `✍️ Consent form signed online ${fmt(recs[0].signedAt)} by ${recs[0].signedName}${recs.length > 1 ? ` (${recs.length} on file)` : ''}` : '';
+  const when = st === 'submitted' && f.submittedAt ? ` (${fmtdt(f.submittedAt)})` : '';
+  return `✍️ Consent form by link: ${CF_STATE[st][0]}${when}${st === 'open' ? ' · link works until ' + fmt(new Date(_ifExpMs(f)).toISOString()) : ''}`;
+}
+function consentLinkMessage(c, f) {
+  const days = Math.max(1, Math.ceil((_ifExpMs(f) - Date.now()) / 864e5)), url = consentLinkUrl(f.linkId);
+  const long = toGsmText(`Hi ${smsFirstName(c)}, please read and sign your Worn Gundidj consent form: ${url} (works ${days} days). Questions? ${ORG_PHONE}`);
+  return long.length <= 160 ? long : toGsmText(`Hi ${smsFirstName(c, 10)}, your Worn Gundidj consent form: ${url} (works ${days} days). Questions? ${ORG_PHONE}`);
+}
+function consentEmailBody(c, f) {
+  const until = new Date(_ifExpMs(f)).toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long' });
+  return `Hi ${smsFirstName(c)},\n\nWorn Gundidj would like you to read and sign a consent form. It explains what informed consent means, and lets you choose what you agree to. You can do it on your phone. It takes about 5 minutes.\n\nOpen your form here:\n${consentLinkUrl(f.linkId)}\n\nTo keep your information private you will be asked for your date of birth. The link works until ${until}.\n\nIf you would rather go through it with your worker, or you have any questions, call us on ${ORG_PHONE}.\n\n${currentUser?.name || 'Worn Gundidj'}\nWorn Gundidj Aboriginal Co-operative`;
+}
+
+// ---- the window ----
+function openConsentLinkModal(clientId) {
+  const c = clients.find(x => x.id === clientId); if (!c) return;
+  const f = currentConsentForm(clientId), st = consentFormState(f);
+  if (st === 'submitted') return openConsentReviewModal(f.id);
+  _cfOpenClient = clientId;
+  const place = _clientFilePlace(clientId);
+  showModal('✍️ Consent form by link', `<div id="cf-body">${st === 'open' ? _cfLiveHTML(c, f) : _cfCreateHTML(c, st)}</div>`, null, '660px', true);
+  _returnToFileOnClose(place);
+}
+function _cfRefreshModal(clientId) {
+  const el = document.getElementById('cf-body'); if (!el) return;
+  const c = clients.find(x => x.id === clientId), f = currentConsentForm(clientId), st = consentFormState(f); if (!c) return;
+  if (st === 'submitted') { el.innerHTML = `<div class="alert alert-success" style="font-size:13px">${sanitize(smsFirstName(c))} has signed their consent form.</div><button class="btn btn-primary" onclick="openConsentReviewModal('${sanitize(f.id)}')">Check it and file it →</button>`; return; }
+  el.innerHTML = st === 'open' ? _cfLiveHTML(c, f) : _cfCreateHTML(c, st);
+}
+function _cfCreateHTML(c, st) {
+  const dob = /^\d{4}-\d{2}-\d{2}$/.test(c.dob || ''), recs = consentRecordsOf(c);
+  return `${st === 'expired' || st === 'cancelled' ? `<div class="alert alert-warning" style="font-size:12px">The last link for ${sanitize(c.fullName)} is ${st === 'expired' ? 'out of date' : 'cancelled'}. Make a new one below.</div>` : ''}
+    <p style="font-size:13px;margin:0 0 10px">Send <strong>${sanitize(c.fullName)}</strong> a link to read about informed consent, make their choices and <strong>sign on their phone</strong>. The signed form comes back here for you to check and file on their profile.</p>
+    <div style="background:#f8fafc;border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:12px;margin-bottom:12px">
+      <strong>What they see:</strong> what informed consent means · six choices (one is needed to give support, five are their own choice) · when information can be shared without consent · their rights · four things to confirm · a place to sign.<br>
+      <span style="color:var(--muted)">Wording version ${sanitize(WG_CONSENT.VERSION)}. Talk it through with them too — the form does not replace the conversation.</span></div>
+    <div class="grid-2">
+      <div class="form-group"><label for="cf-days">Link works for</label><select id="cf-days">${CF_DAYS.map(d => `<option value="${d}"${d === 7 ? ' selected' : ''}>${d} days</option>`).join('')}</select></div>
+      <div class="form-group"><label>Protection</label>
+        <label style="display:flex;gap:8px;align-items:flex-start;font-weight:400;font-size:13px"><input type="checkbox" id="cf-usedob" ${dob ? 'checked' : 'disabled'} style="margin-top:3px"> <span>Ask for their date of birth before it opens${dob ? ' (recommended)' : ' — <em>no DOB on file, so the link alone opens it</em>'}</span></label></div>
+    </div>
+    <button class="btn btn-primary" id="cf-create" onclick="createConsentLink('${sanitize(c.id)}')">✍️ Create the link</button>
+    ${recs.length ? `<span style="font-size:12px;color:var(--muted);margin-left:10px">${recs.length} signed consent form${recs.length !== 1 ? 's' : ''} already on the profile — <a href="#" onclick="event.preventDefault();closeModal();setTimeout(()=>openClientProfile('${sanitize(c.id)}','consents'),50)">view</a></span>` : ''}
+    ${FSYNC.isReady() ? '' : '<div class="alert alert-warning" style="font-size:12px;margin-top:10px">Cloud Sync isn’t connected on this device — the link needs it.</div>'}`;
+}
+function _cfLiveHTML(c, f) {
+  const mob = auMobile(c.phone), safe = c.ifSafeContact === 'Yes', url = consentLinkUrl(f.linkId);
+  const sends = (f.sends || []).map(s => `${fmtdt(s.at)} — ${sanitize(s.channel)}${s.by ? ' by ' + sanitize(s.by) : ''}`);
+  return `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">${_cfChip('open')}<span style="font-size:12px;color:var(--muted)">Made ${fmtdt(f.createdAt)}${f.createdBy ? ' by ' + sanitize(f.createdBy) : ''} · works until <strong>${fmt(new Date(_ifExpMs(f)).toISOString())}</strong>${f.needsDob ? ' · asks for their date of birth' : ' · <strong>no date of birth asked</strong>'}</span></div>
+    <div class="form-group"><label for="cf-url">Link</label><div style="display:flex;gap:6px"><input id="cf-url" readonly value="${sanitize(url)}" style="font-family:monospace;font-size:12px" onfocus="this.select()"><button class="btn btn-sm btn-outline" onclick="sendConsentLink('${sanitize(f.id)}','copy')">📋 Copy</button></div></div>
+    ${!safe && mob ? `<div class="alert alert-warning" style="font-size:12px">"Safe to leave calls/texts?" is <strong>${sanitize(c.ifSafeContact || 'not answered')}</strong>. Only text the link if they’ve agreed to texts.</div>` : ''}
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
+      <button class="btn btn-primary" id="cf-open" onclick="sendConsentLink('${sanitize(f.id)}','open')" title="Opens the form here. Hand the phone or tablet to ${sanitize(smsFirstName(c))} to sign.">📱 Open on this device</button>
+      <button class="btn btn-outline" id="cf-sms" ${mob ? '' : 'disabled'} onclick="sendConsentLink('${sanitize(f.id)}','sms')">💬 Text from my phone</button>
+      ${c.email ? `<button class="btn btn-outline" id="cf-email" onclick="sendConsentLink('${sanitize(f.id)}','email')">✉️ Email it</button>` : ''}
+      <button class="btn btn-outline" style="color:#991b1b;border-color:#fca5a5" onclick="cancelConsentLink('${sanitize(f.id)}')">🔒 Cancel link</button>
+    </div>
+    ${c.email ? `<p style="font-size:12px;color:var(--muted);margin:8px 0 0">Email goes from your own Outlook to ${sanitize(c.email)}${mailBlocker() ? ' — Outlook isn’t connected here, so it opens your email app instead' : ''}.</p>` : ''}
+    ${sends.length ? `<div style="font-size:12px;color:var(--muted);margin-top:10px"><strong>Sent:</strong><br>${sends.join('<br>')}</div>` : ''}
+    <p style="font-size:11px;color:var(--muted);margin-top:12px">You’ll see it here, on the Intake tab and on the Dashboard when they sign. Nothing goes on their profile until you check it and press File.</p>`;
+}
+
+// ---- create / send / cancel ----
+async function createConsentLink(clientId) {
+  const c = clients.find(x => x.id === clientId); if (!c) return;
+  if (!FSYNC.isReady()) { showToast('Cloud Sync isn’t connected — the link needs it'); return; }
+  const btn = document.getElementById('cf-create'); if (btn) { btn.disabled = true; btn.textContent = 'Creating…'; }
+  const days = Number(document.getElementById('cf-days')?.value) || 7;
+  const useDob = !!document.getElementById('cf-usedob')?.checked && /^\d{4}-\d{2}-\d{2}$/.test(c.dob || '');
+  const token = newIntakeToken(), formId = await _sha256hex(token + ':' + (useDob ? c.dob : ''));
+  const exp = new Date(Date.now() + days * 864e5), at = now();
+  const form = { linkId: token, clientId: c.id, status: 'open', needsDob: useDob, version: WG_CONSENT.VERSION, expiresAt: exp, expiresAtIso: exp.toISOString(), days, createdAt: at, createdBy: currentUser?.name || '', sends: [] };
+  try {
+    await FSYNC.createConsentForm(formId, form, { status: 'open', expiresAt: exp, needsDob: useDob, createdAt: at });
+    consentForms = [Object.assign({ id: formId }, form, { expiresAt: exp.toISOString() }), ...consentForms.filter(x => x.id !== formId)];
+    audit('Consent form link created', `${c.fullName} — works ${days} days${useDob ? ', asks for DOB' : ''}`, c.id);
+    _cfRefreshModal(c.id); showToast('Link ready — now send it to ' + smsFirstName(c));
+  } catch (e) {
+    console.warn('Consent link failed:', e);
+    showToast('⚠️ Couldn’t create the link: ' + (e.code === 'permission-denied' ? 'Firebase refused — the latest firestore.rules need publishing' : (e.message || e)));
+    if (btn) { btn.disabled = false; btn.textContent = '✍️ Create the link'; }
+  }
+}
+async function sendConsentLink(formId, channel) {
+  const f = consentForms.find(x => x.id === formId); if (!f) return;
+  const c = clients.find(x => x.id === f.clientId); if (!c) return;
+  const url = consentLinkUrl(f.linkId), mob = auMobile(c.phone);
+  if (channel === 'copy') {
+    try { await navigator.clipboard.writeText(url); showToast('Link copied'); } catch (_) { document.getElementById('cf-url')?.select(); showToast('Select the link and copy it'); }
+    return _cfRecordSend(f, c, 'link copied');
+  }
+  if (channel === 'open') {
+    window.open(url, '_blank', 'noopener');
+    return _cfRecordSend(f, c, 'opened on this device for the client to sign');
+  }
+  if (channel === 'sms') {
+    if (c.ifSafeContact !== 'Yes' && !confirm(`"Safe to leave calls/texts?" is ${c.ifSafeContact || 'not answered'} for ${c.fullName}.\n\nOnly text the link if they have agreed to texts. Send anyway?`)) return;
+    openExternalLink(`sms:${mob || String(c.phone || '').replace(/[^\d+]/g, '')}?&body=${encodeURIComponent(consentLinkMessage(c, f))}`);
+    return _cfRecordSend(f, c, 'text from ' + (currentUser?.name ? currentUser.name.split(' ')[0] + '’s' : 'worker’s') + ' phone to ' + _maskPhone(mob));
+  }
+  if (channel === 'email') {
+    if (!c.email) { showToast('This client has no email address on file.'); return; }
+    if (!mailBlocker()) {            // from the worker's own Outlook, and the send is noted once it has gone
+      closeModal();
+      return mailCompose({ to: c.email, clientId: c.id, record: false, subject: 'Your Worn Gundidj consent form', body: consentEmailBody(c, f), onSent: () => _cfRecordSend(f, c, 'email from Outlook') });
+    }
+    openExternalLink(`mailto:${encodeURIComponent(c.email)}?subject=${encodeURIComponent('Your Worn Gundidj consent form')}&body=${encodeURIComponent(consentEmailBody(c, f))}`);
+    return _cfRecordSend(f, c, 'email');
+  }
+}
+async function _cfRecordSend(f, c, channel) {
+  const sends = [...(f.sends || []), { at: now(), channel, by: currentUser?.name || '' }].slice(-20);
+  f.sends = sends;
+  try { await FSYNC.updateConsentForm(f.id, { sends }); } catch (e) { console.warn('send record not saved:', e.message); }
+  audit('Consent form link sent', `${c.fullName} — ${channel}`, c.id);
+  _cfRefreshModal(c.id);
+}
+async function cancelConsentLink(formId) {
+  const f = consentForms.find(x => x.id === formId); if (!f) return;
+  const c = clients.find(x => x.id === f.clientId);
+  if (!confirm('Cancel this link?\n\nIt will stop working straight away.')) return;
+  try {
+    await FSYNC.cancelConsentForm(f.id, f.linkId);
+    f.status = 'cancelled'; audit('Consent form link cancelled', c ? c.fullName : '', f.clientId); showToast('Link cancelled');
+    if (c) _cfRefreshModal(c.id);
+  } catch (e) { showToast('⚠️ Couldn’t cancel: ' + (e.message || e)); }
+}
+
+// ---- check and file ----
+function _cfNameWords(v) { return String(v || '').toLowerCase().replace(/"[^"]*"/g, ' ').replace(/[^a-z\s]/g, ' ').split(/\s+/).filter(x => x.length > 1); }
+// Does the name that signed share a name with the client? (A parent signing for a child won't, so only "self" is checked.)
+function _cfNameMismatch(c, sig) {
+  if (!sig || sig.role !== 'self') return false;
+  const a = _cfNameWords(c.fullName).concat(_cfNameWords(c.preferredName)), b = _cfNameWords(sig.name);
+  return !!a.length && !!b.length && !b.some(x => a.includes(x));
+}
+function _cfChoiceRows(answers) {
+  return WG_CONSENT.CHOICES.map(ch => ({ key: ch.key, q: ch.q, a: (answers || {})[ch.key] === 'Yes' ? 'Yes' : (answers || {})[ch.key] === 'No' ? 'No' : '' }));
+}
+function _cfAnswerChip(a) { return a === 'Yes' ? '<span class="tag" style="background:#d1fae5;color:#065f46">✓ Agrees</span>' : a === 'No' ? '<span class="tag" style="background:#fef3c7;color:#92400e">✗ Does not agree</span>' : '<span class="tag">—</span>'; }
+function openConsentReviewModal(formId) {
+  const f = consentForms.find(x => x.id === formId); if (!f) return;
+  const c = clients.find(x => x.id === f.clientId); if (!c) return;
+  const A = f.answers || {}, S = f.signature || {}, done = f.status === 'applied', rows = _cfChoiceRows(A), declined = rows.filter(r => r.a === 'No');
+  const html = `<p style="font-size:13px;margin:0 0 10px"><strong>${sanitize(c.fullName)}</strong>’s consent form was signed ${S.at ? fmtdt(S.at) : f.submittedAt ? fmtdt(f.submittedAt) : ''}${S.method === 'typed' ? ' with a typed name' : ' on screen'}. ${done ? `<span class="idea-chip" style="color:#065f46;background:#d1fae5">Filed on the profile</span>` : ''}</p>
+    ${_cfNameMismatch(c, S) ? `<div class="alert alert-warning" id="cf-mismatch" style="font-size:13px">The name that signed (<strong>${sanitize(S.name)}</strong>) doesn’t match the client’s name. Check who signed before you file it.</div>` : ''}
+    ${declined.length ? `<div class="alert alert-info" style="font-size:13px">They said <strong>No</strong> to: ${declined.map(r => sanitize(r.q)).join(', ')}. Filing records that, and the intake ticks for those stay off.</div>` : ''}
+    <div class="rowsx-cf" style="border:1px solid var(--border);border-radius:8px;overflow:hidden">${rows.map((r, i) => `<div style="display:flex;gap:10px;align-items:center;justify-content:space-between;padding:8px 12px;font-size:13px;${i % 2 ? 'background:#faf7f2' : ''}"><span>${sanitize(r.q)}${WG_CONSENT.CHOICES.find(x => x.key === r.key).required ? ' <span style="font-size:10px;font-weight:700;color:#4a2618">NEEDED</span>' : ''}</span>${_cfAnswerChip(r.a)}</div>`).join('')}</div>
+    <div style="font-size:12px;margin:10px 0 0;color:var(--muted)">${WG_CONSENT.CONFIRMS.every(x => A[x.key] === true) ? '✓ They confirmed: they understood the form, had the chance to ask questions, agreed freely, and know they can change their mind.' : '⚠️ Not every confirmation is ticked.'} · Wording version ${sanitize(f.version || '')}</div>
+    <div style="margin:12px 0 0"><div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Signature</div>${_sigImg(S, 300)}<div style="font-size:13px;margin-top:6px">${_sigWho(S)}${S.supportPerson ? `<br><span style="color:var(--muted)">Support person or interpreter: ${sanitize(S.supportPerson)}</span>` : ''}</div></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px">
+      ${done ? `<button class="btn btn-primary" onclick="closeModal();openClientProfile('${sanitize(c.id)}','consents')">Open the consent forms</button>` :
+        `<button class="btn btn-primary" id="cf-file" onclick="fileConsentForm('${sanitize(f.id)}')">✓ File on ${sanitize(smsFirstName(c))}’s profile</button>`}
+      <button class="btn btn-outline" onclick="printConsentForm('${sanitize(f.id)}')">🖨️ Print</button>
+      <button class="btn btn-outline" onclick="closeModal()">Close</button></div>
+    ${done ? '' : `<p style="font-size:11px;color:var(--muted);margin:10px 0 0">Filing adds the signed form to the profile, fills in the consent ticks on the intake from their choices, and marks the link as done.</p>`}`;
+  showModal('✍️ Consent form from ' + sanitize(smsFirstName(c)), html, null, '640px', true);
+}
+async function fileConsentForm(formId) {
+  const f = consentForms.find(x => x.id === formId); if (!f || f.status === 'applied') return;
+  const c = clients.find(x => x.id === f.clientId); if (!c) return;
+  const A = f.answers || {}, S = f.signature || {}, at = now(), who = currentUser?.name || '';
+  if (!S.name || !WG_CONSENT.CHOICES.every(ch => A[ch.key] === 'Yes' || A[ch.key] === 'No')) { showToast('That form is incomplete — it can’t be filed'); return; }
+  const rec = { id: uid(), formId, kind: 'online', docType: 'consent', version: f.version || '', signedAt: S.at || f.submittedAt || at, submittedAt: f.submittedAt || '', filedAt: at, filedBy: who,
+    signedName: S.name, role: S.role || 'self', method: S.method || 'typed', choices: _cfChoiceRows(A).map(r => ({ k: r.key, q: r.q, a: r.a })), confirmed: WG_CONSENT.CONFIRMS.every(x => A[x.key] === true) };
+  if (S.role === 'representative') rec.relationship = S.relationship || '';
+  if (S.supportPerson) rec.supportPerson = S.supportPerson;
+  if (S.method === 'drawn' && _PNG_OK.test(S.image || '')) rec.image = S.image;
+  c.consentRecords = [...(c.consentRecords || []), rec];
+  // The latest consent is the one that applies: fill in the intake's consent ticks from the client's choices.
+  WG_CONSENT.CHOICES.forEach(ch => { const yes = A[ch.key] === 'Yes'; if (ch.file === 'ifTransportConsent') c.ifTransportConsent = yes ? 'Yes' : 'No'; else c[ch.file] = yes; });
+  c.ifConsentPrivacy = true; c.ifConsentSigned = true;
+  c.ifClientSig = S.role === 'representative' ? `${S.name} (${S.relationship || 'authorised representative'})` : S.name;
+  { const d = new Date(S.at || at); c.ifConsentDate = isNaN(d) ? today() : localISO(d).slice(0, 10); }
+  saveAll();
+  try { await FSYNC.updateConsentForm(formId, { status: 'applied', appliedAt: at, appliedBy: who }, f.linkId); } catch (e) { console.warn('form status not updated:', e.message); }
+  f.status = 'applied'; f.appliedAt = at; f.appliedBy = who;
+  audit('Consent form filed on client profile', `${c.fullName} — signed ${S.method === 'typed' ? 'with a typed name' : 'on screen'}${S.role === 'representative' ? ' by a representative' : ''}`, c.id);
+  showToast(`✓ Consent form filed on ${c.fullName}’s profile`);
+  closeModal(); setTimeout(() => openClientProfile(c.id, 'consents'), 60);
+}
+
+// ---- the "Consent forms" section of the client file ----
+function renderConsentsTab(c) {
+  const recs = consentRecordsOf(c), f = currentConsentForm(c.id), st = consentFormState(f), id = sanitize(c.id);
+  const ticks = [['Information stored', c.ifConsentDatabase], ['Other WG programs', c.ifConsentInfo], ['Quality & funding checks', c.ifConsentAudit], ['Other agencies', c.ifConsentExternal], ['Video calls', c.ifConsentVideo], ['Privacy explained', c.ifConsentPrivacy]];
+  return `<div class="card">
+      <div class="card-header"><div class="card-title">✍️ Consent forms</div><button class="btn btn-sm btn-primary" id="cf-send-btn" onclick="openConsentLinkModal('${id}')">✍️ Send a consent form</button></div>
+      <p style="font-size:12px;color:var(--muted);margin:0 0 10px">Informed consent: the client is told what they are agreeing to, understands it, chooses freely, and can change their mind. Send them the form to read and sign on their phone, or open it on a shared device. Signed forms are filed here, and fill in the consent ticks on the Intake.</p>
+      ${st !== 'none' && st !== 'applied' ? `<div class="alert alert-${st === 'submitted' ? 'warning' : 'info'}" style="font-size:13px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span style="flex:1">${sanitize(consentLinkStatusText(c))}</span>${st === 'submitted' ? `<button class="btn btn-sm btn-primary" onclick="openConsentReviewModal('${sanitize(f.id)}')">Check it and file it →</button>` : st === 'open' ? `<button class="btn btn-sm btn-outline" onclick="openConsentLinkModal('${id}')">Open link</button>` : ''}</div>` : ''}
+      <div style="display:flex;gap:6px;flex-wrap:wrap;font-size:12px;margin-bottom:4px">${ticks.map(([l, v]) => `<span class="tag" style="background:${v ? '#d1fae5' : '#f3f4f6'};color:${v ? '#065f46' : '#6b7280'}">${v ? '✓' : '○'} ${sanitize(l)}</span>`).join('')}
+        <span class="tag" style="background:${c.ifConsentSigned ? '#d1fae5' : '#fef3c7'};color:${c.ifConsentSigned ? '#065f46' : '#92400e'}">${c.ifConsentSigned ? '✓ Signed' + (c.ifConsentDate ? ' ' + sanitize(fmt(c.ifConsentDate)) : '') : 'Not signed yet'}</span></div>
+      <div style="font-size:11px;color:var(--muted)">Ticks as recorded on the Intake — a worker can also tick them by hand there.</div>
+    </div>
+    <div class="card"><div class="card-header"><div class="card-title">Signed forms on file (${recs.length})</div></div>
+      ${recs.length ? recs.map(r => `<div class="cf-record" data-id="${sanitize(r.id)}" style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:10px">
+        <div style="display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap">
+          <div style="flex:1;min-width:220px"><div style="font-weight:700;font-size:14px">Signed ${sanitize(fmtdt(r.signedAt))}</div>
+            <div style="font-size:12px;color:var(--muted)">${_sigWho({ name: r.signedName, role: r.role, relationship: r.relationship })} · ${r.method === 'typed' ? 'typed name' : 'drawn on screen'} · ${r.kind === 'online' ? 'signed online by link' : sanitize(r.kind || '')} · wording ${sanitize(r.version || '')}<br>Filed ${sanitize(fmtdt(r.filedAt))}${r.filedBy ? ' by ' + sanitize(r.filedBy) : ''}${r.supportPerson ? ` · support person: ${sanitize(r.supportPerson)}` : ''}</div></div>
+          <div style="width:180px">${_sigImg({ method: r.image ? 'drawn' : 'typed', image: r.image, name: r.signedName }, 180)}</div></div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0">${(r.choices || []).map(x => `<span class="tag" style="background:${x.a === 'Yes' ? '#d1fae5' : '#fef3c7'};color:${x.a === 'Yes' ? '#065f46' : '#92400e'}">${x.a === 'Yes' ? '✓' : '✗'} ${sanitize(x.q)}</span>`).join('')}</div>
+        <button class="btn btn-sm btn-outline" onclick="printConsentRecord('${id}','${sanitize(r.id)}')">🖨️ View / print signed copy</button></div>`).join('')
+      : `<div class="empty-state" style="padding:22px"><div class="icon">✍️</div><p>No consent form has been signed online for ${sanitize(smsFirstName(c))} yet.</p></div>`}
+    </div>`;
+}
+
+// ---- printing (the look of the "Emergency Contacts & Supports" sheet) ----
+function wgPrintCSS() {
+  return `@page{size:A4;margin:12mm}*{box-sizing:border-box}
+  body{font-family:Arial,Helvetica,sans-serif;font-size:11.5px;line-height:1.45;color:#2b2b2b;margin:0;padding:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .top{display:flex;align-items:center;gap:14px;padding:2px 0 10px}.top img{height:58px;width:auto}
+  .top h1{margin:0;font-size:24px;line-height:1.15;color:#4a2618}.top p{margin:3px 0 0;font-size:12px;font-weight:700;color:#3d7c88}
+  .addr{background:#4a2618;color:#fff;text-align:center;font-size:11.5px;padding:7px 10px;border-bottom:3px solid #c08a2a}
+  .help{background:#4a2618;color:#fff;font-size:11.5px;padding:8px 12px;margin:8px 0 2px}.help b{color:#f5c453}
+  h2.bar{background:#4a2618;color:#fff;font-size:12.5px;letter-spacing:.3px;text-transform:uppercase;margin:12px 0 0;padding:6px 10px;page-break-after:avoid}
+  h2.bar.teal{background:#3d7c88}h2.bar.ochre{background:#9a6b1e}
+  table{width:100%;border-collapse:collapse}td{padding:6px 10px;vertical-align:top;border-bottom:1px solid #e3d5c6}
+  tr:nth-child(even) td{background:#f6efe6}td.k{width:34%;font-weight:700;color:#4a2618}
+  .box{border:1px solid #e3d5c6;padding:10px 12px}.sig img{max-width:280px}
+  .note{font-size:10.5px;color:#5f5650;margin:8px 0 0}
+  .foot{background:#4a2618;color:#fff;text-align:center;font-size:10.5px;padding:9px 12px;margin-top:14px;page-break-inside:avoid}`;
+}
+function wgPrintDoc(docTitle, title, subtitle, body, opts) {
+  opts = opts || {};
+  const logo = orgLogoSrc() || (location.origin + '/intake/wg-logo.png');
+  return `<!DOCTYPE html><html lang="en-AU"><head><meta charset="utf-8"><title>${sanitize(docTitle)}</title><style>${wgPrintCSS()}</style></head><body>
+    <div class="top"><img src="${sanitize(logo)}" alt="Worn Gundidj"><div><h1>${sanitize(title)}</h1><p>${sanitize(subtitle)}</p></div></div>
+    <div class="addr">1-3 Rooneys Rd, Warrnambool VIC 3280 &nbsp;|&nbsp; Phone <b>(03) 5561 5315</b></div>
+    ${opts.help ? `<div class="help"><b>In immediate danger or someone is hurt?</b> Call <b>000</b> or go to the Emergency Department, Warrnambool Base Hospital, Ryot Street.</div>` : ''}
+    ${body}
+    <div class="foot"><strong>Acknowledgement of Country.</strong> Worn Gundidj acknowledges the Gunditjmara Peoples, on whose unceded lands we work, and pays respect to Elders past, present and emerging.</div>
+    <script>window.onload=function(){setTimeout(function(){window.print()},250)}<\/script></body></html>`;
+}
+function _openPrintWindow(html) {
+  const w = window.open('', '_blank');
+  if (!w) { showToast('⚠️ Pop-up blocked — allow pop-ups for this site to open documents'); return false; }
+  w.document.write(html); w.document.close(); return true;
+}
+// The signed consent as a document: the choices, the confirmations, the signature.
+function _consentDocBody(c, d) {
+  const rows = (d.choices || []).map(ch => `<tr><td class="k">${sanitize(ch.q)}</td><td>${sanitize((WG_CONSENT.CHOICES.find(x => x.key === ch.k) || {}).d || '')}<br><strong>${ch.a === 'Yes' ? 'Yes — agrees' : ch.a === 'No' ? 'No — does not agree' : 'Not answered'}</strong></td></tr>`).join('');
+  return `<table><tr><td class="k">Client</td><td>${sanitize(c.fullName)}${c.dob ? ' · DOB ' + sanitize(fmt(c.dob)) : ''}${c.clientId ? ' · ID ' + sanitize(c.clientId) : ''}</td></tr></table>
+    <h2 class="bar">What was agreed to</h2><table>${rows}</table>
+    <h2 class="bar teal">Confirmed by the signer</h2><table>${WG_CONSENT.CONFIRMS.map(x => `<tr><td>${d.confirmed ? '☑' : '☐'} ${sanitize(x.t)}</td></tr>`).join('')}</table>
+    <h2 class="bar">Signature</h2><div class="box sig">${_sigImg({ method: d.image ? 'drawn' : 'typed', image: d.image, name: d.signedName }, 280)}
+      <p style="margin:8px 0 0"><strong>${sanitize(d.signedName)}</strong>${d.role === 'representative' ? ` — signing for ${sanitize(c.fullName)}, as their ${sanitize(d.relationship || 'authorised representative')}` : ''}</p>
+      ${d.supportPerson ? `<p style="margin:2px 0 0">Support person or interpreter: ${sanitize(d.supportPerson)}</p>` : ''}
+      <p style="margin:2px 0 0">Signed ${sanitize(fmtdt(d.signedAt))} · ${d.method === 'typed' ? 'typed name' : 'drawn on screen'} · wording version ${sanitize(d.version || '')}${d.filedAt ? ` · filed ${sanitize(fmtdt(d.filedAt))}${d.filedBy ? ' by ' + sanitize(d.filedBy) : ''}` : ''}</p></div>
+    <p class="note">Consent can be changed or withdrawn at any time by telling a Worn Gundidj worker. Confidential client information.</p>`;
+}
+function printConsentRecord(clientId, recId) {
+  const c = clients.find(x => x.id === clientId), r = c && (c.consentRecords || []).find(x => x.id === recId); if (!r) return;
+  audit('Printed signed consent form', c.fullName, c.id);
+  _openPrintWindow(wgPrintDoc('Signed consent — ' + c.fullName, 'Consent Form', 'Signed copy · Worn Gundidj Aboriginal Co-operative', _consentDocBody(c, r)));
+}
+function printConsentForm(formId) {        // a form straight from the client, before it is filed
+  const f = consentForms.find(x => x.id === formId), c = f && clients.find(x => x.id === f.clientId); if (!c) return;
+  const A = f.answers || {}, S = f.signature || {};
+  audit('Printed signed consent form', c.fullName, c.id);
+  _openPrintWindow(wgPrintDoc('Signed consent — ' + c.fullName, 'Consent Form', 'Signed copy · Worn Gundidj Aboriginal Co-operative', _consentDocBody(c, { choices: _cfChoiceRows(A).map(r => ({ k: r.key, q: r.q, a: r.a })), confirmed: WG_CONSENT.CONFIRMS.every(x => A[x.key] === true),
+    signedName: S.name, role: S.role, relationship: S.relationship, supportPerson: S.supportPerson, method: S.method, image: S.image, signedAt: S.at || f.submittedAt, version: f.version })));
+}
+
+// ---- where it shows up ----
+function returnedConsentFormsCardHTML() {
+  const list = returnedConsentForms(); if (!list.length) return '';
+  return `<div class="card" id="cf-returned-card" style="margin-bottom:16px;border-left:4px solid #dc2626">
+    <div class="card-header"><div class="card-title">✍️ Consent forms signed by clients (${list.length})</div></div>
+    ${list.map(f => { const c = clients.find(x => x.id === f.clientId);
+      return `<div class="cf-returned-row" data-id="${sanitize(f.id)}" style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)"><span style="flex:1"><strong>${sanitize(c ? c.fullName : 'Client')}</strong> <span style="font-size:12px;color:var(--muted)">· signed ${sanitize(fmtdt(f.submittedAt))}</span></span>
+        <button class="btn btn-sm btn-primary" onclick="openConsentReviewModal('${sanitize(f.id)}')">Check and file →</button></div>`; }).join('')}</div>`;
+}
+function _consentFormsRefresh() {
+  const sub = new Set(returnedConsentForms().map(f => f.id));
+  if (_cfSeenSubmitted) [...sub].filter(id => !_cfSeenSubmitted.has(id)).forEach(id => {
+    const f = consentForms.find(x => x.id === id), c = f && clients.find(x => x.id === f.clientId);
+    if (c) showToast(`✍️ ${smsFirstName(c)} signed their consent form — check it and file it on the Dashboard`);
+  });
+  _cfSeenSubmitted = sub;
+  if (document.getElementById('cf-body') && _cfOpenClient) _cfRefreshModal(_cfOpenClient);
+  document.querySelectorAll('.consent-link-status').forEach(el => { const c = clients.find(x => x.id === el.dataset.client); if (c) el.textContent = consentLinkStatusText(c); });
+  if (currentPage === 'dashboard' && !document.querySelector('#modal-container .modal-overlay')) {
+    const card = document.getElementById('cf-returned-card'), html = returnedConsentFormsCardHTML();
     if (!!card !== !!html || (card && card.outerHTML.length !== html.length)) showPage('dashboard');
   }
 }
@@ -15223,6 +15579,7 @@ function showPrivacyPolicy() {
         <li>Cultural background, mob and language</li>
         <li>Health, disability, wellbeing, alcohol and other drug, justice and family information (sensitive information)</li>
         <li>Case notes, sessions, referrals, goals, assessments and documents</li>
+        <li>Signed consent and intake forms, including the signature (a drawn image or a typed name), when it was signed and who signed</li>
         <li>Emergency planning information and, with separate consent, a Vulnerable Persons Register record</li>
         <li>Medicare, Centrelink and NDIS numbers where a service needs them. We do not use these as our own identifier for a person.</li>
         <li>For staff: name, work email, role, and a log of what they view and change</li>
@@ -15968,8 +16325,8 @@ async function logout(reason) {
   try {
     if (FSYNC.isReady()) {
       clients=[]; notes=[]; timeLogs=[]; referrals=[];
-      smsOutbox=[]; intakeForms=[];   // cloud-held (re-read at next sign-in); they carry client names and numbers
-      ['clients','notes','timelogs','referrals','fphoApplications','fphoClients','resources','smsOutbox','intakeForms'].forEach(k=>DB.save(k,[]));
+      smsOutbox=[]; intakeForms=[]; consentForms=[];   // cloud-held (re-read at next sign-in); they carry client names, numbers and signatures
+      ['clients','notes','timelogs','referrals','fphoApplications','fphoClients','resources','smsOutbox','intakeForms','consentForms'].forEach(k=>DB.save(k,[]));
       // Calendar and walk-in register (client names) are whole lists held in the cloud and re-read at sign-in.
       calEvents=[]; walkins=[]; DB.save('calevents',[]); DB.save('walkins',[]);
       // Audit log: cleared only once every entry is confirmed in the cloud (it is re-read at sign-in).

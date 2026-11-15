@@ -12,6 +12,8 @@ node tests/browser/datahealth.cjs       # Data Health score, scorecard, document
 node tests/browser/email.cjs            # Email page: inbox, read, reply, send (Microsoft Graph is stubbed)
 node tests/browser/privacy.cjs          # privacy: sign-out clean-up, audit trail, voice notice, retention, notices
 node tests/browser/vprintake.cjs        # VPR screening at intake, automatic add, alerts to managers and supervisors
+node tests/browser/forms.cjs            # the client's forms on a phone: signing, consent form, intake signature
+node tests/browser/consent.cjs          # consent forms in the CMS: send, check and file, print, intake signature
 node tests/browser/vpr.cjs              # Vulnerable Persons Register: screening, auto add/remove, Admin page
 node --test tests/unit/data-health.test.js   # the scoring engine on its own (no browser)
 node --test tests/unit/vpr.test.js           # the VPR rules on their own (no browser)

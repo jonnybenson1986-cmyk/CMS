@@ -133,3 +133,12 @@ test('banner flags: one entry per group, merged labels, in the given order', () 
     { group: 'vadc', label: 'AOD / VADC: Principal drug of concern, Treatment type, Referral source', tab: 'aod' },
   ]);
 });
+
+test('a signed consent form filed on the profile counts as the signed consent document', () => {
+  const DH = globalThis.WG_DATA_HEALTH, base = { fullName: 'Jordan Citizen', status: 'active', sewb: true };
+  const item = c => { const r = DH.compute(c, { helpers: {} }); return r.missing.find(m => /consent form uploaded/i.test(m.label || '')); };
+  assert.ok(item(base), 'missing with no document');
+  assert.ok(!item({ ...base, consentRecords: [{ id: 'r', docType: 'consent', signedAt: '2026-11-12' }] }), 'a filed consent record counts');
+  assert.ok(item({ ...base, consentRecords: [{ id: 'r', docType: 'other' }] }), 'only a consent record counts');
+  assert.ok(!item({ ...base, attachments: [{ name: 'Consent form.pdf' }] }), 'an uploaded file still counts');
+});

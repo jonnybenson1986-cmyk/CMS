@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#4a2618">
+<title>Your consent form · Worn Gundidj</title>
+<!--
+  Worn Gundidj CMS — the client's own consent form, opened from a link a worker
+  texts, emails or opens on a shared device (https://<cms>/c#<link id>). Like the
+  intake form (intake.html) there is no sign-in: the link id (and the client's date
+  of birth, when one is on file) opens it, and the Firestore rules let a signed-out
+  visitor do only this:
+    • read the link's status (no personal details),
+    • open the one form whose id they can compute — SHA-256(link id + ":" + DOB),
+    • send their answers to the consent questions and their signature, once,
+  and only until the link expires. The worker then checks it in the CMS and files
+  the signed copy on the client's profile.
+  The wording is in consent/consent-text.js; signing is in forms/signing.js.
+  The link id sits after "#", so it is never sent to the web server or logged.
+-->
+<link rel="stylesheet" href="forms/wg-forms.css">
+</head>
+<body>
+<header>
+  <div class="wg-top"><img src="intake/wg-logo.png" alt="Worn Gundidj">
+    <div><h1>Consent Form</h1><p>Social &amp; Emotional Wellbeing Team · Worn Gundidj Aboriginal Co-operative</p></div></div>
+  <div class="wg-addr">1-3 Rooneys Rd, Warrnambool VIC 3280 <span>|</span> Phone <a href="tel:0355615315">(03) 5561 5315</a></div>
+  <div class="wg-help"><div class="in"><b>In immediate danger or someone is hurt?</b> Call <b>000</b> or go to the Emergency Department, Warrnambool Base Hospital, Ryot Street.</div></div>
+</header>
+<main id="main" aria-live="polite"><div class="card plain msg"><div class="ic">⏳</div><p>Opening your form…</p></div></main>
+<footer class="wg-foot"><p><strong>Acknowledgement of Country.</strong> Worn Gundidj acknowledges the Gunditjmara Peoples, on whose unceded lands we work, and pays respect to Elders past, present and emerging.</p></footer>
+<div id="copy" aria-hidden="true"></div>
+
+<script src="vendor/firebase/firebase-app-compat.js"></script>
+<script src="vendor/firebase/firebase-firestore-compat.js"></script>
+<script src="forms/signing.js"></script>
+<script src="consent/consent-text.js"></script>
+<script>
+(function () {
+  'use strict';
+  const CFG = { apiKey: 'AIzaSyB5llVjMjy0AOp9w5UlKW3FltUi8XUZj40', authDomain: 'worn-gundidj-cms.firebaseapp.com',
+                projectId: 'worn-gundidj-cms', appId: '1:1058581942911:web:6769b34a10ccf95ea9a54a' };
+  const TEAM = 'worngundidj', ORG_PHONE = '(03) 5561 5315', ORG_TEL = '0355615315';
+  const C = window.WG_CONSENT, SIGN = window.WG_SIGN;
+  const $ = id => document.getElementById(id);
+  const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  let db, token = '', formRef = null, expires = null, answers = {}, signer = null, keep = {}, tries = 0, sending = false, live = false;
+
+  const contactHTML = () => `<p class="contact">Questions, or want to do this with a worker? Call <a href="tel:${ORG_TEL}">${ORG_PHONE}</a></p>`;
+  function screen(icon, title, text, extra) {
+    $('main').innerHTML = `<div class="card plain msg"><div class="ic" aria-hidden="true">${icon}</div><h2 tabindex="-1" id="h">${esc(title)}</h2><p>${text}</p>${extra || ''}</div>${contactHTML()}`;
+    $('h') && $('h').focus();
+  }
+  const fmtDate = d => d ? d.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long' }) : '';
+  const toDate = v => (v && v.toDate ? v.toDate() : v ? new Date(v) : null);
+  const expiredScreen = () => screen('⌛', 'This link has expired', 'For your privacy, consent links only work for a short time. Please contact us and we’ll send you a new one.');
+  async function sha256(text) {
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+    return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  // ---- open ----
+  async function start() {
+    token = (location.hash || '').replace(/^#/, '').split(/[?&]/)[0];
+    if (!/^[A-Za-z0-9_-]{16,64}$/.test(token)) return screen('🔗', 'This link isn’t complete', 'Please open the link exactly as it was sent to you. If it still doesn’t work, contact us.');
+    if (!window.crypto || !crypto.subtle) return screen('⚠️', 'Please open this link in your phone’s web browser', 'This page needs a secure browser connection.');
+    try {
+      firebase.initializeApp(CFG);
+      db = firebase.firestore();
+      const emu = new URLSearchParams(location.search).get('emu');          // automated tests only, never on the live site
+      if (emu && /^(localhost|127\.0\.0\.1)$/.test(location.hostname)) { const [h, p] = emu.split(':'); db.useEmulator(h, Number(p)); }
+      const link = await db.collection('teams').doc(TEAM).collection('consentLinks').doc(token).get();
+      if (!link.exists) return expiredScreen();
+      const L = link.data();
+      expires = toDate(L.expiresAt);
+      if (L.status === 'cancelled') return screen('🔒', 'This link is no longer active', 'Your worker has closed this link. Please contact us if you still need to sign your consent form.');
+      if (L.status === 'applied') return screen('✅', 'Thank you — we have your consent form', 'Your worker has already added your signed form to your file. You can ask them for a copy.');
+      if (!expires || expires.getTime() <= Date.now()) return expiredScreen();
+      if (L.needsDob) return dobScreen();
+      return openForm('');
+    } catch (e) {
+      console.warn(e);
+      return screen('📶', 'We couldn’t open your form', 'Please check your internet connection and try again.', `<button class="btn primary" type="button" onclick="location.reload()">Try again</button>`);
+    }
+  }
+  function dobScreen(err) {
+    $('main').innerHTML = `<div class="bar-h">Welcome</div><div class="card">
+      <p class="intro">To keep your information private, please enter your date of birth to open your form.</p>
+      <form id="dob-form" novalidate>
+        <div class="f"><label for="dob-in">Date of birth</label><input type="date" id="dob-in" required autocomplete="bday" max="${new Date().toISOString().slice(0, 10)}"></div>
+        ${err ? `<div class="note err" role="alert">${esc(err)}</div>` : ''}
+        <p style="margin:16px 0 0"><button class="btn primary" type="submit" style="width:100%">Open my form</button></p>
+      </form></div>${contactHTML()}`;
+    $('dob-form').addEventListener('submit', async ev => {
+      ev.preventDefault();
+      const v = $('dob-in').value;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return dobScreen('Please enter your date of birth.');
+      if (tries >= 6) return screen('🔒', 'Please contact us', 'That date of birth doesn’t match our records. Please call us and we’ll help you open your form.');
+      const ok = await openForm(v);
+      if (ok === false) { tries++; dobScreen('That date of birth doesn’t match our records. Please check it and try again.'); }
+    });
+  }
+  async function openForm(dob) {
+    const id = await sha256(token + ':' + dob);
+    formRef = db.collection('teams').doc(TEAM).collection('consentForms').doc(id);
+    let snap;
+    try { snap = await formRef.get(); }
+    catch (e) { if (dob) return false; if (e && e.code === 'permission-denied') return expiredScreen(); throw e; }
+    if (!snap.exists) { if (dob) return false; return expiredScreen(); }
+    const F = snap.data();
+    expires = toDate(F.expiresAt) || expires;
+    if (F.status === 'submitted') return doneScreen(true, F);
+    const local = readLocal(); if (local) answers = Object.assign({}, local);
+    render();
+    return true;
+  }
+
+  // ---- the form ----
+  const LKEY = () => 'wg-consent-' + token;
+  function writeLocal() { try { localStorage.setItem(LKEY(), JSON.stringify(answers)); } catch (_) {} }
+  function readLocal() {
+    try { const v = JSON.parse(localStorage.getItem(LKEY()) || 'null'); if (!v || typeof v !== 'object') return null;
+      const ok = {}; C.CHOICES.forEach(c => { if (v[c.key] === 'Yes' || v[c.key] === 'No') ok[c.key] = v[c.key]; }); C.CONFIRMS.forEach(c => { if (v[c.key] === true) ok[c.key] = true; }); return ok; } catch (_) { return null; }
+  }
+  function clearLocal() { try { localStorage.removeItem(LKEY()); } catch (_) {} }
+
+  function choiceHTML(c) {
+    const v = answers[c.key];
+    return `<div class="choice${c.required ? ' req' : ''}" id="ch-${c.key}" role="radiogroup" aria-labelledby="q-${c.key}" data-read>
+      <p class="q" id="q-${c.key}">${esc(c.q)} ${c.required ? '<span class="tag-req">Needed</span>' : '<span class="tag-opt">Your choice</span>'}</p>
+      <p class="d">${esc(c.d)}</p>
+      <div class="opts two">
+        <label class="opt"><input type="radio" name="ch-${c.key}" value="Yes" data-k="${c.key}" ${v === 'Yes' ? 'checked' : ''}> <span>Yes, I agree</span></label>
+        <label class="opt no"><input type="radio" name="ch-${c.key}" value="No" data-k="${c.key}" ${v === 'No' ? 'checked' : ''}> <span>No, I don’t agree</span></label>
+      </div></div>`;
+  }
+  function render() {
+    live = true;
+    $('main').innerHTML = `
+      <div class="card plain cream" style="margin-top:4px"><p class="lead" style="margin:0 0 8px"><strong>Please read this, then sign at the bottom.</strong> It takes about 5 minutes. You can stop and come back with the same link${expires ? ' until ' + esc(fmtDate(expires)) : ''}.</p>
+        <button class="btn teal" type="button" id="speak" hidden>🔊 Read this form to me</button></div>
+
+      <h2 class="bar-h" tabindex="-1" id="h">1. What is informed consent?</h2>
+      <div class="card" data-read>
+        <p class="lead">${esc(C.EXPLAIN_INTRO)}</p>
+        <div class="explain">${C.EXPLAIN.map(([t, d], i) => `<div><span class="n" aria-hidden="true">${i + 1}</span><div><b>${esc(t)}</b><span>${esc(d)}</span></div></div>`).join('')}</div>
+        <p style="margin:12px 0 0;font-size:15.5px">${esc(C.CAPACITY)}</p>
+      </div>
+
+      <h2 class="bar-h teal">2. What you are agreeing to</h2>
+      <div class="card"><p class="intro" data-read>For each one, tap <strong>Yes</strong> or <strong>No</strong>. We need your answer to every one. Only the first is needed to give you support. The rest are your choice.</p>
+        ${C.CHOICES.map(choiceHTML).join('')}</div>
+
+      <h2 class="bar-h ochre">3. When we might share without your consent</h2>
+      <div class="card" data-read><p style="margin:0 0 8px">${esc(C.LIMITS_INTRO)}</p>
+        <div class="rowsx">${C.LIMITS.map(t => `<div>${esc(t)}</div>`).join('')}</div></div>
+
+      <h2 class="bar-h">4. Your rights</h2>
+      <div class="card" data-read><div class="rowsx">${C.RIGHTS.map(([t, d]) => `<div><b>${esc(t)}.</b> ${esc(d)}</div>`).join('')}</div></div>
+
+      <h2 class="bar-h teal">5. Before you sign</h2>
+      <div class="card"><p class="intro">Tap each box to say it is true.</p>
+        ${C.CONFIRMS.map(c => `<label class="confirm"><input type="checkbox" data-c="${c.key}" ${answers[c.key] ? 'checked' : ''}> <span>${esc(c.t)}</span></label>`).join('')}</div>
+
+      <h2 class="bar-h">6. Sign</h2>
+      <div class="card" id="sign-card">${SIGN.blockHTML({ prefix: 'sg' })}
+        <div id="send-err" role="alert"></div>
+        <p style="margin:16px 0 0"><button class="btn primary" type="button" id="send" style="width:100%">Sign and send</button></p>
+        <p class="help" style="margin-top:10px">Your answers and signature go to Worn Gundidj, and nowhere else. You will be able to save or print your own copy.</p></div>
+      ${contactHTML()}`;
+    signer = SIGN.mount($('sign-card'), { prefix: 'sg', keep });
+    $('main').querySelectorAll('input[data-k]').forEach(el => el.addEventListener('change', () => { answers[el.dataset.k] = el.value; writeLocal(); }));
+    $('main').querySelectorAll('input[data-c]').forEach(el => el.addEventListener('change', () => { answers[el.dataset.c] = el.checked; writeLocal(); }));
+    $('send').addEventListener('click', submit);
+    if ('speechSynthesis' in window && window.SpeechSynthesisUtterance) { $('speak').hidden = false; $('speak').addEventListener('click', readAloud); }
+  }
+
+  // Read the explanations out loud (the browser's own voice, on the phone). Only the form's
+  // wording is read — nothing personal.
+  function readAloud() {
+    const synth = window.speechSynthesis, btn = $('speak'); if (!synth || !btn) return;
+    const label = on => { btn.textContent = on ? '⏹ Stop reading' : '🔊 Read this form to me'; };
+    if (synth.speaking || synth.pending) { synth.cancel(); label(false); return; }
+    const parts = [...document.querySelectorAll('#main [data-read]')].map(e => e.innerText.replace(/\s+/g, ' ').trim()).filter(Boolean);
+    parts.forEach((t, i) => { const u = new SpeechSynthesisUtterance(t); u.lang = 'en-AU'; u.rate = 0.95; if (i === parts.length - 1) { u.onend = () => label(false); } u.onerror = () => label(false); synth.speak(u); });
+    label(true);
+  }
+
+  // ---- send ----
+  function problem(msg, focusEl) {
+    $('send-err').innerHTML = `<div class="note err" role="alert">${esc(msg)}</div>`;
+    const el = focusEl || $('send-err'); if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center' }); if (el && el.focus) el.focus({ preventScroll: true });
+  }
+  async function submit() {
+    if (sending) return;
+    const missing = C.CHOICES.filter(c => answers[c.key] !== 'Yes' && answers[c.key] !== 'No');
+    if (missing.length) return problem(`Please tap Yes or No for: ${missing.map(c => c.q).join(', ')}.`, $('ch-' + missing[0].key));
+    if (answers.collect !== 'Yes') return problem(`To give you support we do need to keep some information. If you’d rather not agree to that, please call us on ${ORG_PHONE} and we’ll talk it through with you.`, $('ch-collect'));
+    const unconfirmed = C.CONFIRMS.filter(c => answers[c.key] !== true);
+    if (unconfirmed.length) return problem('Please tap each box in “5. Before you sign” to say it is true.', document.querySelector(`input[data-c="${unconfirmed[0].key}"]`));
+    const bad = signer.validate();
+    if (bad) return problem(bad, $('sg-block'));
+    const sig = signer.value(); if (!sig) return problem('Please check your signature and try again.', $('sg-block'));
+    const out = {}; C.KEYS.forEach(k => { if (answers[k] !== undefined) out[k] = answers[k]; });
+    const btn = $('send'); sending = true; btn.disabled = true; btn.textContent = 'Sending…';
+    try {
+      await formRef.update({ answers: out, signature: sig, version: C.VERSION, status: 'submitted', submittedAt: new Date().toISOString() });
+      clearLocal(); sending = false;
+      doneScreen(false, { answers: out, signature: sig, version: C.VERSION, submittedAt: new Date().toISOString() });
+    } catch (e) {
+      console.warn(e); sending = false; btn.disabled = false; btn.textContent = 'Sign and send';
+      if (e && e.code === 'permission-denied') return expiredScreen();
+      problem('We couldn’t send it. Please check your internet connection and try again. Your answers are saved on this phone.');
+      writeLocal();
+    }
+  }
+
+  // ---- done, and the client's own copy ----
+  const PNG = /^data:image\/png;base64,[A-Za-z0-9+/=]+$/;
+  const ansText = v => v === 'Yes' ? 'Yes — I agree' : v === 'No' ? 'No — I don’t agree' : 'Not answered';
+  function copyHTML(F) {
+    const A = F.answers || {}, S = F.signature || {}, when = S.at ? new Date(S.at) : null;
+    const sig = S.method === 'drawn' && PNG.test(S.image || '') ? `<img src="${S.image}" alt="Signature of ${esc(S.name)}">` : `<div style="font:italic 28px/1.2 'Brush Script MT','Segoe Script',cursive;border-bottom:1px solid #111;padding:6px 2px">${esc(S.name)}</div>`;
+    return `<div class="wg-top"><img src="intake/wg-logo.png" alt="Worn Gundidj"><div><h1>Consent Form</h1><p>Your signed copy · Worn Gundidj Aboriginal Co-operative</p></div></div>
+      <div class="wg-addr">1-3 Rooneys Rd, Warrnambool VIC 3280 <span>|</span> Phone (03) 5561 5315</div>
+      <div class="bar-h">What I agreed to</div>
+      <div class="rowsx">${C.CHOICES.map(c => `<div><b>${esc(c.q)}</b><br>${esc(c.d)}<br><strong>${esc(ansText(A[c.key]))}</strong></div>`).join('')}</div>
+      <div class="bar-h teal">I confirmed that</div>
+      <div class="rowsx">${C.CONFIRMS.map(c => `<div>${A[c.key] ? '☑' : '☐'} ${esc(c.t)}</div>`).join('')}</div>
+      <div class="bar-h">Signature</div>
+      <div class="card plain sigcopy">${sig}
+        <p style="margin:8px 0 0"><strong>${esc(S.name)}</strong>${S.role === 'representative' ? ` — signing for someone else, as their ${esc(S.relationship || 'authorised representative')}` : ''}</p>
+        ${S.supportPerson ? `<p style="margin:2px 0 0">Support person or interpreter: ${esc(S.supportPerson)}</p>` : ''}
+        <p style="margin:2px 0 0">Signed ${when && !isNaN(when) ? esc(when.toLocaleString('en-AU', { dateStyle: 'long', timeStyle: 'short' })) : ''} · ${S.method === 'typed' ? 'typed name' : 'drawn on screen'} · form version ${esc(F.version || '')}</p></div>
+      <p style="margin:10px 0 0;font-size:12px">You can change or withdraw your consent at any time by telling your worker, or calling (03) 5561 5315.</p>
+      <div class="wg-foot"><p><strong>Acknowledgement of Country.</strong> Worn Gundidj acknowledges the Gunditjmara Peoples, on whose unceded lands we work, and pays respect to Elders past, present and emerging.</p></div>`;
+  }
+  function doneScreen(already, F) {
+    live = false; clearLocal();
+    $('copy').innerHTML = copyHTML(F || {});
+    screen('🌿', already ? 'You’ve already sent your consent form' : 'Thank you — your signed form has been sent',
+      already ? 'We have your answers and signature. Your worker will check them and add them to your file.' : 'Your worker will check it and add it to your file. You can change your mind at any time by telling your worker.',
+      `<p style="margin:16px 0 0"><button class="btn primary" type="button" id="print-copy">Save or print my copy</button></p>
+       <p class="help" style="margin-top:8px">Choose “Save as PDF” in the print window to keep a copy on your phone.</p>`);
+    $('print-copy').addEventListener('click', () => window.print());
+  }
+
+  window.addEventListener('hashchange', () => location.reload());     // a different link pasted into the same tab
+  window.addEventListener('pagehide', () => { if (live && !sending) writeLocal(); });
+  start();
+})();
+</script>
+</body>
+</html>
