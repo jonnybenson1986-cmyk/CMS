@@ -27,6 +27,20 @@ service cloud.firestore {
     // Byte-identical re-write — what the app's "push everything" sync does.
     function unchanged() { return request.resource.data == resource.data; }
 
+    // A signature sent with a client form (intake.html / consent.html): who signed, how, when,
+    // and — for a drawn one — a small PNG (the keys match site/forms/signing.js SIG_KEYS).
+    function validSignature(s) {
+      return s is map
+        && s.keys().hasOnly(['method', 'name', 'image', 'at', 'role', 'relationship', 'supportPerson'])
+        && s.method in ['drawn', 'typed']
+        && s.name is string && s.name.size() > 0 && s.name.size() <= 120
+        && s.at is string && s.at.size() <= 40
+        && s.role in ['self', 'representative']
+        && (s.method == 'typed' ? !('image' in s) : (s.image is string && s.image.size() < 90000 && s.image.matches('^data:image/png;base64,.*')))
+        && (s.role == 'self' ? !('relationship' in s) : (s.relationship is string && s.relationship.size() > 0 && s.relationship.size() <= 80))
+        && (!('supportPerson' in s) || (s.supportPerson is string && s.supportPerson.size() <= 120));
+    }
+
     // ── Core client data ────────────────────────────────────────────────────
     match /teams/{teamId}/clients/{id}       { allow read, write: if signedIn(); }
     match /teams/{teamId}/notes/{id}         { allow read, write: if signedIn(); }
@@ -105,7 +119,7 @@ service cloud.firestore {
     //     know — never list — and only before it expires;
     //   • they can change only their answers (the keys below = intake/intake-fields.js)
     //     and progress, and can mark it submitted once (with the declaration
-    //     ticked). After that, or once staff cancel it, it is locked.
+    //     ticked and a signature). After that, or once staff cancel it, it is locked.
     // intakeLinks holds no personal details: expiry, status, whether a DOB is asked.
     match /teams/{teamId}/intakeLinks/{linkId} {
       allow get: if true;
@@ -119,12 +133,53 @@ service cloud.firestore {
       allow update: if signedIn() || (
            resource.data.status in ['open', 'draft']
         && resource.data.expiresAt > request.time
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['answers', 'status', 'savedAt', 'submittedAt', 'step'])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['answers', 'signature', 'status', 'savedAt', 'submittedAt', 'step'])
         && request.resource.data.status in ['draft', 'submitted']
         && request.resource.data.answers is map
         && request.resource.data.answers.keys().hasOnly(['fullName', 'preferredName', 'dob', 'gender', 'ifLgbtiqa', 'atsi', 'mob', 'languages', 'interpreter', 'ifMarital', 'phone', 'ifSafeContact', 'email', 'address', 'ifEc1name', 'ifEc1rel', 'ifEc1phone', 'ifEc2name', 'ifEc2rel', 'ifEc2phone', 'ifHousing', 'ifEmployment', 'ifEdu', 'ifCentrelink', 'gp', 'ndis', 'ifHasChildren', 'ifPrevAccess', 'ifReferralHow', 'ifServices', 'ifAdditionalInfo', 'ifHobbies', 'ifGoalShort', 'ifGoalMedium', 'ifGoalLong', 'declaration'])
-        && (request.resource.data.status == 'draft' || request.resource.data.answers.get('declaration', false) == true)
+        && (request.resource.data.status == 'draft' || (request.resource.data.answers.get('declaration', false) == true && validSignature(request.resource.data.signature)))
+        && (request.resource.data.status == 'submitted' || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['signature']))
         && (!('step' in request.resource.data) || request.resource.data.step is int)
+      );
+      allow delete: if false;
+    }
+
+    // ── Client consent forms sent by link (consent.html) ─────────────────────
+    // The same pattern as the intake forms above: staff make a form for ONE client and
+    // send them a link; the client opens it WITHOUT signing in (the link id, plus their
+    // date of birth when one is on file, opens one form only, until it expires), answers
+    // the consent questions, signs, and sends it ONCE. After that, or once staff cancel
+    // it, it is locked. They cannot read or list anything else. consentLinks holds no
+    // personal details. The answer keys are exactly site/consent/consent-text.js KEYS.
+    match /teams/{teamId}/consentLinks/{linkId} {
+      allow get: if true;
+      allow list, create, update: if signedIn();
+      allow delete: if false;
+    }
+    match /teams/{teamId}/consentForms/{formId} {
+      allow list, create: if signedIn();
+      allow get: if signedIn()
+        || (resource.data.expiresAt > request.time && resource.data.status in ['open', 'submitted']);
+      allow update: if signedIn() || (
+           resource.data.status == 'open'
+        && resource.data.expiresAt > request.time
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['answers', 'signature', 'version', 'status', 'submittedAt'])
+        && request.resource.data.status == 'submitted'
+        && request.resource.data.answers is map
+        && request.resource.data.answers.keys().hasOnly(['collect', 'programs', 'audit', 'external', 'video', 'transport', 'understood', 'questions', 'voluntary', 'change'])
+        && request.resource.data.answers.collect == 'Yes'
+        && request.resource.data.answers.programs in ['Yes', 'No']
+        && request.resource.data.answers.audit in ['Yes', 'No']
+        && request.resource.data.answers.external in ['Yes', 'No']
+        && request.resource.data.answers.video in ['Yes', 'No']
+        && request.resource.data.answers.transport in ['Yes', 'No']
+        && request.resource.data.answers.understood == true
+        && request.resource.data.answers.questions == true
+        && request.resource.data.answers.voluntary == true
+        && request.resource.data.answers.change == true
+        && validSignature(request.resource.data.signature)
+        && request.resource.data.version is string && request.resource.data.version.size() <= 20
+        && request.resource.data.submittedAt is string
       );
       allow delete: if false;
     }
