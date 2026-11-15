@@ -21,9 +21,14 @@ createRequire(import.meta.url)('../../site/consent/consent-text.js');
 createRequire(import.meta.url)('../../site/forms/signing.js');
 for (const file of Object.keys(RULES)) {
   const src = fs.readFileSync(new URL(RULES[file], import.meta.url), 'utf8');
-  const block = src.slice(src.indexOf('match /teams/{teamId}/consentForms/'));
-  const ruleKeys = (block.match(/answers\.keys\(\)\.hasOnly\(\[([^\]]*)\]\)/) || [, ''])[1].split(',').map(x => x.trim().replace(/'/g, '')).filter(Boolean);
+  const ruleKeys = (src.match(/function validConsentAnswers[\s\S]*?a\.keys\(\)\.hasOnly\(\[([^\]]*)\]\)/) || [, ''])[1].split(',').map(x => x.trim().replace(/'/g, '')).filter(Boolean);
   await check(file + ': consent rule keys match site/consent/consent-text.js', JSON.stringify(ruleKeys) === JSON.stringify(globalThis.WG_CONSENT.KEYS) ? Promise.resolve() : Promise.reject(new Error('rule keys differ from consent-text.js')));
+  const grab = re => (src.match(re) || [, ''])[1].split(',').map(x => x.trim().replace(/'/g, '')).filter(Boolean);
+  const same = (a, b, msg) => JSON.stringify(a) === JSON.stringify(b) ? Promise.resolve() : Promise.reject(new Error(msg));
+  await check(file + ': sharing rule keys (who, what, why…) match site/consent/consent-text.js', Promise.all([
+    same(grab(/function validParty[\s\S]*?m\.keys\(\)\.hasOnly\(\[([^\]]*)\]\)/), globalThis.WG_CONSENT.SHARE_PARTY_KEYS, 'party keys differ'),
+    same(grab(/function validSharing[\s\S]*?s\.keys\(\)\.hasOnly\(\[([^\]]*)\]\)/), globalThis.WG_CONSENT.SHARE_KEYS, 'sharing keys differ'),
+    same(grab(/m\.what\.hasOnly\(\[([^\]]*)\]\)/), globalThis.WG_CONSENT.SHARE_WHAT.map(x => x[0]), '"what" codes differ')]));
   const sigKeys = (src.match(/function validSignature[\s\S]*?s\.keys\(\)\.hasOnly\(\[([^\]]*)\]\)/) || [, ''])[1].split(',').map(x => x.trim().replace(/'/g, '')).filter(Boolean);
   await check(file + ': signature rule keys match site/forms/signing.js', JSON.stringify(sigKeys) === JSON.stringify(globalThis.WG_SIGN.SIG_KEYS) ? Promise.resolve() : Promise.reject(new Error('signature keys differ from signing.js')));
 }
@@ -90,7 +95,14 @@ for (const file of Object.keys(RULES)) {
   const later = Timestamp.fromDate(new Date(Date.now() + 7 * 864e5)), past = Timestamp.fromDate(new Date(Date.now() - 1000));
   const form = { linkId: 'L1nkL1nkL1nkL1nkL1nk', clientId: 'c1', status: 'open', expiresAt: later, answers: { fullName: 'Jordan Citizen', phone: '0491570156' }, createdBy: 'u-wkr' };
   const CL = 'C0nsentC0nsentC0nsent1';
-  const cform = { linkId: CL, clientId: 'c1', status: 'open', expiresAt: later, version: '2026-11 v1', createdBy: 'u-wkr', needsDob: true };
+  const PNG = 'data:image/png;base64,' + 'iVBORw0KGgo='.repeat(40);
+  const sigDrawn = { method: 'drawn', name: 'Jordan Citizen', image: PNG, at: '2026-11-12T01:02:03.000Z', role: 'self' };
+  const sigTyped = { method: 'typed', name: 'Jordan Citizen', at: '2026-11-12T01:02:03.000Z', role: 'self' };
+  const ans = { collect: 'Yes', programs: 'Yes', audit: 'No', video: 'Yes', transport: 'No', understood: true, questions: true, voluntary: true, limits: true, change: true };
+  const party = (o) => ({ name: 'Dr Sam Example', role: 'GP', contact: '03 5550 0000', what: ['contact', 'plan'], why: 'So my GP knows about my counselling', back: 'Yes', ...(o || {}) });
+  const shareYes = { pro: 'Yes', per: 'Yes', length: 'm12', pro1: party(), per1: party({ name: 'Pat Citizen', role: 'mother', what: ['contact'], back: 'No' }) };
+  const shareNo = { pro: 'No', per: 'No' };
+  const cform = { linkId: CL, clientId: 'c1', status: 'open', expiresAt: later, version: '2026-11 v2', createdBy: 'u-wkr', needsDob: true };
   await check(f + ' staff can create an intake link + form', Promise.all([
     assertSucceeds(setDoc(doc(wkr, T + '/intakeLinks/L1nkL1nkL1nkL1nkL1nk'), { status: 'open', expiresAt: later, needsDob: true })),
     assertSucceeds(setDoc(doc(wkr, T + '/intakeForms/F1'), form))]));
@@ -99,7 +111,9 @@ for (const file of Object.keys(RULES)) {
     await setDoc(doc(d, T + '/intakeForms/F3'), { ...form, linkId: 'x3', status: 'cancelled' });
     await setDoc(doc(d, T + '/intakeForms/F4'), { ...form, linkId: 'x4' });
     await setDoc(doc(d, T + '/intakeForms/F5'), { ...form, linkId: 'x5' }); await setDoc(doc(d, T + '/intakeForms/F6'), { ...form, linkId: 'x6' });
-    for (const n of [2, 3, 4, 5, 6, 7, 8]) await setDoc(doc(d, T + '/consentForms/CF' + n), { ...cform, linkId: 'cx' + n });
+    for (const n of [2, 3, 4, 5, 6, 7, 8]) await setDoc(doc(d, T + '/consentForms/CF' + n), { ...cform, linkId: 'cx' + n, sharing: shareYes });
+    for (const n of [9, 10, 11, 12, 13, 14, 15]) await setDoc(doc(d, T + '/consentForms/CF' + n), { ...cform, linkId: 'cx' + n });
+    await setDoc(doc(d, T + '/consentForms/CFNS'), { ...cform, linkId: 'cxns' });
     await setDoc(doc(d, T + '/consentForms/CFX'), { ...cform, linkId: 'cxx', expiresAt: past });
     await setDoc(doc(d, T + '/consentForms/CFC'), { ...cform, linkId: 'cxc', status: 'cancelled' }); });
   await check(f + ' a signed-out visitor cannot create links or forms', Promise.all([
@@ -118,9 +132,6 @@ for (const file of Object.keys(RULES)) {
   await check(f + ' the client cannot mark it applied/cancelled', assertFails(updateDoc(doc(anon, T + '/intakeForms/F1'), { status: 'applied' })));
   await check(f + ' submitting needs the declaration ticked', assertFails(updateDoc(doc(anon, T + '/intakeForms/F1'), { status: 'submitted', submittedAt: 'x' })));
   const omit = (o, k) => { const c = { ...o }; delete c[k]; return c; };
-  const PNG = 'data:image/png;base64,' + 'iVBORw0KGgo='.repeat(40);
-  const sigDrawn = { method: 'drawn', name: 'Jordan Citizen', image: PNG, at: '2026-11-12T01:02:03.000Z', role: 'self' };
-  const sigTyped = { method: 'typed', name: 'Jordan Citizen', at: '2026-11-12T01:02:03.000Z', role: 'self' };
   const submit = (sig, extra) => ({ answers: { fullName: 'Jordan Citizen', declaration: true }, status: 'submitted', submittedAt: 'x', ...(sig ? { signature: sig } : {}), ...extra });
   await check(f + ' submitting the intake needs a signature (declaration alone is not enough)', assertFails(updateDoc(doc(anon, T + '/intakeForms/F1'), submit(null))));
   await check(f + ' a draft save cannot carry a signature', assertFails(updateDoc(doc(anon, T + '/intakeForms/F1'), { answers: { fullName: 'x' }, status: 'draft', signature: sigTyped })));
@@ -153,8 +164,8 @@ for (const file of Object.keys(RULES)) {
   await check(f + ' staff can read SMS usage; nobody can write it from a browser', Promise.all([
     assertSucceeds(getDoc(doc(wkr, T + '/smsUsage/2026-10'))), assertFails(setDoc(doc(sys, T + '/smsUsage/2026-10'), { cost: 0 }))]));
   // ── client consent forms (signed-out client) ──
-  const ans = { collect: 'Yes', programs: 'Yes', audit: 'No', external: 'No', video: 'Yes', transport: 'No', understood: true, questions: true, voluntary: true, change: true };
-  const csubmit = (over, sig, drop) => ({ answers: (a => { (drop || []).forEach(k => delete a[k]); return a; })({ ...ans, ...(over || {}) }), signature: sig === undefined ? sigDrawn : sig, version: '2026-11 v1', status: 'submitted', submittedAt: '2026-11-12T01:02:03.000Z' });
+  // Two writes: the sharing section, then the answers + signature (which sends it).
+  const sendWith = (over, sig, drop) => ({ answers: (a => { (drop || []).forEach(k => delete a[k]); return a; })({ ...ans, ...(over || {}) }), signature: sig === undefined ? sigDrawn : sig, version: '2026-11 v2', status: 'submitted', submittedAt: '2026-11-12T01:02:03.000Z' });
   await check(f + ' staff can create a consent link + form', Promise.all([
     assertSucceeds(setDoc(doc(wkr, T + '/consentLinks/' + CL), { status: 'open', expiresAt: later, needsDob: true })),
     assertSucceeds(setDoc(doc(wkr, T + '/consentForms/CF1'), cform))]));
@@ -166,32 +177,82 @@ for (const file of Object.keys(RULES)) {
   await check(f + ' the client can open their own consent form by its id; an expired or cancelled one cannot be opened', Promise.all([
     assertSucceeds(getDoc(doc(anon, T + '/consentForms/CF1'))), assertFails(getDoc(doc(anon, T + '/consentForms/CFX'))), assertFails(getDoc(doc(anon, T + '/consentForms/CFC')))]));
   await check(f + ' an anonymous Firebase session is not staff for consent forms', Promise.all([assertFails(getDocs(collection(anonUser, T + '/consentForms'))), assertFails(setDoc(doc(anonUser, T + '/consentForms/CFA'), cform))]));
-  await check(f + ' consent: the client can submit once, signed and with every answer', assertSucceeds(updateDoc(doc(anon, T + '/consentForms/CF1'), csubmit())));
+  // sending needs the sharing to be saved first
+  await check(f + ' consent: it cannot be sent until the sharing section has been saved', assertFails(updateDoc(doc(anon, T + '/consentForms/CFNS'), sendWith())));
+  await check(f + ' consent: the client saves the sharing section first, then sends once, signed and with every answer', (async () => {
+    await assertSucceeds(updateDoc(doc(anon, T + '/consentForms/CF1'), { sharing: shareYes }));
+    await assertSucceeds(updateDoc(doc(anon, T + '/consentForms/CF1'), { sharing: shareYes }));
+    await assertSucceeds(updateDoc(doc(anon, T + '/consentForms/CF1'), sendWith()));
+  })());
   await check(f + ' consent: ...or with a typed name, or a representative', Promise.all([
-    assertSucceeds(updateDoc(doc(anon, T + '/consentForms/CF2'), csubmit({}, sigTyped))),
-    assertSucceeds(updateDoc(doc(anon, T + '/consentForms/CF3'), csubmit({}, { ...sigDrawn, role: 'representative', relationship: 'guardian' })))]));
-  await check(f + ' consent: after sending it is locked to the client, but they can still see it was sent', Promise.all([
-    assertFails(updateDoc(doc(anon, T + '/consentForms/CF1'), csubmit({ video: 'No' }))), assertSucceeds(getDoc(doc(anon, T + '/consentForms/CF1')))]));
+    assertSucceeds(updateDoc(doc(anon, T + '/consentForms/CF2'), sendWith({}, sigTyped))),
+    assertSucceeds(updateDoc(doc(anon, T + '/consentForms/CF3'), sendWith({}, { ...sigDrawn, role: 'representative', relationship: 'guardian' })))]));
+  await check(f + ' consent: after sending it is locked to the client (answers and sharing), but they can still see it was sent', Promise.all([
+    assertFails(updateDoc(doc(anon, T + '/consentForms/CF1'), sendWith({ video: 'No' }))), assertFails(updateDoc(doc(anon, T + '/consentForms/CF1'), { sharing: shareNo })), assertSucceeds(getDoc(doc(anon, T + '/consentForms/CF1')))]));
   await check(f + ' consent: an expired or cancelled form cannot be changed', Promise.all([
-    assertFails(updateDoc(doc(anon, T + '/consentForms/CFX'), csubmit())), assertFails(updateDoc(doc(anon, T + '/consentForms/CFC'), csubmit()))]));
+    assertFails(updateDoc(doc(anon, T + '/consentForms/CFX'), sendWith())), assertFails(updateDoc(doc(anon, T + '/consentForms/CFC'), sendWith())),
+    assertFails(updateDoc(doc(anon, T + '/consentForms/CFX'), { sharing: shareNo })), assertFails(updateDoc(doc(anon, T + '/consentForms/CFC'), { sharing: shareNo }))]));
   await check(f + ' consent: it must be signed', Promise.all([
     assertFails(updateDoc(doc(anon, T + '/consentForms/CF4'), { answers: ans, version: 'v', status: 'submitted', submittedAt: 'x' })),
-    assertFails(updateDoc(doc(anon, T + '/consentForms/CF4'), csubmit({}, { method: 'typed', name: '', at: 'x', role: 'self' }))),
-    assertFails(updateDoc(doc(anon, T + '/consentForms/CF4'), csubmit({}, { ...sigDrawn, image: 'data:image/svg+xml;base64,PHN2Zz4=' })))]));
-  await check(f + ' consent: every answer is needed — the core consent must be Yes, the rest Yes or No, all four confirmations ticked', Promise.all([
-    assertFails(updateDoc(doc(anon, T + '/consentForms/CF5'), csubmit({ collect: 'No' }))),
-    assertFails(updateDoc(doc(anon, T + '/consentForms/CF5'), csubmit({ programs: 'Maybe' }))),
-    assertFails(updateDoc(doc(anon, T + '/consentForms/CF5'), csubmit({}, undefined, ['external']))),
-    assertFails(updateDoc(doc(anon, T + '/consentForms/CF5'), csubmit({ understood: false }))),
-    assertFails(updateDoc(doc(anon, T + '/consentForms/CF5'), csubmit({}, undefined, ['change']))),
-    assertFails(updateDoc(doc(anon, T + '/consentForms/CF5'), csubmit({ riskLevel: 'low' })))]));
+    assertFails(updateDoc(doc(anon, T + '/consentForms/CF4'), sendWith({}, { method: 'typed', name: '', at: 'x', role: 'self' }))),
+    assertFails(updateDoc(doc(anon, T + '/consentForms/CF4'), sendWith({}, { ...sigDrawn, image: 'data:image/svg+xml;base64,PHN2Zz4=' })))]));
+  await check(f + ' consent: every answer is needed — the core consent must be Yes, the rest Yes or No, and all five confirmations (including the law / mandatory reporting) ticked', Promise.all([
+    assertFails(updateDoc(doc(anon, T + '/consentForms/CF5'), sendWith({ collect: 'No' }))),
+    assertFails(updateDoc(doc(anon, T + '/consentForms/CF5'), sendWith({ programs: 'Maybe' }))),
+    assertFails(updateDoc(doc(anon, T + '/consentForms/CF5'), sendWith({}, undefined, ['video']))),
+    assertFails(updateDoc(doc(anon, T + '/consentForms/CF5'), sendWith({ understood: false }))),
+    assertFails(updateDoc(doc(anon, T + '/consentForms/CF5'), sendWith({ limits: false }))),
+    assertFails(updateDoc(doc(anon, T + '/consentForms/CF5'), sendWith({}, undefined, ['limits']))),
+    assertFails(updateDoc(doc(anon, T + '/consentForms/CF5'), sendWith({}, undefined, ['change']))),
+    assertFails(updateDoc(doc(anon, T + '/consentForms/CF5'), sendWith({ external: 'No' }))),
+    assertFails(updateDoc(doc(anon, T + '/consentForms/CF5'), sendWith({ riskLevel: 'low' })))]));
   await check(f + ' consent: nothing else can be changed (client, expiry, status, who it was for)', Promise.all([
     assertFails(updateDoc(doc(anon, T + '/consentForms/CF6'), { clientId: 'c2' })),
     assertFails(updateDoc(doc(anon, T + '/consentForms/CF6'), { expiresAt: Timestamp.fromDate(new Date(Date.now() + 365 * 864e5)) })),
     assertFails(updateDoc(doc(anon, T + '/consentForms/CF6'), { status: 'applied' })),
-    assertFails(updateDoc(doc(anon, T + '/consentForms/CF6'), { ...csubmit(), clientId: 'c2' })),
-    assertFails(updateDoc(doc(anon, T + '/consentForms/CF6'), { ...csubmit(), appliedBy: 'me' }))]));
-  await check(f + ' consent: the client cannot save a draft', assertFails(updateDoc(doc(anon, T + '/consentForms/CF7'), { answers: { collect: 'Yes' }, status: 'open' })));
+    assertFails(updateDoc(doc(anon, T + '/consentForms/CF6'), { ...sendWith(), clientId: 'c2' })),
+    assertFails(updateDoc(doc(anon, T + '/consentForms/CF6'), { ...sendWith(), appliedBy: 'me' })),
+    assertFails(updateDoc(doc(anon, T + '/consentForms/CF6'), { sharing: shareYes, clientId: 'c2' })),
+    assertFails(updateDoc(doc(anon, T + '/consentForms/CF6'), { sharing: shareYes, status: 'submitted' }))]));
+  await check(f + ' consent: the client cannot change the sharing in the same write that sends the form', assertFails(updateDoc(doc(anon, T + '/consentForms/CF6'), { ...sendWith(), sharing: shareNo })));
+  await check(f + ' consent: the client cannot save a draft of the answers', assertFails(updateDoc(doc(anon, T + '/consentForms/CF7'), { answers: { collect: 'Yes' }, status: 'open' })));
+  // the sharing section
+  const share = (sh, n) => updateDoc(doc(anon, T + '/consentForms/CF' + n), { sharing: sh });
+  await check(f + ' consent: the client must say what they want about sharing, and may say nobody', Promise.all([
+    assertFails(share({}, 9)), assertSucceeds(share(shareNo, 10))]));
+  await check(f + ' consent: sharing — "Yes" needs a named person, "No" cannot carry people, a length is needed only when sharing', Promise.all([
+    assertFails(share({ pro: 'Yes', per: 'No', length: 'm6' }, 9)),
+    assertFails(share({ pro: 'No', per: 'No', pro1: party() }, 9)),
+    assertFails(share({ pro: 'Yes', per: 'No', pro1: party() }, 9)),
+    assertFails(share({ pro: 'No', per: 'No', length: 'm6' }, 9)),
+    assertFails(share({ pro: 'Yes', per: 'No', length: 'forever', pro1: party() }, 9)),
+    assertFails(share({ pro: 'Maybe', per: 'No' }, 9))]));
+  await check(f + ' consent: sharing — each person needs a name, something ticked, and a yes/no on "they can tell us things"; unknown fields and codes are refused', Promise.all([
+    assertFails(share({ ...shareYes, pro1: party({ name: '' }) }, 11)),
+    assertFails(share({ ...shareYes, pro1: party({ name: 'x'.repeat(121) }) }, 11)),
+    assertFails(share({ ...shareYes, pro1: party({ what: [] }) }, 11)),
+    assertFails(share({ ...shareYes, pro1: party({ what: ['contact', 'passwords'] }) }, 11)),
+    assertFails(share({ ...shareYes, pro1: party({ what: 'contact' }) }, 11)),
+    assertFails(share({ ...shareYes, pro1: party({ what: ['contact', 'contact', 'contact', 'contact', 'contact', 'contact', 'contact'] }) }, 11)),
+    assertFails(share({ ...shareYes, pro1: party({ back: 'Maybe' }) }, 11)),
+    assertFails(share({ ...shareYes, pro1: party({ why: 'x'.repeat(301) }) }, 11)),
+    assertFails(share({ ...shareYes, pro1: party({ role: 'x'.repeat(121) }) }, 11)),
+    assertFails(share({ ...shareYes, pro1: party({ contact: 7 }) }, 11)),
+    assertFails(share({ ...shareYes, pro1: { ...party(), admin: true } }, 11)),
+    assertFails(share({ ...shareYes, pro6: party() }, 11)),
+    assertFails(share({ ...shareYes, extra: 'x' }, 11))]));
+  await check(f + ' consent: sharing — up to five of each, with the optional role, contact and reason left out', Promise.all([
+    assertSucceeds(share({ pro: 'Yes', per: 'Yes', length: 'until', pro1: party(), pro2: party({ name: 'B' }), pro3: party({ name: 'C' }), pro4: party({ name: 'D' }), pro5: party({ name: 'E' }),
+      per1: { name: 'Pat', what: ['safety'], back: 'No' }, per2: { name: 'Lee', what: ['contact', 'plan', 'health', 'notes', 'referrals', 'safety'], back: 'Yes' } }, 12)),
+    assertSucceeds(share({ pro: 'No', per: 'Yes', length: 'm6', per1: party({ name: 'Aunty Pat', role: 'Elder' }) }, 13))]));
+  const full = n => party({ name: 'N' + n + ' ' + 'x'.repeat(100), role: 'r'.repeat(120), contact: 'c'.repeat(120), why: 'w'.repeat(300), what: ['contact', 'plan', 'health', 'notes', 'referrals', 'safety'] });
+  await check(f + ' consent: the biggest sharing list that is allowed — five professionals and five people, every field full — goes through (the rules have a 1000-expression limit)', assertSucceeds(share({ pro: 'Yes', per: 'Yes', length: 'm12',
+    pro1: full(1), pro2: full(2), pro3: full(3), pro4: full(4), pro5: full(5), per1: full(6), per2: full(7), per3: full(8), per4: full(9), per5: full(10) }, 14)));
+  await check(f + ' consent: ...and then the biggest form can be sent, drawn signature and all', assertSucceeds(updateDoc(doc(anon, T + '/consentForms/CF14'), sendWith())));
+  await check(f + ' consent: ...but not a sixth person, or a name with a line break', Promise.all([
+    assertFails(share({ pro: 'Yes', per: 'No', length: 'm6', pro1: party(), pro6: party() }, 15)),
+    assertFails(share({ pro: 'Yes', per: 'No', length: 'm6', pro1: party({ name: 'a\nb' }) }, 15))]));
+  await check(f + ' consent: sharing cannot be slipped into the intake form', assertFails(updateDoc(doc(anon, T + '/intakeForms/F5'), { sharing: shareYes, status: 'draft', answers: { fullName: 'x' } })));
   await check(f + ' consent: staff can read, list and mark it applied; nobody can delete', Promise.all([
     assertSucceeds(getDocs(collection(wkr, T + '/consentForms'))),
     assertSucceeds(updateDoc(doc(wkr, T + '/consentForms/CF1'), { status: 'applied', appliedBy: 'Sam' })),

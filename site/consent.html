@@ -48,6 +48,7 @@
   const $ = id => document.getElementById(id);
   const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   let db, token = '', formRef = null, expires = null, answers = {}, signer = null, keep = {}, tries = 0, sending = false, live = false;
+  const share = { pro: '', per: '', length: '', parties: { pro: [], per: [] } };      // what they say about sharing; the people they name stay in memory only
 
   const contactHTML = () => `<p class="contact">Questions, or want to do this with a worker? Call <a href="tel:${ORG_TEL}">${ORG_PHONE}</a></p>`;
   function screen(icon, title, text, extra) {
@@ -113,17 +114,21 @@
     const F = snap.data();
     expires = toDate(F.expiresAt) || expires;
     if (F.status === 'submitted') return doneScreen(true, F);
-    const local = readLocal(); if (local) answers = Object.assign({}, local);
+    const local = readLocal(); if (local) { answers = Object.assign({}, local.a); share.pro = local.s.pro; share.per = local.s.per; share.length = local.s.length; ['pro', 'per'].forEach(g => { if (share[g] === 'Yes') share.parties[g] = [blankParty()]; }); }
     render();
     return true;
   }
 
   // ---- the form ----
+  // Saved on the phone while they fill it in: the Yes/No choices and the sharing yes/no and length only.
+  // The NAMES of people and services they list are kept in memory, never on the phone, because this
+  // page may be open on a worker's shared device.
   const LKEY = () => 'wg-consent-' + token;
-  function writeLocal() { try { localStorage.setItem(LKEY(), JSON.stringify(answers)); } catch (_) {} }
+  function writeLocal() { try { localStorage.setItem(LKEY(), JSON.stringify({ a: answers, s: { pro: share.pro, per: share.per, length: share.length } })); } catch (_) {} }
   function readLocal() {
-    try { const v = JSON.parse(localStorage.getItem(LKEY()) || 'null'); if (!v || typeof v !== 'object') return null;
-      const ok = {}; C.CHOICES.forEach(c => { if (v[c.key] === 'Yes' || v[c.key] === 'No') ok[c.key] = v[c.key]; }); C.CONFIRMS.forEach(c => { if (v[c.key] === true) ok[c.key] = true; }); return ok; } catch (_) { return null; }
+    try { const v = JSON.parse(localStorage.getItem(LKEY()) || 'null'); if (!v || typeof v !== 'object' || !v.a) return null;
+      const a = {}; C.CHOICES.forEach(c => { if (v.a[c.key] === 'Yes' || v.a[c.key] === 'No') a[c.key] = v.a[c.key]; }); C.CONFIRMS.forEach(c => { if (v.a[c.key] === true) a[c.key] = true; });
+      const s = v.s || {}; return { a, s: { pro: s.pro === 'Yes' || s.pro === 'No' ? s.pro : '', per: s.per === 'Yes' || s.per === 'No' ? s.per : '', length: C.SHARE_LENGTH.some(x => x[0] === s.length) ? s.length : '' } }; } catch (_) { return null; }
   }
   function clearLocal() { try { localStorage.removeItem(LKEY()); } catch (_) {} }
 
@@ -137,6 +142,103 @@
         <label class="opt no"><input type="radio" name="ch-${c.key}" value="No" data-k="${c.key}" ${v === 'No' ? 'checked' : ''}> <span>No, I don’t agree</span></label>
       </div></div>`;
   }
+
+  // ---- sharing with other people: professionals and services / people in my life ----
+  function partyHTML(g, i) {
+    const p = share.parties[g.key][i], id = `p-${g.key}-${i}`;
+    return `<div class="party" data-g="${g.key}" data-i="${i}" role="group" aria-labelledby="${id}-t">
+      <p class="party-t" id="${id}-t">${esc(g.short)} ${i + 1}</p>
+      <div class="f"><label for="${id}-name">${esc(g.nameLabel)} <span aria-hidden="true" style="color:var(--err)">*</span></label><input type="text" id="${id}-name" data-f="name" maxlength="120" autocomplete="off" value="${esc(p.name)}"></div>
+      <div class="f"><label for="${id}-role">${esc(g.roleLabel)}</label><p class="help">${esc(g.roleHint)}</p><input type="text" id="${id}-role" data-f="role" maxlength="120" autocomplete="off" value="${esc(p.role)}"></div>
+      <div class="f"><label for="${id}-contact">Phone or email <span style="font-weight:400">(if you want us to have it)</span></label><input type="text" id="${id}-contact" data-f="contact" maxlength="120" autocomplete="off" value="${esc(p.contact)}"></div>
+      <fieldset class="f"><legend>What can we share with them? <span aria-hidden="true" style="color:var(--err)">*</span></legend><p class="help">Tick any. Anything you don’t tick stays private.</p>
+        <div class="opts">${C.SHARE_WHAT.map(([k, label]) => `<label class="opt"><input type="checkbox" data-f="what" value="${k}" ${p.what.includes(k) ? 'checked' : ''}> <span>${esc(label)}</span></label>`).join('')}</div></fieldset>
+      <div class="f"><label for="${id}-why">Why? <span style="font-weight:400">(optional)</span></label><input type="text" id="${id}-why" data-f="why" maxlength="300" autocomplete="off" placeholder="For example: so they can help me get to appointments" value="${esc(p.why)}"></div>
+      <fieldset class="f"><legend>Can they also tell Worn Gundidj things about you? <span aria-hidden="true" style="color:var(--err)">*</span></legend>
+        <div class="opts two"><label class="opt"><input type="radio" name="${id}-back" data-f="back" value="Yes" ${p.back === 'Yes' ? 'checked' : ''}> <span>Yes</span></label><label class="opt no"><input type="radio" name="${id}-back" data-f="back" value="No" ${p.back === 'No' ? 'checked' : ''}> <span>No</span></label></div></fieldset>
+      <button type="button" class="btn link" data-remove>Remove this ${g.key === 'pro' ? 'person or service' : 'person'}</button>
+    </div>`;
+  }
+  function shareGroupHTML(g, n) {
+    const yes = share[g.key], list = share.parties[g.key];
+    return `<div class="share-group" data-group="${g.key}">
+      <h3 class="sub-h">${String.fromCharCode(65 + n)}. ${esc(g.title)}</h3>
+      <p class="d" data-read>${esc(g.blurb)}</p>
+      <div class="choice" id="sh-${g.key}" role="radiogroup" aria-labelledby="sq-${g.key}"><p class="q" id="sq-${g.key}" data-read>${esc(g.ask)}</p>
+        <div class="opts two">
+          <label class="opt"><input type="radio" name="sh-${g.key}" value="Yes" data-share="${g.key}" ${yes === 'Yes' ? 'checked' : ''}> <span>Yes, I’ll name them</span></label>
+          <label class="opt no"><input type="radio" name="sh-${g.key}" value="No" data-share="${g.key}" ${yes === 'No' ? 'checked' : ''}> <span>No, nobody</span></label></div></div>
+      ${yes === 'Yes' ? `${list.map((_, i) => partyHTML(g, i)).join('')}${list.length < C.SHARE_MAX ? `<button type="button" class="btn" data-add="${g.key}">+ Add another ${g.key === 'pro' ? 'person or service' : 'person'}</button>` : `<p class="help">That’s the most we can take on this form (${C.SHARE_MAX}). Your worker can add more with you.</p>`}` : ''}
+    </div>`;
+  }
+  function shareBoxHTML() {
+    const any = share.pro === 'Yes' || share.per === 'Yes';
+    return `${C.SHARE_GROUPS.map(shareGroupHTML).join('')}
+      ${any ? `<div class="share-group" id="sh-length"><h3 class="sub-h">How long should this last?</h3><p class="d" data-read>It ends on its own after the time you choose, and we will ask you again. You can change it or stop it any time before then.</p>
+        <div class="opts">${C.SHARE_LENGTH.map(([k, label]) => `<label class="opt"><input type="radio" name="sh-length" value="${k}" data-length ${share.length === k ? 'checked' : ''}> <span>${esc(label)}</span></label>`).join('')}</div></div>` : ''}`;
+  }
+  const blankParty = () => ({ name: '', role: '', contact: '', what: [], why: '', back: '' });
+  function renderShare(focus) {
+    const box = $('share-box'); if (!box) return;
+    box.innerHTML = shareBoxHTML();
+    if (focus) { const el = box.querySelector(focus); el && el.focus && el.focus(); }
+  }
+  function onShareClick(ev) {
+    const add = ev.target.closest('[data-add]'), rm = ev.target.closest('[data-remove]');
+    if (add) { const g = add.dataset.add; if (share.parties[g].length < C.SHARE_MAX) { share.parties[g].push(blankParty()); renderShare(`.party[data-g="${g}"][data-i="${share.parties[g].length - 1}"] input[data-f="name"]`); } }
+    if (rm) { const party = rm.closest('.party'), g = party.dataset.g, i = Number(party.dataset.i); share.parties[g].splice(i, 1); if (!share.parties[g].length) share.parties[g].push(blankParty()); renderShare(`#sh-${g}`); }
+  }
+  function onShareChange(ev) {
+    const el = ev.target;
+    if (el.dataset.share) {                                       // Yes / No for a whole list
+      const g = el.dataset.share; share[g] = el.value;
+      if (el.value === 'Yes' && !share.parties[g].length) share.parties[g].push(blankParty());
+      if (el.value === 'No') share.parties[g] = [];
+      renderShare(); writeLocal(); return;
+    }
+    if (el.dataset.length !== undefined) { share.length = el.value; writeLocal(); return; }
+    const party = el.closest('.party'); if (!party) return;
+    const p = share.parties[party.dataset.g][Number(party.dataset.i)], f = el.dataset.f; if (!p || !f) return;
+    if (f === 'what') p.what = [...party.querySelectorAll('input[data-f="what"]:checked')].map(x => x.value);
+    else p[f] = el.value;
+  }
+  function onShareInput(ev) {
+    const el = ev.target; if (el.type !== 'text') return;
+    const party = el.closest('.party'); if (!party) return;
+    const p = share.parties[party.dataset.g][Number(party.dataset.i)]; if (p && el.dataset.f) p[el.dataset.f] = el.value;
+  }
+  // What goes to the cloud: { pro, per, length, pro1…, per1… } — or the first thing that is missing.
+  function buildSharing() {
+    const out = {}, fail = (msg, sel) => ({ error: msg, sel });
+    for (const g of C.SHARE_GROUPS) {
+      if (share[g.key] !== 'Yes' && share[g.key] !== 'No') return fail(`Please tap Yes or No: “${g.ask}”`, '#sh-' + g.key);
+      out[g.key] = share[g.key];
+    }
+    for (const g of C.SHARE_GROUPS) {
+      if (share[g.key] !== 'Yes') continue;
+      const list = share.parties[g.key].filter(p => p.name.trim() || p.role.trim() || p.contact.trim() || p.why.trim() || p.what.length || p.back);   // a card left empty is ignored
+      share.parties[g.key] = list.length ? list : [blankParty()];
+      if (!list.length) return fail(`You said Yes to sharing with ${g.title.toLowerCase()}. Please add at least one, or tap No.`, `.party[data-g="${g.key}"] input[data-f="name"]`);
+      for (let i = 0; i < list.length; i++) {
+        const p = list[i], el = sel => `.party[data-g="${g.key}"][data-i="${i}"] ${sel}`;
+        if (!p.name.trim()) return fail(`Please add a name for ${g.short.toLowerCase()} ${i + 1}.`, el('input[data-f="name"]'));
+        if (!p.what.length) return fail(`Please tick what we can share with ${p.name.trim()}, or remove them.`, el('input[data-f="what"]'));
+        if (p.back !== 'Yes' && p.back !== 'No') return fail(`Please say whether ${p.name.trim()} can also tell Worn Gundidj things about you.`, el('input[data-f="back"]'));
+        const q = { name: p.name.trim().slice(0, 120), what: p.what.slice(), back: p.back };
+        if (p.role.trim()) q.role = p.role.trim().slice(0, 120);
+        if (p.contact.trim()) q.contact = p.contact.trim().slice(0, 120);
+        if (p.why.trim()) q.why = p.why.trim().slice(0, 300);
+        out[g.key + (i + 1)] = q;
+      }
+    }
+    if (share.pro === 'Yes' || share.per === 'Yes') {
+      if (!C.SHARE_LENGTH.some(x => x[0] === share.length)) return fail('Please choose how long the sharing should last.', '#sh-length');
+      out.length = share.length;
+    }
+    return { sharing: out };
+  }
+
+  const TITLES = ['', 'teal', '', 'ochre', 'teal', '', 'teal'];
   function render() {
     live = true;
     $('main').innerHTML = `
@@ -154,18 +256,28 @@
       <div class="card"><p class="intro" data-read>For each one, tap <strong>Yes</strong> or <strong>No</strong>. We need your answer to every one. Only the first is needed to give you support. The rest are your choice.</p>
         ${C.CHOICES.map(choiceHTML).join('')}</div>
 
-      <h2 class="bar-h ochre">3. When we might share without your consent</h2>
-      <div class="card" data-read><p style="margin:0 0 8px">${esc(C.LIMITS_INTRO)}</p>
-        <div class="rowsx">${C.LIMITS.map(t => `<div>${esc(t)}</div>`).join('')}</div></div>
+      <h2 class="bar-h" id="h-share">3. ${esc(C.SHARE_TITLE)}</h2>
+      <div class="card"><p class="lead" data-read>${esc(C.SHARE_INTRO)}</p>
+        <div class="share-rights" data-read><p class="mr-title">${esc(C.SHARE_RIGHTS_TITLE)}</p>
+          <div class="rowsx">${C.SHARE_RIGHTS.map(([t, d]) => `<div><b>${esc(t)}.</b> ${esc(d)}</div>`).join('')}</div></div>
+        <div id="share-box">${shareBoxHTML()}</div></div>
 
-      <h2 class="bar-h">4. Your rights</h2>
+      <h2 class="bar-h ochre" id="h-limits">4. ${esc(C.LIMITS_TITLE)}</h2>
+      <div class="card" data-read><p style="margin:0 0 10px">${esc(C.LIMITS_INTRO)}</p>
+        <p class="mr-title">${esc(C.MUST_TITLE)}</p>
+        <div class="rowsx">${C.MUST.map(([t, d]) => `<div><b>${esc(t)}.</b> ${esc(d)}</div>`).join('')}</div>
+        <p class="mr-title">${esc(C.MAY_TITLE)}</p>
+        <div class="rowsx">${C.MAY.map(([t, d]) => `<div><b>${esc(t)}:</b> ${esc(d)}</div>`).join('')}</div>
+        <p style="margin:12px 0 0;font-size:15.5px"><strong>${esc(C.LIMITS_NOTE)}</strong></p></div>
+
+      <h2 class="bar-h teal">5. Your rights</h2>
       <div class="card" data-read><div class="rowsx">${C.RIGHTS.map(([t, d]) => `<div><b>${esc(t)}.</b> ${esc(d)}</div>`).join('')}</div></div>
 
-      <h2 class="bar-h teal">5. Before you sign</h2>
+      <h2 class="bar-h">6. Before you sign</h2>
       <div class="card"><p class="intro">Tap each box to say it is true.</p>
         ${C.CONFIRMS.map(c => `<label class="confirm"><input type="checkbox" data-c="${c.key}" ${answers[c.key] ? 'checked' : ''}> <span>${esc(c.t)}</span></label>`).join('')}</div>
 
-      <h2 class="bar-h">6. Sign</h2>
+      <h2 class="bar-h teal">7. Sign</h2>
       <div class="card" id="sign-card">${SIGN.blockHTML({ prefix: 'sg' })}
         <div id="send-err" role="alert"></div>
         <p style="margin:16px 0 0"><button class="btn primary" type="button" id="send" style="width:100%">Sign and send</button></p>
@@ -174,12 +286,13 @@
     signer = SIGN.mount($('sign-card'), { prefix: 'sg', keep });
     $('main').querySelectorAll('input[data-k]').forEach(el => el.addEventListener('change', () => { answers[el.dataset.k] = el.value; writeLocal(); }));
     $('main').querySelectorAll('input[data-c]').forEach(el => el.addEventListener('change', () => { answers[el.dataset.c] = el.checked; writeLocal(); }));
+    const sb = $('share-box'); sb.addEventListener('click', onShareClick); sb.addEventListener('change', onShareChange); sb.addEventListener('input', onShareInput);
     $('send').addEventListener('click', submit);
     if ('speechSynthesis' in window && window.SpeechSynthesisUtterance) { $('speak').hidden = false; $('speak').addEventListener('click', readAloud); }
   }
 
   // Read the explanations out loud (the browser's own voice, on the phone). Only the form's
-  // wording is read — nothing personal.
+  // wording is read — nothing personal, and never what they have typed.
   function readAloud() {
     const synth = window.speechSynthesis, btn = $('speak'); if (!synth || !btn) return;
     const label = on => { btn.textContent = on ? '⏹ Stop reading' : '🔊 Read this form to me'; };
@@ -199,17 +312,21 @@
     const missing = C.CHOICES.filter(c => answers[c.key] !== 'Yes' && answers[c.key] !== 'No');
     if (missing.length) return problem(`Please tap Yes or No for: ${missing.map(c => c.q).join(', ')}.`, $('ch-' + missing[0].key));
     if (answers.collect !== 'Yes') return problem(`To give you support we do need to keep some information. If you’d rather not agree to that, please call us on ${ORG_PHONE} and we’ll talk it through with you.`, $('ch-collect'));
+    const sh = buildSharing(); if (sh.error) { if (share.pro === 'Yes' || share.per === 'Yes') renderShare(); return problem(sh.error, sh.sel ? document.querySelector(sh.sel) : null); }
     const unconfirmed = C.CONFIRMS.filter(c => answers[c.key] !== true);
-    if (unconfirmed.length) return problem('Please tap each box in “5. Before you sign” to say it is true.', document.querySelector(`input[data-c="${unconfirmed[0].key}"]`));
+    if (unconfirmed.length) return problem('Please tap each box in “6. Before you sign” to say it is true.', document.querySelector(`input[data-c="${unconfirmed[0].key}"]`));
     const bad = signer.validate();
     if (bad) return problem(bad, $('sg-block'));
     const sig = signer.value(); if (!sig) return problem('Please check your signature and try again.', $('sg-block'));
     const out = {}; C.KEYS.forEach(k => { if (answers[k] !== undefined) out[k] = answers[k]; });
     const btn = $('send'); sending = true; btn.disabled = true; btn.textContent = 'Sending…';
     try {
+      // Two writes: the sharing list first (the form's security rules cap how much one write can carry),
+      // then the answers and signature, which send the form. Both are safe to repeat if the first try drops out.
+      await formRef.update({ sharing: sh.sharing });
       await formRef.update({ answers: out, signature: sig, version: C.VERSION, status: 'submitted', submittedAt: new Date().toISOString() });
       clearLocal(); sending = false;
-      doneScreen(false, { answers: out, signature: sig, version: C.VERSION, submittedAt: new Date().toISOString() });
+      doneScreen(false, { answers: out, sharing: sh.sharing, signature: sig, version: C.VERSION, submittedAt: new Date().toISOString() });
     } catch (e) {
       console.warn(e); sending = false; btn.disabled = false; btn.textContent = 'Sign and send';
       if (e && e.code === 'permission-denied') return expiredScreen();
@@ -221,6 +338,18 @@
   // ---- done, and the client's own copy ----
   const PNG = /^data:image\/png;base64,[A-Za-z0-9+/=]+$/;
   const ansText = v => v === 'Yes' ? 'Yes — I agree' : v === 'No' ? 'No — I don’t agree' : 'Not answered';
+  const whatText = codes => (codes || []).map(k => (C.SHARE_WHAT.find(x => x[0] === k) || [k, k])[1]).join('; ');
+  function sharingCopyHTML(Sh) {
+    Sh = Sh || {};
+    const lenLabel = (C.SHARE_LENGTH.find(x => x[0] === Sh.length) || [])[1];
+    const groups = C.SHARE_GROUPS.map(g => {
+      const people = [1, 2, 3, 4, 5].map(n => Sh[g.key + n]).filter(Boolean);
+      return `<div class="bar-h ${g.key === 'pro' ? 'teal' : ''}">Sharing with: ${esc(g.title)}</div>` + (Sh[g.key] === 'Yes' && people.length
+        ? `<div class="rowsx">${people.map(p => `<div><b>${esc(p.name)}</b>${p.role ? ' — ' + esc(p.role) : ''}${p.contact ? '<br>Contact: ' + esc(p.contact) : ''}<br>Can be shared: ${esc(whatText(p.what))}${p.why ? '<br>Why: ' + esc(p.why) : ''}<br>They can also tell Worn Gundidj things about me: <strong>${esc(p.back)}</strong></div>`).join('')}</div>`
+        : `<div class="rowsx"><div>No — I don’t want information shared with ${esc(g.title.toLowerCase())}.</div></div>`);
+    }).join('');
+    return groups + (Sh.length ? `<p style="margin:6px 0 0;font-size:12px"><strong>This lasts:</strong> ${esc(lenLabel || '')}. I can change or stop it any time by telling my worker.</p>` : '');
+  }
   function copyHTML(F) {
     const A = F.answers || {}, S = F.signature || {}, when = S.at ? new Date(S.at) : null;
     const sig = S.method === 'drawn' && PNG.test(S.image || '') ? `<img src="${S.image}" alt="Signature of ${esc(S.name)}">` : `<div style="font:italic 28px/1.2 'Brush Script MT','Segoe Script',cursive;border-bottom:1px solid #111;padding:6px 2px">${esc(S.name)}</div>`;
@@ -228,6 +357,9 @@
       <div class="wg-addr">1-3 Rooneys Rd, Warrnambool VIC 3280 <span>|</span> Phone (03) 5561 5315</div>
       <div class="bar-h">What I agreed to</div>
       <div class="rowsx">${C.CHOICES.map(c => `<div><b>${esc(c.q)}</b><br>${esc(c.d)}<br><strong>${esc(ansText(A[c.key]))}</strong></div>`).join('')}</div>
+      ${sharingCopyHTML(F.sharing)}
+      <div class="bar-h ochre">The law: when information must or may be shared</div>
+      <div class="rowsx">${C.MUST.map(([t, d]) => `<div><b>${esc(t)}.</b> ${esc(d)}</div>`).join('')}${C.MAY.map(([t, d]) => `<div><b>${esc(t)}:</b> ${esc(d)}</div>`).join('')}</div>
       <div class="bar-h teal">I confirmed that</div>
       <div class="rowsx">${C.CONFIRMS.map(c => `<div>${A[c.key] ? '☑' : '☐'} ${esc(c.t)}</div>`).join('')}</div>
       <div class="bar-h">Signature</div>

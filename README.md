@@ -252,10 +252,33 @@ or the **✍️ Consent forms** section of the file.
 * The client's page (`site/consent.html`, served at `/c`) first explains what
   **informed consent** means (told · understand · your choice · you can change
   your mind, and who can sign for someone under 18 or who can't decide), then
-  asks them to tap Yes or No on six choices — one is needed to give support, five
-  are their own — when information can be shared without consent, their rights,
-  four things to confirm, and a place to sign. Nothing is pre-ticked. A
+  asks them to tap Yes or No on five choices — one is needed to give support, four
+  are their own — then a **sharing section** (below), **when we must or may share
+  without consent, including mandatory reporting**, their rights, five things to
+  confirm, and a place to sign. Nothing is pre-ticked. A
   **🔊 Read this form to me** button reads the wording aloud on the phone.
+* **Sharing with other people (third parties):** two lists — **professionals and
+  services** (GP, NDIS provider, housing…) and **people in my life** (family,
+  carer, Elder…). The client says Yes or No to each; for a Yes they name up to
+  five people or services, tick *what* may be shared (contact and appointments,
+  plan, health, progress notes, referrals, safety), say *why*, and whether that
+  person may also tell Worn Gundidj things — then choose how long it lasts (6
+  months, 12 months, or until they change it). The section explains their rights
+  first: it's their choice, they choose what, only what is needed, other services
+  have their own privacy rules, they can see and change it any time, and it ends
+  on its own. The names are never kept on the phone.
+* **Mandatory reporting:** a plain-English section says that, whatever the client
+  ticks, some laws mean we must report (child abuse, sexual offences against a
+  child under 16, NDIS serious incidents, court orders) or may share (a serious
+  threat; family violence and child information sharing), and that we will tell
+  them first where it is safe. They must tick that they understand it. **It
+  describes the law in general terms — have management or a lawyer check it.**
+* When a form is filed the record keeps who may be shared with, what, why and an
+  end date; the file shows a **🤝 Who we may share information with** card and warns
+  when that consent has ended or ends within 30 days. Earlier (v1) forms stay valid.
+* The form is saved in **two writes** (the sharing list, then the signed answers)
+  because Firestore rules cap how much one write can carry; the rules require the
+  sharing to be saved before the form can be sent.
 * **The wording is a plain-English draft** in `site/consent/consent-text.js`
   (`WG_CONSENT`). Worn Gundidj's management must approve it before it goes to
   clients. Change `VERSION` when it changes — every signed form records the
