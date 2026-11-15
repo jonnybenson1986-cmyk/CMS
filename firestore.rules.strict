@@ -51,6 +51,39 @@ service cloud.firestore {
         && (!('supportPerson' in s) || (s.supportPerson is string && s.supportPerson.size() <= 120));
     }
 
+    // Who a client lets us share their information with (the consent form's "sharing" section).
+    // A list can't be checked item by item in rules, so each person or service has its own fixed
+    // key (pro1..pro5, per1..per5). Keys match site/consent/consent-text.js (the tests check).
+    // Written lean: a request may evaluate at most 1000 expressions, and a full form (five of each) must fit.
+    function validParty(m) {
+      return m.keys().hasOnly(['name', 'role', 'contact', 'what', 'why', 'back'])
+        && m.name.matches('.{1,120}')
+        && m.get('role', '').matches('.{0,120}')
+        && m.get('contact', '').matches('.{0,120}')
+        && m.get('why', '').matches('.{0,300}')
+        && m.what.size() > 0 && m.what.size() <= 6
+        && m.what.hasOnly(['contact', 'plan', 'health', 'notes', 'referrals', 'safety'])
+        && m.back in ['Yes', 'No'];
+    }
+    function validSharing(s) {
+      return s.keys().hasOnly(['pro', 'per', 'length', 'pro1', 'pro2', 'pro3', 'pro4', 'pro5', 'per1', 'per2', 'per3', 'per4', 'per5'])
+        && s.pro in ['Yes', 'No'] && s.per in ['Yes', 'No']
+        && (s.pro == 'Yes' ? 'pro1' in s : !s.keys().hasAny(['pro1', 'pro2', 'pro3', 'pro4', 'pro5']))
+        && (s.per == 'Yes' ? 'per1' in s : !s.keys().hasAny(['per1', 'per2', 'per3', 'per4', 'per5']))
+        && ((s.pro == 'No' && s.per == 'No') ? !('length' in s) : s.length in ['m6', 'm12', 'until'])
+        && (!('pro1' in s) || validParty(s.pro1)) && (!('pro2' in s) || validParty(s.pro2)) && (!('pro3' in s) || validParty(s.pro3))
+        && (!('pro4' in s) || validParty(s.pro4)) && (!('pro5' in s) || validParty(s.pro5))
+        && (!('per1' in s) || validParty(s.per1)) && (!('per2' in s) || validParty(s.per2)) && (!('per3' in s) || validParty(s.per3))
+        && (!('per4' in s) || validParty(s.per4)) && (!('per5' in s) || validParty(s.per5));
+    }
+    // The consent form's own answers (keys = site/consent/consent-text.js KEYS).
+    function validConsentAnswers(a) {
+      return a.keys().hasOnly(['collect', 'programs', 'audit', 'video', 'transport', 'understood', 'questions', 'voluntary', 'limits', 'change'])
+        && a.collect == 'Yes'
+        && a.programs in ['Yes', 'No'] && a.audit in ['Yes', 'No'] && a.video in ['Yes', 'No'] && a.transport in ['Yes', 'No']
+        && a.understood == true && a.questions == true && a.voluntary == true && a.limits == true && a.change == true;
+    }
+
     match /teams/{teamId}/clients/{id} {
       allow read, create: if signedIn();
       allow update: if signedIn();          // all staff maintain client records
@@ -226,7 +259,7 @@ service cloud.firestore {
     // The same pattern as the intake forms above: staff make a form for ONE client and
     // send them a link; the client opens it WITHOUT signing in (the link id, plus their
     // date of birth when one is on file, opens one form only, until it expires), answers
-    // the consent questions, signs, and sends it ONCE. After that, or once staff cancel
+    // the consent questions, says who we may share with, signs, and sends it ONCE. After that, or once staff cancel
     // it, it is locked. They cannot read or list anything else. consentLinks holds no
     // personal details. The answer keys are exactly site/consent/consent-text.js KEYS.
     match /teams/{teamId}/consentLinks/{linkId} {
@@ -238,26 +271,24 @@ service cloud.firestore {
       allow list, create: if hasRole();
       allow get: if hasRole()
         || (resource.data.expiresAt > request.time && resource.data.status in ['open', 'submitted']);
+      // Two writes, because a request may evaluate at most 1000 expressions and a full sharing list is most of that:
+      //   1. the sharing section on its own (who we may share with) — as often as they like before sending;
+      //   2. the answers and signature, ONCE, which sends the form. The sharing must already have been saved,
+      //      and cannot be changed in this write.
       allow update: if hasRole() || (
            resource.data.status == 'open'
         && resource.data.expiresAt > request.time
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['answers', 'signature', 'version', 'status', 'submittedAt'])
-        && request.resource.data.status == 'submitted'
-        && request.resource.data.answers is map
-        && request.resource.data.answers.keys().hasOnly(['collect', 'programs', 'audit', 'external', 'video', 'transport', 'understood', 'questions', 'voluntary', 'change'])
-        && request.resource.data.answers.collect == 'Yes'
-        && request.resource.data.answers.programs in ['Yes', 'No']
-        && request.resource.data.answers.audit in ['Yes', 'No']
-        && request.resource.data.answers.external in ['Yes', 'No']
-        && request.resource.data.answers.video in ['Yes', 'No']
-        && request.resource.data.answers.transport in ['Yes', 'No']
-        && request.resource.data.answers.understood == true
-        && request.resource.data.answers.questions == true
-        && request.resource.data.answers.voluntary == true
-        && request.resource.data.answers.change == true
-        && validSignature(request.resource.data.signature)
-        && request.resource.data.version is string && request.resource.data.version.size() <= 20
-        && request.resource.data.submittedAt is string
+        && (
+          (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['sharing'])
+            && validSharing(request.resource.data.sharing))
+          || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['answers', 'signature', 'version', 'status', 'submittedAt'])
+            && request.resource.data.status == 'submitted'
+            && resource.data.sharing is map
+            && validConsentAnswers(request.resource.data.answers)
+            && validSignature(request.resource.data.signature)
+            && request.resource.data.version is string && request.resource.data.version.size() <= 20
+            && request.resource.data.submittedAt is string)
+        )
       );
       allow delete: if false;
     }

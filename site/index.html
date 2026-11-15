@@ -1314,7 +1314,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v112';
+const APP_VERSION = 'v113';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -2354,6 +2354,7 @@ function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
       ...(intakeFormState(currentIntakeForm(c.id))==='submitted' ? [`<div class="pf-attn-row"><span>📲 ${sanitize(smsFirstName(c))} sent back their intake form</span><button class="btn btn-sm btn-primary" onclick="openIntakeReviewModal('${sanitize(currentIntakeForm(c.id).id)}')">Review →</button></div>`] : []),
       ...due.map(d=>`<div class="pf-attn-row"><span>⭐ Feedback due: ${sanitize(QF_POINTS[d])}</span><button class="btn btn-sm btn-outline" onclick="openFeedbackSendModal('${c.id}','${d}')">Ask →</button></div>`),
       ...vprAttention(c).map(t=>`<div class="pf-attn-row"><span>🚨 ${sanitize(t)}</span><button class="btn btn-sm btn-outline" onclick="gotoProfileSection('vpr')">Review →</button></div>`),
+      ...consentAttention(c).map(t=>`<div class="pf-attn-row"><span>🤝 ${sanitize(t)}</span><button class="btn btn-sm btn-outline" onclick="gotoProfileSection('consents')">Review →</button></div>`),
     ];
     return `
     <div class="pf-glance">
@@ -14422,7 +14423,7 @@ function _cfCreateHTML(c, st) {
   return `${st === 'expired' || st === 'cancelled' ? `<div class="alert alert-warning" style="font-size:12px">The last link for ${sanitize(c.fullName)} is ${st === 'expired' ? 'out of date' : 'cancelled'}. Make a new one below.</div>` : ''}
     <p style="font-size:13px;margin:0 0 10px">Send <strong>${sanitize(c.fullName)}</strong> a link to read about informed consent, make their choices and <strong>sign on their phone</strong>. The signed form comes back here for you to check and file on their profile.</p>
     <div style="background:#f8fafc;border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:12px;margin-bottom:12px">
-      <strong>What they see:</strong> what informed consent means · six choices (one is needed to give support, five are their own choice) · when information can be shared without consent · their rights · four things to confirm · a place to sign.<br>
+      <strong>What they see:</strong> what informed consent means · five choices (one is needed to give support, four are their own) · <strong>who we may share their information with</strong> (professionals and services, and people in their life), with their rights · <strong>when the law means we must or may share, including mandatory reporting</strong> · their rights · five things to confirm · a place to sign.<br>
       <span style="color:var(--muted)">Wording version ${sanitize(WG_CONSENT.VERSION)}. Talk it through with them too — the form does not replace the conversation.</span></div>
     <div class="grid-2">
       <div class="form-group"><label for="cf-days">Link works for</label><select id="cf-days">${CF_DAYS.map(d => `<option value="${d}"${d === 7 ? ' selected' : ''}>${d} days</option>`).join('')}</select></div>
@@ -14524,74 +14525,131 @@ function _cfNameMismatch(c, sig) {
   const a = _cfNameWords(c.fullName).concat(_cfNameWords(c.preferredName)), b = _cfNameWords(sig.name);
   return !!a.length && !!b.length && !b.some(x => a.includes(x));
 }
-function _cfChoiceRows(answers) {
-  return WG_CONSENT.CHOICES.map(ch => ({ key: ch.key, q: ch.q, a: (answers || {})[ch.key] === 'Yes' ? 'Yes' : (answers || {})[ch.key] === 'No' ? 'No' : '' }));
+// The v1 wording (before the sharing section) had a "sharing with other services" choice, no "law" confirmation.
+const _CF_V1 = '2026-11 v1';
+function _cfConfirmKeys(version) { return version === _CF_V1 ? ['understood', 'questions', 'voluntary', 'change'] : WG_CONSENT.CONFIRMS.map(x => x.key); }
+function _cfChoiceRows(answers, version) {
+  const A = answers || {}, rows = WG_CONSENT.CHOICES.map(ch => ({ key: ch.key, q: ch.q, a: A[ch.key] === 'Yes' ? 'Yes' : A[ch.key] === 'No' ? 'No' : '' }));
+  if (version === _CF_V1 && (A.external === 'Yes' || A.external === 'No')) rows.push({ key: 'external', q: 'Sharing with other services', a: A.external });
+  return rows;
 }
+// Who they said we may share with, as kept on the record (labels, not codes, so it reads the same later).
+function _cfSharingRecord(sh, signedAt) {
+  if (!sh || typeof sh !== 'object') return null;
+  const parties = [];
+  WG_CONSENT.SHARE_GROUPS.forEach(g => [1, 2, 3, 4, 5].forEach(n => { const p = sh[g.key + n]; if (p && p.name) parties.push({ group: g.key, name: p.name, role: p.role || '', contact: p.contact || '', what: (p.what || []).map(k => (WG_CONSENT.SHARE_WHAT.find(x => x[0] === k) || [k, k])[1]), why: p.why || '', back: p.back === 'Yes' ? 'Yes' : 'No' }); }));
+  const months = { m6: 6, m12: 12 }[sh.length] || 0, d = new Date(signedAt);
+  let endsOn = ''; if (months && !isNaN(d)) { d.setMonth(d.getMonth() + months); endsOn = localISO(d).slice(0, 10); }
+  return { pro: sh.pro === 'Yes' ? 'Yes' : 'No', per: sh.per === 'Yes' ? 'Yes' : 'No', length: sh.length || '', lengthLabel: ((WG_CONSENT.SHARE_LENGTH.find(x => x[0] === sh.length) || [])[1]) || '', endsOn, parties };
+}
+// A signed form (from the cloud) as the record that goes on the profile — and what the printout is made from.
+function _cfBuildRecord(f) {
+  const A = f.answers || {}, S = f.signature || {}, signedAt = S.at || f.submittedAt || '';
+  const rec = { formId: f.id, kind: 'online', docType: 'consent', version: f.version || '', signedAt, submittedAt: f.submittedAt || '', signedName: S.name, role: S.role || 'self', method: S.method || 'typed',
+    choices: _cfChoiceRows(A, f.version).map(r => ({ k: r.key, q: r.q, a: r.a })), confirmed: _cfConfirmKeys(f.version).every(k => A[k] === true) };
+  if (S.role === 'representative') rec.relationship = S.relationship || '';
+  if (S.supportPerson) rec.supportPerson = S.supportPerson;
+  if (S.method === 'drawn' && _PNG_OK.test(S.image || '')) rec.image = S.image;
+  const sh = _cfSharingRecord(f.sharing, signedAt); if (sh) rec.sharing = sh;
+  return rec;
+}
+// Is the sharing consent on this record still running?  'ok' | 'soon' (30 days) | 'expired' | 'open' (until changed) | 'none'
+function sharingStatus(rec) {
+  const sh = rec && rec.sharing; if (!sh || (sh.pro !== 'Yes' && sh.per !== 'Yes')) return 'none';
+  if (!sh.endsOn) return 'open';
+  const t = today(); if (sh.endsOn < t) return 'expired';
+  return sh.endsOn <= addDaysStr(t, 30) ? 'soon' : 'ok';
+}
+function _cfSharingHTML(sh, compact) {
+  if (!sh) return '';
+  const grp = g => { const list = (sh.parties || []).filter(p => p.group === g.key);
+    return `<div style="margin-top:8px"><div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase">${sanitize(g.title)}</div>${sh[g.key] === 'Yes' && list.length ? list.map(p => `<div class="cf-party" style="border:1px solid var(--border);border-radius:8px;padding:8px 12px;margin-top:6px;font-size:13px"><strong>${sanitize(p.name)}</strong>${p.role ? ` <span style="color:var(--muted)">— ${sanitize(p.role)}</span>` : ''}${p.contact ? ` <span style="color:var(--muted)">· ${sanitize(p.contact)}</span>` : ''}<div style="font-size:12px;margin-top:2px">Can be shared: ${p.what.map(sanitize).join('; ')}</div>${p.why ? `<div style="font-size:12px;color:var(--muted)">Why: ${sanitize(p.why)}</div>` : ''}<div style="font-size:12px;color:var(--muted)">They can also tell us things about the client: ${sanitize(p.back)}</div></div>`).join('') : `<div style="font-size:13px;color:var(--muted);margin-top:4px">${sh[g.key] === 'Yes' ? '—' : 'Not sharing with anyone here.'}</div>`}</div>`; };
+  return `${WG_CONSENT.SHARE_GROUPS.map(grp).join('')}<div style="font-size:12px;margin-top:8px;color:var(--muted)">${(sh.pro === 'Yes' || sh.per === 'Yes') ? `Lasts: <strong style="color:var(--text)">${sanitize(sh.lengthLabel)}</strong>${sh.endsOn ? ` — until ${sanitize(fmt(sh.endsOn))}` : ''}` : 'They chose not to share with anyone.'}</div>`;
+}
+
 function _cfAnswerChip(a) { return a === 'Yes' ? '<span class="tag" style="background:#d1fae5;color:#065f46">✓ Agrees</span>' : a === 'No' ? '<span class="tag" style="background:#fef3c7;color:#92400e">✗ Does not agree</span>' : '<span class="tag">—</span>'; }
 function openConsentReviewModal(formId) {
   const f = consentForms.find(x => x.id === formId); if (!f) return;
   const c = clients.find(x => x.id === f.clientId); if (!c) return;
-  const A = f.answers || {}, S = f.signature || {}, done = f.status === 'applied', rows = _cfChoiceRows(A), declined = rows.filter(r => r.a === 'No');
+  const A = f.answers || {}, S = f.signature || {}, done = f.status === 'applied', rec = _cfBuildRecord(f), rows = rec.choices.map(r => ({ key: r.k, q: r.q, a: r.a })), declined = rows.filter(r => r.a === 'No');
+  const sh = rec.sharing, nShare = sh ? sh.parties.length : 0;
   const html = `<p style="font-size:13px;margin:0 0 10px"><strong>${sanitize(c.fullName)}</strong>’s consent form was signed ${S.at ? fmtdt(S.at) : f.submittedAt ? fmtdt(f.submittedAt) : ''}${S.method === 'typed' ? ' with a typed name' : ' on screen'}. ${done ? `<span class="idea-chip" style="color:#065f46;background:#d1fae5">Filed on the profile</span>` : ''}</p>
     ${_cfNameMismatch(c, S) ? `<div class="alert alert-warning" id="cf-mismatch" style="font-size:13px">The name that signed (<strong>${sanitize(S.name)}</strong>) doesn’t match the client’s name. Check who signed before you file it.</div>` : ''}
     ${declined.length ? `<div class="alert alert-info" style="font-size:13px">They said <strong>No</strong> to: ${declined.map(r => sanitize(r.q)).join(', ')}. Filing records that, and the intake ticks for those stay off.</div>` : ''}
-    <div class="rowsx-cf" style="border:1px solid var(--border);border-radius:8px;overflow:hidden">${rows.map((r, i) => `<div style="display:flex;gap:10px;align-items:center;justify-content:space-between;padding:8px 12px;font-size:13px;${i % 2 ? 'background:#faf7f2' : ''}"><span>${sanitize(r.q)}${WG_CONSENT.CHOICES.find(x => x.key === r.key).required ? ' <span style="font-size:10px;font-weight:700;color:#4a2618">NEEDED</span>' : ''}</span>${_cfAnswerChip(r.a)}</div>`).join('')}</div>
-    <div style="font-size:12px;margin:10px 0 0;color:var(--muted)">${WG_CONSENT.CONFIRMS.every(x => A[x.key] === true) ? '✓ They confirmed: they understood the form, had the chance to ask questions, agreed freely, and know they can change their mind.' : '⚠️ Not every confirmation is ticked.'} · Wording version ${sanitize(f.version || '')}</div>
+    <div class="rowsx-cf" style="border:1px solid var(--border);border-radius:8px;overflow:hidden">${rows.map((r, i) => `<div style="display:flex;gap:10px;align-items:center;justify-content:space-between;padding:8px 12px;font-size:13px;${i % 2 ? 'background:#faf7f2' : ''}"><span>${sanitize(r.q)}${(WG_CONSENT.CHOICES.find(x => x.key === r.key) || {}).required ? ' <span style="font-size:10px;font-weight:700;color:#4a2618">NEEDED</span>' : ''}</span>${_cfAnswerChip(r.a)}</div>`).join('')}</div>
+    <div id="cf-sharing" style="margin:12px 0 0"><div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:2px">Who we may share with</div>${sh ? _cfSharingHTML(sh) : '<div style="font-size:13px;color:var(--muted)">This form was signed under the earlier wording, which had no sharing section.</div>'}</div>
+    <div style="font-size:12px;margin:10px 0 0;color:var(--muted)">${rec.confirmed ? '✓ They confirmed: they understood the form, had the chance to ask questions, agreed freely, understood the law can require reports (mandatory reporting) even if they say no, and know they can change their mind.' : '⚠️ Not every confirmation is ticked.'} · Wording version ${sanitize(f.version || '')}</div>
     <div style="margin:12px 0 0"><div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Signature</div>${_sigImg(S, 300)}<div style="font-size:13px;margin-top:6px">${_sigWho(S)}${S.supportPerson ? `<br><span style="color:var(--muted)">Support person or interpreter: ${sanitize(S.supportPerson)}</span>` : ''}</div></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px">
       ${done ? `<button class="btn btn-primary" onclick="closeModal();openClientProfile('${sanitize(c.id)}','consents')">Open the consent forms</button>` :
         `<button class="btn btn-primary" id="cf-file" onclick="fileConsentForm('${sanitize(f.id)}')">✓ File on ${sanitize(smsFirstName(c))}’s profile</button>`}
       <button class="btn btn-outline" onclick="printConsentForm('${sanitize(f.id)}')">🖨️ Print</button>
       <button class="btn btn-outline" onclick="closeModal()">Close</button></div>
-    ${done ? '' : `<p style="font-size:11px;color:var(--muted);margin:10px 0 0">Filing adds the signed form to the profile, fills in the consent ticks on the intake from their choices, and marks the link as done.</p>`}`;
-  showModal('✍️ Consent form from ' + sanitize(smsFirstName(c)), html, null, '640px', true);
+    ${done ? '' : `<p style="font-size:11px;color:var(--muted);margin:10px 0 0">Filing adds the signed form to the profile${nShare ? `, records who we may share with (${nShare} ${nShare === 1 ? 'person or service' : 'people and services'})` : ''}, fills in the consent ticks on the intake from their choices, and marks the link as done.</p>`}`;
+  showModal('✍️ Consent form from ' + sanitize(smsFirstName(c)), html, null, '660px', true);
 }
 async function fileConsentForm(formId) {
   const f = consentForms.find(x => x.id === formId); if (!f || f.status === 'applied') return;
   const c = clients.find(x => x.id === f.clientId); if (!c) return;
   const A = f.answers || {}, S = f.signature || {}, at = now(), who = currentUser?.name || '';
   if (!S.name || !WG_CONSENT.CHOICES.every(ch => A[ch.key] === 'Yes' || A[ch.key] === 'No')) { showToast('That form is incomplete — it can’t be filed'); return; }
-  const rec = { id: uid(), formId, kind: 'online', docType: 'consent', version: f.version || '', signedAt: S.at || f.submittedAt || at, submittedAt: f.submittedAt || '', filedAt: at, filedBy: who,
-    signedName: S.name, role: S.role || 'self', method: S.method || 'typed', choices: _cfChoiceRows(A).map(r => ({ k: r.key, q: r.q, a: r.a })), confirmed: WG_CONSENT.CONFIRMS.every(x => A[x.key] === true) };
-  if (S.role === 'representative') rec.relationship = S.relationship || '';
-  if (S.supportPerson) rec.supportPerson = S.supportPerson;
-  if (S.method === 'drawn' && _PNG_OK.test(S.image || '')) rec.image = S.image;
+  const rec = Object.assign(_cfBuildRecord(f), { id: uid(), filedAt: at, filedBy: who });
   c.consentRecords = [...(c.consentRecords || []), rec];
   // The latest consent is the one that applies: fill in the intake's consent ticks from the client's choices.
   WG_CONSENT.CHOICES.forEach(ch => { const yes = A[ch.key] === 'Yes'; if (ch.file === 'ifTransportConsent') c.ifTransportConsent = yes ? 'Yes' : 'No'; else c[ch.file] = yes; });
+  if (rec.sharing) { c.ifConsentExternal = rec.sharing.pro === 'Yes'; c.ifConsentFamily = rec.sharing.per === 'Yes'; }
+  else if (A.external === 'Yes' || A.external === 'No') c.ifConsentExternal = A.external === 'Yes';       // the earlier wording
   c.ifConsentPrivacy = true; c.ifConsentSigned = true;
   c.ifClientSig = S.role === 'representative' ? `${S.name} (${S.relationship || 'authorised representative'})` : S.name;
   { const d = new Date(S.at || at); c.ifConsentDate = isNaN(d) ? today() : localISO(d).slice(0, 10); }
   saveAll();
   try { await FSYNC.updateConsentForm(formId, { status: 'applied', appliedAt: at, appliedBy: who }, f.linkId); } catch (e) { console.warn('form status not updated:', e.message); }
   f.status = 'applied'; f.appliedAt = at; f.appliedBy = who;
-  audit('Consent form filed on client profile', `${c.fullName} — signed ${S.method === 'typed' ? 'with a typed name' : 'on screen'}${S.role === 'representative' ? ' by a representative' : ''}`, c.id);
+  audit('Consent form filed on client profile', `${c.fullName} — signed ${S.method === 'typed' ? 'with a typed name' : 'on screen'}${S.role === 'representative' ? ' by a representative' : ''}${rec.sharing ? `; sharing: ${rec.sharing.parties.length} named` : ''}`, c.id);
   showToast(`✓ Consent form filed on ${c.fullName}’s profile`);
   closeModal(); setTimeout(() => openClientProfile(c.id, 'consents'), 60);
 }
 
 // ---- the "Consent forms" section of the client file ----
+// Who we can share with right now: from the newest signed form. Shown at the top of the Consent forms section.
+function consentSharingNowHTML(c) {
+  const rec = consentRecordsOf(c).find(r => r.sharing); if (!rec) return '';
+  const st = sharingStatus(rec), sh = rec.sharing;
+  const chip = { ok: ['Current', '#d1fae5', '#065f46'], soon: ['Ends soon', '#fef3c7', '#92400e'], expired: ['Expired — ask them again', '#fee2e2', '#991b1b'], open: ['Until they change it', '#dbeafe', '#1e40af'], none: ['Not sharing with anyone', '#f3f4f6', '#4b5563'] }[st];
+  return `<div class="card" id="cf-sharing-now"><div class="card-header"><div class="card-title">🤝 Who we may share information with</div><span class="tag" style="background:${chip[1]};color:${chip[2]}">${chip[0]}</span></div>
+    <p style="font-size:12px;color:var(--muted);margin:0 0 6px">From the consent form signed ${sanitize(fmt(rec.signedAt))}. Only share with the people named here, and only what is ticked. Check who you are speaking to first. A report the law requires (such as mandatory reporting) does not need this consent.</p>
+    ${_cfSharingHTML(sh)}</div>`;
+}
 function renderConsentsTab(c) {
   const recs = consentRecordsOf(c), f = currentConsentForm(c.id), st = consentFormState(f), id = sanitize(c.id);
-  const ticks = [['Information stored', c.ifConsentDatabase], ['Other WG programs', c.ifConsentInfo], ['Quality & funding checks', c.ifConsentAudit], ['Other agencies', c.ifConsentExternal], ['Video calls', c.ifConsentVideo], ['Privacy explained', c.ifConsentPrivacy]];
+  const ticks = [['Information stored', c.ifConsentDatabase], ['Other WG programs', c.ifConsentInfo], ['Quality & funding checks', c.ifConsentAudit], ['Sharing with services', c.ifConsentExternal], ['Sharing with personal supports', c.ifConsentFamily], ['Video calls', c.ifConsentVideo], ['Privacy explained', c.ifConsentPrivacy]];
   return `<div class="card">
       <div class="card-header"><div class="card-title">✍️ Consent forms</div><button class="btn btn-sm btn-primary" id="cf-send-btn" onclick="openConsentLinkModal('${id}')">✍️ Send a consent form</button></div>
-      <p style="font-size:12px;color:var(--muted);margin:0 0 10px">Informed consent: the client is told what they are agreeing to, understands it, chooses freely, and can change their mind. Send them the form to read and sign on their phone, or open it on a shared device. Signed forms are filed here, and fill in the consent ticks on the Intake.</p>
+      <p style="font-size:12px;color:var(--muted);margin:0 0 10px">Informed consent: the client is told what they are agreeing to, understands it, chooses freely, and can change their mind. The form also lets them say who we may share their information with (professionals and personal supports), and explains mandatory reporting. Send it to read and sign on their phone, or open it on a shared device. Signed forms are filed here, and fill in the consent ticks on the Intake.</p>
       ${st !== 'none' && st !== 'applied' ? `<div class="alert alert-${st === 'submitted' ? 'warning' : 'info'}" style="font-size:13px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span style="flex:1">${sanitize(consentLinkStatusText(c))}</span>${st === 'submitted' ? `<button class="btn btn-sm btn-primary" onclick="openConsentReviewModal('${sanitize(f.id)}')">Check it and file it →</button>` : st === 'open' ? `<button class="btn btn-sm btn-outline" onclick="openConsentLinkModal('${id}')">Open link</button>` : ''}</div>` : ''}
       <div style="display:flex;gap:6px;flex-wrap:wrap;font-size:12px;margin-bottom:4px">${ticks.map(([l, v]) => `<span class="tag" style="background:${v ? '#d1fae5' : '#f3f4f6'};color:${v ? '#065f46' : '#6b7280'}">${v ? '✓' : '○'} ${sanitize(l)}</span>`).join('')}
         <span class="tag" style="background:${c.ifConsentSigned ? '#d1fae5' : '#fef3c7'};color:${c.ifConsentSigned ? '#065f46' : '#92400e'}">${c.ifConsentSigned ? '✓ Signed' + (c.ifConsentDate ? ' ' + sanitize(fmt(c.ifConsentDate)) : '') : 'Not signed yet'}</span></div>
       <div style="font-size:11px;color:var(--muted)">Ticks as recorded on the Intake — a worker can also tick them by hand there.</div>
     </div>
+    ${consentSharingNowHTML(c)}
     <div class="card"><div class="card-header"><div class="card-title">Signed forms on file (${recs.length})</div></div>
       ${recs.length ? recs.map(r => `<div class="cf-record" data-id="${sanitize(r.id)}" style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:10px">
         <div style="display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap">
           <div style="flex:1;min-width:220px"><div style="font-weight:700;font-size:14px">Signed ${sanitize(fmtdt(r.signedAt))}</div>
             <div style="font-size:12px;color:var(--muted)">${_sigWho({ name: r.signedName, role: r.role, relationship: r.relationship })} · ${r.method === 'typed' ? 'typed name' : 'drawn on screen'} · ${r.kind === 'online' ? 'signed online by link' : sanitize(r.kind || '')} · wording ${sanitize(r.version || '')}<br>Filed ${sanitize(fmtdt(r.filedAt))}${r.filedBy ? ' by ' + sanitize(r.filedBy) : ''}${r.supportPerson ? ` · support person: ${sanitize(r.supportPerson)}` : ''}</div></div>
           <div style="width:180px">${_sigImg({ method: r.image ? 'drawn' : 'typed', image: r.image, name: r.signedName }, 180)}</div></div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0">${(r.choices || []).map(x => `<span class="tag" style="background:${x.a === 'Yes' ? '#d1fae5' : '#fef3c7'};color:${x.a === 'Yes' ? '#065f46' : '#92400e'}">${x.a === 'Yes' ? '✓' : '✗'} ${sanitize(x.q)}</span>`).join('')}</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0">${(r.choices || []).map(x => `<span class="tag" style="background:${x.a === 'Yes' ? '#d1fae5' : '#fef3c7'};color:${x.a === 'Yes' ? '#065f46' : '#92400e'}">${x.a === 'Yes' ? '✓' : '✗'} ${sanitize(x.q)}</span>`).join('')}${r.sharing ? `<span class="tag" style="background:#e0f2fe;color:#075985">🤝 ${r.sharing.parties.length ? `Sharing with ${r.sharing.parties.length} named` : 'Not sharing with anyone'}${r.sharing.endsOn ? ' · until ' + sanitize(fmt(r.sharing.endsOn)) : ''}</span>` : ''}</div>
         <button class="btn btn-sm btn-outline" onclick="printConsentRecord('${id}','${sanitize(r.id)}')">🖨️ View / print signed copy</button></div>`).join('')
       : `<div class="empty-state" style="padding:22px"><div class="icon">✍️</div><p>No consent form has been signed online for ${sanitize(smsFirstName(c))} yet.</p></div>`}
     </div>`;
+}
+// For the file's "Needs attention" list: a sharing consent that has run out, or runs out within 30 days.
+function consentAttention(c) {
+  if ((c.status || 'active') === 'closed') return [];
+  const rec = consentRecordsOf(c).find(r => r.sharing), st = sharingStatus(rec);
+  if (st === 'expired') return [`Consent to share information ended ${fmt(rec.sharing.endsOn)} — ask the client again before sharing`];
+  if (st === 'soon') return [`Consent to share information ends ${fmt(rec.sharing.endsOn)} — send a new consent form`];
+  return [];
 }
 
 // ---- printing (the look of the "Emergency Contacts & Supports" sheet) ----
@@ -14629,9 +14687,14 @@ function _openPrintWindow(html) {
 // The signed consent as a document: the choices, the confirmations, the signature.
 function _consentDocBody(c, d) {
   const rows = (d.choices || []).map(ch => `<tr><td class="k">${sanitize(ch.q)}</td><td>${sanitize((WG_CONSENT.CHOICES.find(x => x.key === ch.k) || {}).d || '')}<br><strong>${ch.a === 'Yes' ? 'Yes — agrees' : ch.a === 'No' ? 'No — does not agree' : 'Not answered'}</strong></td></tr>`).join('');
+  const sh = d.sharing, keys = _cfConfirmKeys(d.version);
+  const shareBody = !sh ? '' : WG_CONSENT.SHARE_GROUPS.map((g, n) => { const list = sh.parties.filter(p => p.group === g.key);
+    return `<h2 class="bar ${n ? 'teal' : ''}">Sharing with: ${sanitize(g.title)}</h2><table>${sh[g.key] === 'Yes' && list.length ? list.map(p => `<tr><td class="k">${sanitize(p.name)}${p.role ? `<br><span style="font-weight:400">${sanitize(p.role)}</span>` : ''}${p.contact ? `<br><span style="font-weight:400">${sanitize(p.contact)}</span>` : ''}</td><td>Can be shared: ${p.what.map(sanitize).join('; ')}${p.why ? `<br>Why: ${sanitize(p.why)}` : ''}<br>They can also tell Worn Gundidj things about the client: <strong>${sanitize(p.back)}</strong></td></tr>`).join('') : `<tr><td>No — not sharing with ${sanitize(g.title.toLowerCase())}.</td></tr>`}</table>`; }).join('')
+    + `<p class="note"><strong>Lasts:</strong> ${(sh.pro === 'Yes' || sh.per === 'Yes') ? sanitize(sh.lengthLabel) + (sh.endsOn ? ' — until ' + sanitize(fmt(sh.endsOn)) : '') : 'not applicable'}. Can be changed or stopped at any time by telling a Worn Gundidj worker. Information the law requires us to report (mandatory reporting) is not covered by this choice.</p>`;
   return `<table><tr><td class="k">Client</td><td>${sanitize(c.fullName)}${c.dob ? ' · DOB ' + sanitize(fmt(c.dob)) : ''}${c.clientId ? ' · ID ' + sanitize(c.clientId) : ''}</td></tr></table>
     <h2 class="bar">What was agreed to</h2><table>${rows}</table>
-    <h2 class="bar teal">Confirmed by the signer</h2><table>${WG_CONSENT.CONFIRMS.map(x => `<tr><td>${d.confirmed ? '☑' : '☐'} ${sanitize(x.t)}</td></tr>`).join('')}</table>
+    ${shareBody}
+    <h2 class="bar teal">Confirmed by the signer</h2><table>${WG_CONSENT.CONFIRMS.filter(x => keys.includes(x.key)).map(x => `<tr><td>${d.confirmed ? '☑' : '☐'} ${sanitize(x.t)}</td></tr>`).join('')}</table>
     <h2 class="bar">Signature</h2><div class="box sig">${_sigImg({ method: d.image ? 'drawn' : 'typed', image: d.image, name: d.signedName }, 280)}
       <p style="margin:8px 0 0"><strong>${sanitize(d.signedName)}</strong>${d.role === 'representative' ? ` — signing for ${sanitize(c.fullName)}, as their ${sanitize(d.relationship || 'authorised representative')}` : ''}</p>
       ${d.supportPerson ? `<p style="margin:2px 0 0">Support person or interpreter: ${sanitize(d.supportPerson)}</p>` : ''}
@@ -14645,10 +14708,8 @@ function printConsentRecord(clientId, recId) {
 }
 function printConsentForm(formId) {        // a form straight from the client, before it is filed
   const f = consentForms.find(x => x.id === formId), c = f && clients.find(x => x.id === f.clientId); if (!c) return;
-  const A = f.answers || {}, S = f.signature || {};
   audit('Printed signed consent form', c.fullName, c.id);
-  _openPrintWindow(wgPrintDoc('Signed consent — ' + c.fullName, 'Consent Form', 'Signed copy · Worn Gundidj Aboriginal Co-operative', _consentDocBody(c, { choices: _cfChoiceRows(A).map(r => ({ k: r.key, q: r.q, a: r.a })), confirmed: WG_CONSENT.CONFIRMS.every(x => A[x.key] === true),
-    signedName: S.name, role: S.role, relationship: S.relationship, supportPerson: S.supportPerson, method: S.method, image: S.image, signedAt: S.at || f.submittedAt, version: f.version })));
+  _openPrintWindow(wgPrintDoc('Signed consent — ' + c.fullName, 'Consent Form', 'Signed copy · Worn Gundidj Aboriginal Co-operative', _consentDocBody(c, _cfBuildRecord(f))));
 }
 
 // ---- where it shows up ----
