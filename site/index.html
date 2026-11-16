@@ -1324,7 +1324,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v114';
+const APP_VERSION = 'v115';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -12705,6 +12705,38 @@ function _getMsalInstance() {
   return _msalInstance;
 }
 
+// ── Opening Microsoft's sign-in window without the browser blocking it ──
+// A browser only lets a page open a window straight after a click. If anything slow happens
+// between the click and the window — a silent sign-in attempt can take ten seconds or more when
+// it fails — the browser treats the window as an unwanted pop-up and blocks it. So:
+//   • Microsoft's sign-in component is made ready when an Outlook page opens (msalWarm), not on the click;
+//   • a sign-in window is only ever opened by a button press, and first thing in it (_msalPopup);
+//   • everything that runs on its own (loading the inbox, syncing, sending) only signs in silently,
+//     and when that isn't enough it shows a "🔑 Sign in to Microsoft" button instead of a window.
+function msalWarm() {
+  if (!outlookClientId() || !window.msal || !msal.PublicClientApplication) return Promise.resolve(false);
+  const app = _getMsalInstance(); if (!app) return Promise.resolve(false);
+  if (!app.__wgReady) app.__wgReady = Promise.resolve().then(() => app.initialize()).then(() => true, e => { console.warn('Microsoft sign-in component:', e && e.message); app.__wgReady = null; return false; });
+  return app.__wgReady;
+}
+// The Microsoft account this worker connected on this device, as MSAL knows it.
+function _msalAccount(app) {
+  const saved = outlookAccount(), all = app.getAllAccounts();
+  return all.find(a => saved && (a.homeAccountId === saved.homeAccountId || String(a.username || '').toLowerCase() === String(saved.username || '').toLowerCase())) || (saved ? null : all[0]) || null;
+}
+// Call ONLY straight from a button press. Opens the sign-in window for these scopes and returns the token.
+async function _msalPopup(scopes) {
+  const app = _getMsalInstance(); if (!app) return null;
+  await msalWarm();                                       // already done when the page opened: no waiting here
+  const account = _msalAccount(app), hint = String(outlookAccount()?.username || currentUser?.email || '').toLowerCase();
+  return (await app.acquireTokenPopup(account ? { scopes, account } : (hint ? { scopes, loginHint: hint } : { scopes, prompt: 'select_account' }))).accessToken;
+}
+// A sign-in problem that pressing "Sign in to Microsoft" (a fresh click) can fix.
+function _msalNeedsClick(e) {
+  const code = String((e && (e.errorCode || e.code)) || '');
+  return ['popup_window_error', 'empty_window_error', 'user_cancelled', 'interaction_required', 'consent_required', 'login_required', 'no_tokens_found', 'monitor_window_timeout', 'timed_out'].includes(code);
+}
+
 // Microsoft's error codes → what to actually do about them.
 function outlookErrorText(e) {
   const code = String((e && (e.errorCode || e.code)) || ''), msg = String((e && (e.errorMessage || e.message)) || '');
@@ -12722,7 +12754,7 @@ function outlookErrorText(e) {
     AADSTS900023: 'The Directory (tenant) ID in Settings isn\'t valid. Copy it from the app\'s Overview page.',
   }[aad];
   if (fix) return fix + ` (${aad})`;
-  if (code === 'popup_window_error' || code === 'empty_window_error') return 'The browser blocked the Microsoft sign-in window. Allow pop-ups for this site (the icon at the right of the address bar), then try again.';
+  if (code === 'popup_window_error' || code === 'empty_window_error') return 'Your browser stopped the Microsoft sign-in window from opening. Press “🔑 Sign in to Microsoft” — it opens the window straight away. If the browser still blocks it, click the blocked pop-up icon at the right of the address bar, choose “Always allow pop-ups” from this site, and press the button again.';
   if (code === 'user_cancelled') return 'The Microsoft sign-in window was closed before sign-in finished. Try again and complete the sign-in.';
   if (code === 'interaction_in_progress') return 'A Microsoft sign-in window is already open. Finish or close it, then try again.';
   if (code === 'no_network_connectivity' || /Failed to fetch|NetworkError/i.test(msg)) return 'Couldn\'t reach Microsoft — check the internet connection.';
@@ -12757,7 +12789,7 @@ async function outlookConnect() {
   if (_outlookBusy) return; _outlookBusy = true;
   try {
     const msalApp = _getMsalInstance(); if (!msalApp) return;
-    await msalApp.initialize();
+    await msalWarm();                 // ready since the page opened, so the window opens straight after the click
     // Steer Microsoft to the worker's own mailbox (their CMS email). MSAL drops
     // the hint when it's also asked to show the account picker, so only ask for
     // the picker when there's no email to suggest.
@@ -12790,17 +12822,16 @@ async function outlookDisconnect() {
   if (currentPage === 'settings' || currentPage === 'calendar') showPage(currentPage);
 }
 
-async function _getOutlookToken(forceInteractive) {
+// A calendar token, silently (from Microsoft's own cache, or by renewing it). It never opens a
+// sign-in window: syncing waits on Microsoft in between, and a window opened then gets blocked.
+// When Microsoft needs the worker, they are asked to press Connect (which opens it at once).
+async function _getOutlookToken(forceRefresh) {
   const msalApp = _getMsalInstance(); if (!msalApp) return null;
-  await msalApp.initialize();
-  const saved = outlookAccount();
-  const account = msalApp.getAllAccounts().find(a => !saved || a.homeAccountId === saved.homeAccountId || a.username === saved.username) || msalApp.getAllAccounts()[0];
+  if (!(await msalWarm())) { _outlookError('The Microsoft sign-in component didn\'t start. Refresh the page (Ctrl+Shift+R) and try again.'); return null; }
+  const account = _msalAccount(msalApp);
   if (!account) { _outlookError('Your Outlook connection has expired on this device. Press Connect to Outlook.'); DB.save('msalAccount', ''); return null; }
-  if (!forceInteractive) {
-    try { return (await msalApp.acquireTokenSilent({ scopes: OUTLOOK_SCOPES, account })).accessToken; } catch (_) { /* fall through to a popup */ }
-  }
-  try { return (await msalApp.acquireTokenPopup({ scopes: OUTLOOK_SCOPES, account })).accessToken; }
-  catch (e) { console.warn('Outlook token failed:', e); _outlookError(outlookErrorText(e)); return null; }
+  try { return (await msalApp.acquireTokenSilent({ scopes: OUTLOOK_SCOPES, account, forceRefresh: !!forceRefresh })).accessToken; }
+  catch (e) { console.warn('Outlook token failed:', e); _outlookError(_msalNeedsClick(e) || /interaction|consent|login/i.test(String(e && (e.errorCode || e.message) || '')) ? 'Microsoft needs you to sign in again. Press 🔗 Connect to Outlook (Settings → Outlook, or the Calendar), then sync again.' : outlookErrorText(e)); return null; }
 }
 
 // ---- what gets synced ----
@@ -12914,6 +12945,7 @@ function outlookStatusHTML() {
     <div id="outlook-error" class="alert alert-warning" style="font-size:12px;margin-top:8px;${err && err.text ? '' : 'display:none'}">${sanitize(err && err.text || '')}</div>`;
 }
 function outlookCalendarButtonHTML() {
+  msalWarm();                         // so Connect opens Microsoft's window the moment it is pressed
   if (!outlookClientId()) {
     return currentUser?.role === 'sysmanager'
       ? `<button class="btn btn-sm btn-outline" id="outlook-setup-btn" onclick="showPage('settings')" title="Outlook sync needs the Azure IDs entered once in Settings">⚙️ Set up Outlook sync</button>`
@@ -12993,7 +13025,7 @@ async function outlookCheck() {
 
   // 3b. Email (a separate permission, asked for when the Email page is first used)
   try {
-    const mt = await _mailToken(true);
+    const mt = await _mailToken();
     if (!mt) add('warn', 'Email access hasn\'t been allowed yet', 'Optional — only needed for the Email page. Open Email and press "Allow email access". If Microsoft says an administrator must approve it, add Mail.Read and Mail.Send under API permissions and Grant admin consent.', `<div><button class="btn btn-sm btn-outline" onclick="closeModal();showPage('email')">Open Email</button></div>`);
     else { await _graph(mt, 'GET', '/me/mailFolders/inbox?$select=displayName'); add('ok', 'Your Outlook email is reachable', 'The Email page can read and send as you.'); }
   } catch (e) { add('warn', 'Microsoft refused access to your email', mailErrorText(e)); }
@@ -13011,6 +13043,7 @@ async function outlookCheck() {
   done();
 }
 function outlookSettingsCardHTML() {
+  msalWarm();
   if (outlookClientId()) setTimeout(outlookRestore, 0);
   const sys = currentUser?.role === 'sysmanager', acc = outlookAccount(), id = outlookClientId();
   const shownId = outlookOrgConfig.clientId || DB.load('msalClientId', '');
@@ -13061,8 +13094,8 @@ function outlookSettingsCardHTML() {
 const MAIL_SCOPES = ['Mail.Read', 'Mail.Send', 'User.Read'];
 const MAIL_FOLDERS = { inbox: { label: 'Inbox', icon: '📥', date: 'receivedDateTime' }, sentitems: { label: 'Sent', icon: '📤', date: 'sentDateTime' } };
 const MAIL_MAX_RECIPIENTS = 25;
-let _mail = { folder: 'inbox', list: null, loading: false, error: '', consent: false, open: null, openIdx: -1, q: '', at: 0, sending: false, timer: null };
-function mailReset() { _mail = { folder: 'inbox', list: null, loading: false, error: '', consent: false, open: null, openIdx: -1, q: '', at: 0, sending: false, timer: _mail.timer }; }
+let _mail = { folder: 'inbox', list: null, loading: false, error: '', signIn: false, consent: false, open: null, openIdx: -1, q: '', at: 0, sending: false, timer: null };
+function mailReset() { _mail = { folder: 'inbox', list: null, loading: false, error: '', signIn: false, consent: false, open: null, openIdx: -1, q: '', at: 0, sending: false, timer: _mail.timer }; }
 const _EMAIL_RE = /^[^\s@<>,;"()]+@[^\s@<>,;"()]+\.[^\s@<>,;"()]{2,}$/;
 // "a@b.com; C <c@d.org>, e@f.com" → ['a@b.com','c@d.org','e@f.com'], and any entries that aren't addresses.
 function parseRecipients(text) {
@@ -13086,27 +13119,31 @@ function mailErrorText(e) {
   if (e && /Failed to fetch|NetworkError/i.test(e.message || '')) return 'Couldn\'t reach Microsoft — check the internet connection.';
   return e && e.status ? `Outlook said: ${String(e.message || e.status).slice(0, 160)}` : outlookErrorText(e);
 }
-// A token for mail. silentOnly: never open a sign-in window (used when the page loads on its own).
-async function _mailToken(silentOnly) {
+// A token for mail — silently only (from Microsoft's cache, or by renewing it). It never opens a
+// sign-in window; when Microsoft needs the worker, the page shows "🔑 Sign in to Microsoft" (mailAllow).
+async function _mailToken() {
   const msalApp = _getMsalInstance(); if (!msalApp) return null;
-  await msalApp.initialize();
-  const saved = outlookAccount();
-  const account = msalApp.getAllAccounts().find(a => !saved || a.homeAccountId === saved.homeAccountId || a.username === saved.username) || msalApp.getAllAccounts()[0];
-  if (!account) { _mail.error = 'Your Outlook connection has expired on this device. Press Connect to Outlook.'; return null; }
-  try { return (await msalApp.acquireTokenSilent({ scopes: MAIL_SCOPES, account })).accessToken; } catch (e) { if (silentOnly) return null; }
-  try { return (await msalApp.acquireTokenPopup({ scopes: MAIL_SCOPES, account })).accessToken; }
-  catch (e) { console.warn('Mail token failed:', e); _mail.error = outlookErrorText(e); return null; }
+  if (!(await msalWarm())) { _mail.error = 'The Microsoft sign-in component didn\'t start. Refresh the page (Ctrl+Shift+R) and try again.'; return null; }
+  const account = _msalAccount(msalApp);
+  if (!account) { _mail.signIn = true; return null; }
+  try { return (await msalApp.acquireTokenSilent({ scopes: MAIL_SCOPES, account })).accessToken; }
+  catch (e) { console.warn('Mail token (silent):', e && (e.errorCode || e.message)); return null; }
 }
-async function mailAllow() {            // the "Allow email access" button: a click, so the sign-in window can open
-  _mail.error = ''; const t = await _mailToken(false);
-  if (t) { _mail.consent = false; audit('Email access allowed', ''); mailLoad(); } else if (currentPage === 'email') showPage('email');
+// The "Allow email access" / "🔑 Sign in to Microsoft" button. A click, so the window opens at once.
+async function mailAllow() {
+  _mail.error = ''; _mail.signIn = false;
+  let t = null;
+  try { t = await _msalPopup(MAIL_SCOPES); }
+  catch (e) { console.warn('Mail sign-in:', e); _mail.error = outlookErrorText(e); _mail.signIn = _msalNeedsClick(e); }
+  if (t) { _mail.consent = false; audit('Email access allowed', ''); if (_mail.loading) _mail.reload = true; else mailLoad(); } else if (currentPage === 'email') showPage('email');
+  return !!t;
 }
 async function mailLoad(quiet) {
   if (_mail.loading || mailBlocker()) return;
   _mail.loading = true; if (!quiet) { _mail.error = ''; mailRefreshView(); }
   try {
-    const token = await _mailToken(true);
-    if (!token) { _mail.consent = !_mail.error; _mail.list = _mail.list || []; return; }
+    const token = await _mailToken();
+    if (!token) { _mail.consent = !_mail.error && !_mail.signIn; _mail.list = _mail.list || []; return; }
     const f = MAIL_FOLDERS[_mail.folder] || MAIL_FOLDERS.inbox, q = _mail.q.replace(/["\\]/g, ' ').trim();
     const sel = 'id,subject,from,toRecipients,receivedDateTime,sentDateTime,isRead,bodyPreview,hasAttachments';
     const path = `/me/mailFolders/${_mail.folder}/messages?$top=30&$select=${sel}` + (q ? `&$search=${encodeURIComponent('"' + q + '"')}` : `&$orderby=${f.date} desc`);
@@ -13115,7 +13152,7 @@ async function mailLoad(quiet) {
       at: m[f.date] || m.receivedDateTime || m.sentDateTime || '', unread: m.isRead === false && _mail.folder === 'inbox', preview: m.bodyPreview || '', attach: !!m.hasAttachments }));
     _mail.at = Date.now(); _mail.consent = false; _mail.error = '';
   } catch (e) { console.warn('Mail load failed:', e); _mail.error = mailErrorText(e); _mail.list = _mail.list || []; }
-  finally { _mail.loading = false; mailRefreshView(); }
+  finally { _mail.loading = false; mailRefreshView(); if (_mail.reload) { _mail.reload = false; setTimeout(() => mailLoad(), 0); } }
 }
 function mailRefreshView() { if (currentPage === 'email' && document.getElementById('mail-root')) { const el = document.getElementById('mail-root'); el.innerHTML = mailViewHTML(); } }
 function mailSetFolder(k) { if (!MAIL_FOLDERS[k]) return; _mail.folder = k; _mail.list = null; _mail.open = null; _mail.openIdx = -1; _mail.q = ''; mailLoad(); }
@@ -13125,7 +13162,7 @@ async function mailOpen(i) {
   const m = (_mail.list || [])[i]; if (!m) return;
   _mail.openIdx = i; _mail.open = { loading: true, id: m.id }; mailRefreshView();
   try {
-    const token = await _mailToken(true); if (!token) throw new Error('No access');
+    const token = await _mailToken(); if (!token) throw new Error('Microsoft needs you to sign in again — press 🔑 Sign in to Microsoft above.');
     const d = await _graph(token, 'GET', `/me/messages/${encodeURIComponent(m.id)}?$select=subject,from,toRecipients,ccRecipients,receivedDateTime,sentDateTime,body,webLink,hasAttachments`, null, 'outlook.body-content-type="text"');
     if (_mail.open && _mail.open.id === m.id) _mail.open = { id: m.id, idx: i, subject: d.subject || '', from: d.from && d.from.emailAddress || {}, to: (d.toRecipients || []).map(r => r.emailAddress || {}), cc: (d.ccRecipients || []).map(r => r.emailAddress || {}),
       at: d.receivedDateTime || d.sentDateTime || m.at, body: String(d.body && d.body.content || ''), webLink: _MAIL_LINK_OK.test(d.webLink || '') ? d.webLink : '', attach: !!d.hasAttachments };
@@ -13174,11 +13211,12 @@ function mailViewHTML() {
       <button class="btn btn-sm btn-primary" onclick="mailCompose()">✉️ New email</button>
     </div>
     ${_mail.consent ? `<div class="alert alert-warning" id="mail-consent" style="margin:12px 16px;display:block"><strong>One more step.</strong> Microsoft needs you to allow the CMS to read and send email as you. <div style="margin-top:8px"><button class="btn btn-sm btn-primary" style="background:#0078d4;border-color:#0078d4" onclick="mailAllow()">🔓 Allow email access</button></div></div>` : ''}
-    ${_mail.error ? `<div class="alert alert-warning" id="mail-error" style="margin:12px 16px;display:block">${sanitize(_mail.error)}</div>` : ''}
+    ${_mail.error || _mail.signIn ? `<div class="alert alert-warning" id="mail-error" style="margin:12px 16px;display:block">${sanitize(_mail.error || 'Microsoft needs you to sign in again to show your email.')}${_mail.signIn ? `<div style="margin-top:8px"><button class="btn btn-sm btn-primary" id="mail-signin" style="background:#0078d4;border-color:#0078d4" onclick="mailAllow()">🔑 Sign in to Microsoft</button></div>` : ''}</div>` : ''}
     <div class="mail-split"><div class="mail-list" id="mail-list">${list ? rows : `<div class="empty-state" style="padding:28px"><p>${_mail.consent || _mail.error ? '' : 'Loading your email…'}</p></div>`}</div><div class="mail-pane" id="mail-pane">${pane}</div></div>`;
 }
 function renderEmailPage() {
   const b = mailBlocker();
+  if (b !== 'setup') msalWarm();      // so a sign-in window can open the moment a button is pressed
   if (b) {
     const sys = currentUser?.role === 'sysmanager', me = currentUser?.email || 'your email';
     const msg = b === 'setup' ? `Outlook hasn't been set up for the CMS yet. ${sys ? 'Enter the Azure Application (client) ID in Settings → Outlook Calendar Sync.' : 'Ask your System Manager to finish the Outlook set-up (Settings → Outlook Calendar Sync).'}`
@@ -13255,6 +13293,27 @@ function mailReply(all) {
   mailCompose({ to: to.filter(Boolean).join(', '), cc: cc.join(', '), subject: /^re:/i.test(o.subject) ? o.subject : 'RE: ' + o.subject, body: quoted, clientId: client ? client.id : '' });
   setTimeout(() => { const b = document.getElementById('mc-body'); if (b) { b.focus(); b.setSelectionRange(0, 0); } }, 80);
 }
+// The email as sent: the worker's plain text, made safe, with every web address a clickable link —
+// so a client can tap "Open your form" in any mail app (some don't turn plain-text addresses into links).
+// Only http(s) addresses become links; everything else is shown as typed (nothing in it can run).
+function mailBodyHtml(text) {
+  const esc = t => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  const html = String(text || '').split(/(https?:\/\/[^\s<>"']+)/g).map((part, i) => {
+    if (i % 2 === 0) return esc(part);
+    const m = part.match(/^(.*?)([.,;:!?)\]]*)$/), url = m[1], tail = m[2];      // "…/c#abc." → link "…/c#abc", then "."
+    return `<a href="${esc(url)}">${esc(url)}</a>${esc(tail)}`;
+  }).join('').replace(/\r?\n/g, '<br>');
+  return `<div style="font-family:Calibri,Arial,Helvetica,sans-serif;font-size:11pt;line-height:1.45;color:#222">${html}</div>`;
+}
+// From the email window: sign in (the window opens straight from this click), then send.
+async function mailSignInAndSend() {
+  const e = document.getElementById('mc-error');
+  let ok = false;
+  try { ok = !!(await _msalPopup(MAIL_SCOPES)); }
+  catch (x) { console.warn('Mail sign-in:', x); if (e) e.textContent = outlookErrorText(x); return false; }
+  if (ok) { _mail.signIn = false; _mail.consent = false; audit('Email access allowed', ''); return mailSend(); }
+  return false;
+}
 async function mailSend() {
   if (_mail.sending) return;
   const v = id => (document.getElementById(id)?.value || '').trim(), err = m => { const e = document.getElementById('mc-error'); if (e) e.textContent = m; return false; };
@@ -13270,8 +13329,13 @@ async function mailSend() {
   if (record && !recMins) return err(`Enter the minutes of email contact (1–${MAIL_MAX_MINUTES}).`);
   const btn = document.getElementById('mc-send'); _mail.sending = true; if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
   try {
-    const token = await _mailToken(false); if (!token) { err(_mail.error || 'Microsoft didn\'t give access to send email.'); return false; }
-    await _graph(token, 'POST', '/me/sendMail', { message: { subject, body: { contentType: 'text', content: body },
+    const token = await _mailToken();
+    if (!token) {
+      const e = document.getElementById('mc-error');
+      if (e) e.innerHTML = `${sanitize(_mail.error || 'Microsoft needs you to sign in before this can be sent. Your email is kept here.')}${_mail.error ? '' : ` <button type="button" class="btn btn-sm btn-primary" id="mc-signin" style="background:#0078d4;border-color:#0078d4;margin-left:6px" onclick="mailSignInAndSend()">🔑 Sign in and send</button>`}`;
+      return false;
+    }
+    await _graph(token, 'POST', '/me/sendMail', { message: { subject, body: { contentType: 'HTML', content: mailBodyHtml(body) },
       toRecipients: to.ok.map(a => ({ emailAddress: { address: a } })), ccRecipients: cc.ok.map(a => ({ emailAddress: { address: a } })) }, saveToSentItems: true });
   } catch (e) { console.warn('Send failed:', e); err('Not sent. ' + mailErrorText(e)); return false; }
   finally { _mail.sending = false; if (btn && btn.isConnected) { btn.disabled = false; btn.textContent = '📨 Send'; } }
