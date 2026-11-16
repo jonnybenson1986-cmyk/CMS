@@ -632,16 +632,26 @@
 <script src="data-health.js"></script>
 <script src="vpr.js"></script>
 <script src="consent/consent-text.js"></script>
+<script src="teams.js"></script>
 <script>
+// ===== TEAMS =====
+// Several teams share this system (site/teams.js): Worn Gundidj, a spare team and a
+// test team. A page works in ONE team from the moment it loads until it is reloaded:
+// ACTIVE_TEAM picks both where records are read and written in the cloud
+// (teams/<team>/…) and which copy on this device is used, so one team's records can
+// never be mixed into another's. The team is chosen at sign-in from the account's
+// membership (see _teamAccess); changing team reloads the page.
+const ACTIVE_TEAM = (() => { try { const t = localStorage.getItem(WG_TEAMS.DEVICE_KEY); return WG_TEAMS.valid(t) ? t : WG_TEAMS.DEFAULT; } catch (_) { return WG_TEAMS.DEFAULT; } })();
 // ===== DATA LAYER =====
 const DB = {
-  load(k, def) { try { return JSON.parse(localStorage.getItem('sewb_cms_'+k)) ?? def; } catch { return def; } },
+  _p: WG_TEAMS.storagePrefix(ACTIVE_TEAM),   // Worn Gundidj keeps the original keys; other teams get their own
+  load(k, def) { try { return JSON.parse(localStorage.getItem(this._p+k)) ?? def; } catch { return def; } },
   // A failed write used to throw silently and the data was simply lost (QA M2).
   // Browser storage is finite (~5MB), so this DOES happen with large datasets or
   // base64 file fallbacks. Now the failure is caught and the worker is warned so
   // they can act (export a backup / connect Cloud Sync) instead of losing work.
   save(k, v) {
-    try { localStorage.setItem('sewb_cms_'+k, JSON.stringify(v)); return true; }
+    try { localStorage.setItem(this._p+k, JSON.stringify(v)); return true; }
     catch (e) {
       console.error('Local save failed for "'+k+'":', e && e.name, e && e.message);
       try {
@@ -679,7 +689,7 @@ const FSYNC = (() => {
     messagingSenderId: "1058581942911",
     appId: "1:1058581942911:web:6769b34a10ccf95ea9a54a",
     measurementId: "G-G86N7M8GHC",
-    teamId: "worngundidj",
+    teamId: ACTIVE_TEAM,
   };
   // Always use the built-in config — ignore any old config saved in localStorage
   function getCfg()   { return _DEFAULT_CFG; }
@@ -1131,7 +1141,7 @@ const FSYNC = (() => {
     try { return !!(db && window.firebase && firebase.storage && firebase.auth().currentUser); }
     catch(e){ return false; }
   }
-  function _storageRef(path){ return firebase.storage().ref().child('teams/'+(teamId||'worngundidj')+'/'+path); }
+  function _storageRef(path){ return firebase.storage().ref().child('teams/'+(teamId||ACTIVE_TEAM)+'/'+path); }
   // Upload a File/Blob to "folder"; resolves to {storagePath, url, name, type, size}
   async function uploadFile(folder, file, onProgress){
     if(!storageReady()) throw new Error('Cloud Storage not connected');
@@ -1314,7 +1324,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v113';
+const APP_VERSION = 'v114';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -12190,6 +12200,7 @@ function renderSettings() {
     </div>
   </div>
 
+  ${teamsCardHtml()}
   <div class="card">
     <div class="card-title" style="margin-bottom:16px">💾 Data Management</div>
     <p style="font-size:13px;color:var(--muted);margin-bottom:16px">Create a password-protected, encrypted backup (AES-256) of all client records at any time. Export regularly and store the file somewhere safe.</p>
@@ -13472,6 +13483,11 @@ async function createStaffAccount() {
   const cfg = FSYNC.getCfg();
   if(!cfg?.apiKey){errEl.textContent='Firebase Cloud Sync must be set up first (Settings → Cloud Sync)';return false;}
 
+  // Outside Worn Gundidj (or once the teams are locked) an account only works when it is put in
+  // the team — which the security rules let only the owner or a team manager do.
+  const needsEntry = ACTIVE_TEAM !== WG_TEAMS.DEFAULT || teamsLocked === true;
+  if (needsEntry && !canAddToTeam()) { errEl.textContent = `Only the owner, or someone they have ticked as “can add staff”, can add accounts to ${WG_TEAMS.name(ACTIVE_TEAM)}.`; return false; }
+
   errEl.textContent='Creating account…';
 
   try {
@@ -13482,6 +13498,10 @@ async function createStaffAccount() {
     const cred = await secondaryAuth.createUserWithEmailAndPassword(email, pass);
     await cred.user.updateProfile({ displayName: name });
     await secondaryAuth.signOut();
+    // Put the new account in this team (and only this team).
+    const inTeam = await _teamAddMember(cred.user.uid, email, name);
+    if (!inTeam && needsEntry) alert(`The account for ${name} was made, but it could NOT be added to ${WG_TEAMS.name(ACTIVE_TEAM)}.\n\nUntil that is fixed it cannot open ${WG_TEAMS.name(ACTIVE_TEAM)}${teamsLocked ? '' : ' (and would be treated as a Worn Gundidj sign-in)'}. Ask the owner to set its team in Settings → Teams before giving out the password.`);
+    audit('Staff account created', `${email} — ${WG_TEAMS.name(ACTIVE_TEAM)}${inTeam ? '' : ' (team entry not saved)'}`);
 
     // Save local worker profile
     const existing = userProfiles.find(u=>u.email===email);
@@ -13592,9 +13612,17 @@ function removeStaffAccount(userId) {
   if(currentUser?.role!=='sysmanager'){ showToast('Only the System Manager can manage staff accounts'); return; }
   const u = userProfiles.find(p=>p.id===userId); if(!u) return;
   if(_isOwnerEmail(u.email)){ showToast('The organisation’s System Manager account cannot be removed'); return; }
-  if(!confirm(`Remove ${sanitize(u.name)} from the CMS?\n\nThis removes their profile from this system. Their Firebase Authentication account will remain — delete it from the Firebase Console if needed.`)) return;
+  if(!confirm(`Remove ${sanitize(u.name)} from the CMS?\n\nThis removes their profile from ${WG_TEAMS.name(ACTIVE_TEAM)}.${isPlatformOwner() ? ' Their sign-in is also taken out of this team, so it can no longer open it.' : ' Their sign-in still works until the owner takes it out of the team (Settings → Teams).'}`)) return;
   userProfiles = userProfiles.filter(p=>p.id!==userId);
   saveUserProfiles();
+  // The owner can also shut the sign-in out of this team on the server (the security rules).
+  if (isPlatformOwner() && u.firebaseUid) (async () => {
+    try { const ref = _memberRef(u.firebaseUid), d = await ref.get();
+      if (d.exists) await ref.update({ teams: (d.data().teams || []).filter(t => t !== ACTIVE_TEAM), updatedBy: currentUser.email, updatedAt: new Date().toISOString() });
+      else await ref.set({ teams: [], email: String(u.email || '').trim().toLowerCase(), addedBy: currentUser.email, addedAt: new Date().toISOString() });
+      audit('Team access changed', `${u.email || u.name}: taken out of ${WG_TEAMS.name(ACTIVE_TEAM)}`);
+    } catch (e) { console.warn('Team removal:', e.code || e.message); showToast('⚠️ Their profile is removed, but their sign-in could not be taken out of the team — do it in Settings → Teams.'); }
+  })();
   /* saveUserProfiles() publishes the shared staff directory (managers only) */
   showToast(`${sanitize(u.name)} removed from CMS`);
   showPage('settings');
@@ -14080,7 +14108,7 @@ async function _sha256hex(text) {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
   return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
 }
-function intakeLinkUrl(token) { return location.origin + '/i#' + token; }
+function intakeLinkUrl(token) { return location.origin + '/i#' + WG_TEAMS.linkPart(ACTIVE_TEAM, token); }
 function _ifExpMs(f) { const e = f && f.expiresAt; return e && e.toMillis ? e.toMillis() : e && e.seconds ? e.seconds * 1000 : Date.parse((f && f.expiresAtIso) || (typeof e === 'string' ? e : '')) || 0; }
 function intakeFormState(f) {
   if (!f) return 'none';
@@ -14366,7 +14394,7 @@ const CF_STATE = {
   cancelled: ['Link cancelled',                           '#4b5563', '#f3f4f6'],
 };
 const _PNG_OK = /^data:image\/png;base64,[A-Za-z0-9+/=]+$/;
-function consentLinkUrl(token) { return location.origin + '/c#' + token; }
+function consentLinkUrl(token) { return location.origin + '/c#' + WG_TEAMS.linkPart(ACTIVE_TEAM, token); }
 function consentFormState(f) {
   if (!f) return 'none';
   if (['applied', 'cancelled', 'submitted'].includes(f.status)) return f.status;
@@ -15788,6 +15816,7 @@ function showLoginScreen() {
       <div style="text-align:center;margin-bottom:24px">
         <img src="${document.querySelector('#sidebar img')?.src||''}" alt="WG" style="height:60px;margin-bottom:12px">
         <h1 style="font-size:20px;font-weight:700;color:var(--primary)">Worn Gundidj CMS</h1>
+        ${ACTIVE_TEAM !== WG_TEAMS.DEFAULT ? `<p id="login-team" style="font-size:12px;font-weight:600;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:4px 10px;margin-top:6px;display:inline-block">This device last opened: ${sanitize(WG_TEAMS.name(ACTIVE_TEAM))}</p>` : ''}
         <p style="font-size:13px;color:#6b7280;margin-top:4px">${useFirebase ? 'Client & Case Management — SEWB · AOD · Justice · Disability · FPHO' : 'Select your name to sign in'}</p>
         ${useFirebase ? `<p id="login-fb-badge" style="font-size:11px;background:#d1fae5;color:#065f46;border-radius:6px;padding:4px 10px;margin-top:6px;display:inline-block">${fbReady ? '🔒 Secure sign-in · Data stored in Australia' : '⏳ Connecting to secure server…'}</p>` : ''}
       </div>
@@ -16156,6 +16185,243 @@ async function sendPasswordReset() {
   } finally { btn.disabled = false; btn.textContent = 'Email me a reset link'; }
 }
 
+// ===== TEAMS: which team an account opens, switching, and the owner's Teams panel =====
+// The security rules decide what an account can reach (firestore.rules: members/{uid}).
+// This only works out which team to OPEN — it cannot let anyone into a team the rules refuse.
+const TEAM_RESUME_KEY = 'wg_team_resume';
+let myTeams = [ACTIVE_TEAM];      // the teams the signed-in account may use (this session)
+let myMembership = null;          // its membership entry, when it has one
+let teamsLocked = null;           // true once the owner has locked: no entry = no access (null = not known)
+function _memberRef(uid) { return firebase.firestore().collection('members').doc(uid); }
+function _lockRef() { return firebase.firestore().collection('platform').doc('lock'); }
+function isPlatformOwner() { return !!currentUser && _isOwnerEmail(currentUser.email); }
+function canAddToTeam() { return isPlatformOwner() || !!(myMembership && myMembership.manager === true); }
+
+// → { teams, known, member }.  known:false = the membership could not be read (offline, or the
+// new rules are not published yet): carry on in this device's team; the rules still decide.
+async function _teamAccess(user) {
+  const email = (user.email || '').trim().toLowerCase();
+  const lockP = _lockRef().get().then(d => d.exists).catch(() => null);
+  if (_isOwnerEmail(email)) { teamsLocked = await lockP; return { teams: WG_TEAMS.IDS.slice(), known: true }; }
+  let snap;
+  try { snap = await _memberRef(user.uid).get(); }
+  catch (e) { console.warn('Team membership:', e.code || e.message); return { teams: [ACTIVE_TEAM], known: false }; }
+  teamsLocked = await lockP;
+  if (snap.exists) { const d = snap.data() || {}; return { teams: (Array.isArray(d.teams) ? d.teams : []).filter(WG_TEAMS.valid), known: true, member: d }; }
+  if (teamsLocked === null) return { teams: [ACTIVE_TEAM], known: false };
+  if (teamsLocked) return { teams: [], known: true };
+  // An account from before teams existed: it is Worn Gundidj staff. Record that, so the owner
+  // can see everyone who has moved across before locking.
+  const entry = { teams: [WG_TEAMS.DEFAULT], email, addedBy: email, addedAt: new Date().toISOString() };
+  try { await _memberRef(user.uid).set(entry); } catch (e) { console.warn('Team membership (first sign-in):', e.code || e.message); }
+  return { teams: [WG_TEAMS.DEFAULT], known: true, member: entry };
+}
+// Open another team on this device: remember it, and reload into it without asking for the
+// password again (the reload happens straight after a real sign-in, in the same tab).
+function _openTeam(team, uid) {
+  try { localStorage.setItem(WG_TEAMS.DEVICE_KEY, team); sessionStorage.setItem(TEAM_RESUME_KEY, JSON.stringify({ uid, team, at: Date.now() })); } catch (_) {}
+  location.reload();
+}
+// Everything after the password (and two-step code) is accepted. `resumed` = we are finishing
+// a sign-in after the page reloaded into another team.
+async function _finishSignIn(user, email, resumed) {
+  const access = await _teamAccess(user);
+  if (!access.teams.length) {
+    try { await firebase.auth().signOut(); } catch (_) {}
+    throw Object.assign(new Error('This account is not in any team'), { code: 'wg/no-team' });
+  }
+  const team = WG_TEAMS.pick(access.teams, ACTIVE_TEAM);
+  if (team !== ACTIVE_TEAM) {
+    if (resumed) throw Object.assign(new Error('Could not open the team'), { code: 'wg/team-loop' });
+    _openTeam(team, user.uid); return 'reloading';
+  }
+  myTeams = access.teams; myMembership = access.member || null;
+  // Pull the shared staff directory BEFORE resolving the profile. Without
+  // this, a device with no cached profile invents one defaulted to 'worker'
+  // — which is how the System Manager arrived as a Case Worker and lost
+  // access to the only screen that could have put it right.
+  try { if (FSYNC.isReady()) await FSYNC.fetchStaff?.(); } catch(_) {}
+  // Match Firebase user to local profile (keyed on email; self-healing)
+  let u = _resolveUserProfile(user, email);
+  // Server-set role wins: once the role Cloud Function is deployed
+  // (docs/SECURITY-DEPLOY.md), the signed token carries {role, name} custom
+  // claims that a devtools localStorage edit can't forge. No claims yet
+  // (functions not deployed) → keep the local profile role as before.
+  try {
+    const tok = await user.getIdTokenResult();
+    if (tok.claims && tok.claims.role) {
+      u.role = tok.claims.role;
+      if (tok.claims.name) u.name = tok.claims.name;
+      saveUserProfiles();
+    }
+  } catch(_) {}
+  // Pull this person's section-access rules (set by the System Manager)
+  // so restrictions follow them onto any device they sign in from.
+  try {
+    const acc = await _accessDocRef(email)?.get();
+    if (acc && acc.exists) { u.hiddenPages = acc.data().hiddenPages || []; saveUserProfiles(); }
+  } catch(_) {}
+  window._wgSigningIn = false;
+  _clearFailedLogins(email); saveCurrentUser(u); _auditLogin(u); _flagUnconfirmedRole(u, email); initApp();
+  return 'ok';
+}
+// After a reload into another team: finish the sign-in that was already made.
+function _resumeTeamSignIn() {
+  let r = null;
+  try { r = JSON.parse(sessionStorage.getItem(TEAM_RESUME_KEY) || 'null'); sessionStorage.removeItem(TEAM_RESUME_KEY); } catch (_) {}
+  if (!r || !r.uid || !(Date.now() - r.at < 120000)) return;
+  const btn = document.getElementById('login-btn'), errEl = document.getElementById('login-error');
+  const reset = msg => { window._wgSigningIn = false; if (btn) { btn.disabled = false; btn.textContent = 'Sign In →'; } if (errEl && msg) errEl.textContent = msg; };
+  window._wgSigningIn = true;
+  if (btn) { btn.disabled = true; btn.textContent = 'Opening ' + WG_TEAMS.name(ACTIVE_TEAM) + '…'; }
+  (async () => {
+    try {
+      let waited = 0;
+      while ((!window.firebase || !firebase.auth) && waited < 15000) { await FSYNC.init(); if (window.firebase && firebase.auth) break; await new Promise(res => setTimeout(res, 1500)); waited += 1500; }
+      if (!window.firebase || !firebase.auth) return reset('Please sign in again.');
+      if (!firebase.apps.length) firebase.initializeApp(FSYNC.getCfg());
+      const user = await new Promise(res => { const un = firebase.auth().onAuthStateChanged(u => { try { un(); } catch (_) {} res(u); }); });
+      if (!user || user.uid !== r.uid) return reset('Please sign in again.');
+      await _finishSignIn(user, user.email, true);
+    } catch (e) {
+      console.warn('Team resume:', e);
+      reset(e && e.code === 'wg/no-team' ? 'Your account has not been added to a team yet. Ask your System Manager to add you.' : 'Please sign in again.');
+    }
+  })();
+}
+// Client records kept on this device are cleared when someone signs out or changes team
+// (they are read again from the cloud next time).
+function _purgeLocalRecords(auditInCloud) {
+  clients=[]; notes=[]; timeLogs=[]; referrals=[];
+  smsOutbox=[]; intakeForms=[]; consentForms=[];   // cloud-held (re-read at next sign-in); they carry client names, numbers and signatures
+  ['clients','notes','timelogs','referrals','fphoApplications','fphoClients','resources','smsOutbox','intakeForms','consentForms'].forEach(k=>DB.save(k,[]));
+  // Calendar and walk-in register (client names) are whole lists held in the cloud and re-read at sign-in.
+  calEvents=[]; walkins=[]; DB.save('calevents',[]); DB.save('walkins',[]);
+  // Audit log: cleared only once every entry is confirmed in the cloud (it is re-read at sign-in).
+  if (auditInCloud) { auditLog=[]; DB.save('auditlog',[]); }
+}
+function openTeamSwitcher() {
+  if (myTeams.length < 2) return;
+  showModal('🏢 Switch team', `
+    <p style="font-size:13px;color:var(--muted);margin:0 0 12px">Each team has its own clients, notes, staff list and settings. Nothing is shared between them.</p>
+    <div id="team-switch-list" style="display:flex;flex-direction:column;gap:8px">
+      ${WG_TEAMS.LIST.filter(t => myTeams.includes(t.id)).map(t => `
+        <button class="btn ${t.id === ACTIVE_TEAM ? 'btn-primary' : 'btn-outline'}" data-team="${t.id}" style="text-align:left;padding:12px 14px" ${t.id === ACTIVE_TEAM ? 'disabled' : ''} onclick="switchTeam('${t.id}')">
+          <strong>${sanitize(t.name)}</strong>${t.id === ACTIVE_TEAM ? ' — open now' : ''}<br><span style="font-size:12px;font-weight:400">${sanitize(t.note)}</span></button>`).join('')}
+    </div>`, null, '480px', true);
+}
+async function switchTeam(id) {
+  if (!WG_TEAMS.valid(id) || !myTeams.includes(id) || id === ACTIVE_TEAM) return;
+  const user = window.firebase && firebase.auth && firebase.auth().currentUser;
+  if (!user || !FSYNC.isReady() || navigator.onLine === false) { showToast('⚠️ Connect to the internet before switching team.'); return; }
+  if (!confirm(`Open ${WG_TEAMS.name(id)}?\n\n${WG_TEAMS.name(ACTIVE_TEAM)} will be closed on this device. You stay signed in.`)) return;
+  const mc = document.getElementById('modal-container');
+  try { mc && mc._draft && mc._draft.flush(); } catch (e) {}
+  try { flushIntake(); stopIntakeAutoSave(); } catch (e) {}
+  audit('Switched team', `${WG_TEAMS.name(ACTIVE_TEAM)} → ${WG_TEAMS.name(id)}`);
+  let auditInCloud = false;
+  try { auditInCloud = (await Promise.race([FSYNC.pushAudit(), new Promise(r => setTimeout(() => r(false), 4000))])) === true; } catch (e) {}
+  try { _purgeLocalRecords(auditInCloud); } catch (e) {}
+  _openTeam(id, user.uid);
+}
+// The team name in the side menu (with a switch button for accounts in more than one team),
+// and a banner across the top of the Test team so nobody mistakes it for the real thing.
+function _teamChipHtml() {
+  const t = WG_TEAMS.get(ACTIVE_TEAM) || { name: ACTIVE_TEAM };
+  return `<div id="team-chip" style="display:flex;align-items:center;gap:6px;font-size:11px;background:${t.test ? '#b45309' : 'rgba(255,255,255,0.12)'};border-radius:7px;padding:6px 8px">
+    <span style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">🏢 <strong>${sanitize(t.name)}</strong></span>
+    ${myTeams.length > 1 ? `<button id="team-switch-btn" onclick="openTeamSwitcher()" style="background:rgba(255,255,255,0.18);border:1px solid rgba(255,255,255,0.3);color:#fff;border-radius:6px;font-size:11px;font-weight:600;padding:3px 8px;cursor:pointer">Switch</button>` : ''}</div>`;
+}
+function _teamBannerHtml() {
+  const t = WG_TEAMS.get(ACTIVE_TEAM);
+  return t && t.test ? `<div id="team-banner" role="note" style="background:#b45309;color:#fff;font-size:13px;font-weight:600;text-align:center;padding:7px 12px">🧪 TEST TEAM — for practice only. Use made-up people. Never enter real client information here.</div>` : '';
+}
+
+// ── Settings → Teams (the owner only) ────────────────────────────────────────
+let _teamsRows = [];
+function teamsCardHtml() {
+  if (!isPlatformOwner()) return '';
+  setTimeout(() => { teamsLoad(); }, 0);
+  return `<div class="card" id="teams-card">
+    <div class="card-header"><div class="card-title">🏢 Teams</div><span class="tag">Open now: ${sanitize(WG_TEAMS.name(ACTIVE_TEAM))}</span></div>
+    <p style="font-size:13px;color:var(--muted);margin:0 0 10px">Three teams share this system. Each has its own clients, notes, staff list and settings, and an account can only open the teams ticked for it here. You (the owner) can open all of them.</p>
+    <ul style="font-size:13px;margin:0 0 12px 18px;padding:0">${WG_TEAMS.LIST.map(t => `<li><strong>${sanitize(t.name)}</strong> — ${sanitize(t.note)}</li>`).join('')}</ul>
+    <div id="teams-body" style="font-size:13px;color:var(--muted)">Loading…</div>
+  </div>`;
+}
+async function teamsLoad() {
+  const box = document.getElementById('teams-body'); if (!box || !isPlatformOwner()) return;
+  try {
+    const [ms, lock] = await Promise.all([firebase.firestore().collection('members').get(), _lockRef().get()]);
+    _teamsRows = ms.docs.map(d => Object.assign({ uid: d.id }, d.data())).sort((a, b) => String(a.email || '').localeCompare(String(b.email || '')));
+    teamsLocked = lock.exists;
+  } catch (e) {
+    box.innerHTML = `<div style="color:#b45309">Could not read the team list (${sanitize(e.code || e.message)}). If this was just released, the new security rules may still be publishing — try again in a few minutes.</div>`;
+    return;
+  }
+  teamsRender();
+}
+function teamsRender() {
+  const box = document.getElementById('teams-body'); if (!box) return;
+  const listed = new Set(_teamsRows.map(r => String(r.email || '').toLowerCase()));
+  const waiting = ACTIVE_TEAM === WG_TEAMS.DEFAULT ? userProfiles.filter(u => u.email && !_isOwnerEmail(u.email) && !listed.has(String(u.email).trim().toLowerCase())) : [];
+  const th = 'text-align:left;padding:7px 8px;border-bottom:1px solid var(--border);font-size:12px', td = 'padding:7px 8px;border-bottom:1px solid var(--border)';
+  box.innerHTML = `
+    <div style="overflow-x:auto"><table id="teams-table" style="width:100%;border-collapse:collapse;font-size:13px;color:var(--text)">
+      <thead><tr style="background:var(--bg)"><th style="${th}">Account</th>${WG_TEAMS.LIST.map(t => `<th style="${th};text-align:center">${sanitize(t.name)}</th>`).join('')}<th style="${th};text-align:center" title="Can add new staff accounts to their own team">Can add staff</th></tr></thead>
+      <tbody>
+        <tr><td style="${td}"><strong>${sanitize(currentUser.email)}</strong><br><span style="font-size:11px;color:var(--muted)">Owner</span></td>${WG_TEAMS.LIST.map(() => `<td style="${td};text-align:center">✓</td>`).join('')}<td style="${td};text-align:center">✓</td></tr>
+        ${_teamsRows.filter(r => !_isOwnerEmail(r.email)).map(r => `<tr data-uid="${sanitize(r.uid)}">
+          <td style="${td}"><strong>${sanitize(r.email || r.uid)}</strong>${r.name ? `<br><span style="font-size:11px;color:var(--muted)">${sanitize(r.name)}</span>` : ''}${!(r.teams || []).length ? `<br><span style="font-size:11px;color:#b91c1c">No team — cannot open anything</span>` : ''}</td>
+          ${WG_TEAMS.LIST.map(t => `<td style="${td};text-align:center"><input type="checkbox" class="tm-team" data-team="${t.id}" ${(r.teams || []).includes(t.id) ? 'checked' : ''} onchange="teamsSetMember('${sanitize(r.uid)}')" aria-label="${sanitize(r.email || '')} in ${sanitize(t.name)}"></td>`).join('')}
+          <td style="${td};text-align:center"><input type="checkbox" class="tm-mgr" ${r.manager === true ? 'checked' : ''} onchange="teamsSetMember('${sanitize(r.uid)}')" aria-label="${sanitize(r.email || '')} can add staff"></td></tr>`).join('')}
+      </tbody></table></div>
+    ${!_teamsRows.filter(r => !_isOwnerEmail(r.email)).length ? `<p style="margin:10px 0 0;color:var(--muted)">No accounts are listed yet. Worn Gundidj staff appear here the next time they sign in.</p>` : ''}
+    <p style="font-size:12px;color:var(--muted);margin:10px 0 0">To add a <strong>new</strong> person to a team: switch to that team, then Settings → Staff Accounts → Add. To give an existing account another team, tick it here. Untick every team to shut an account out.</p>
+    <div id="teams-lock" style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px">
+      ${teamsLocked
+        ? `<div style="background:#d1fae5;border:1px solid #6ee7b7;color:#065f46;border-radius:8px;padding:10px 12px">🔒 <strong>Locked.</strong> Only the accounts listed above can open a team. A sign-in that is not listed gets nothing.
+            <div style="margin-top:8px"><button class="btn btn-sm btn-outline" id="teams-unlock-btn" onclick="teamsSetLock(false)">Unlock</button></div></div>`
+        : `<div style="background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:8px;padding:10px 12px">🔓 <strong>Moving in.</strong> Accounts from before teams still open Worn Gundidj, and are added to this list the next time they sign in. When everyone is listed, lock it — after that, only listed accounts can open anything.
+            ${waiting.length ? `<div id="teams-waiting" style="margin-top:6px">Not signed in since teams were added (${waiting.length}): ${waiting.map(u => sanitize(u.name || u.email)).join(', ')}. If you lock now they will be shut out until you tick them in.</div>` : (ACTIVE_TEAM === WG_TEAMS.DEFAULT ? `<div id="teams-waiting" style="margin-top:6px">Everyone on the Worn Gundidj staff list has signed in since teams were added.</div>` : '')}
+            <div style="margin-top:8px"><button class="btn btn-sm btn-primary" id="teams-lock-btn" onclick="teamsSetLock(true)">🔒 Lock: listed accounts only</button></div></div>`}
+    </div>`;
+}
+async function teamsSetMember(uid) {
+  if (!isPlatformOwner()) return;
+  const row = document.querySelector(`#teams-table tr[data-uid="${CSS.escape(uid)}"]`), r = _teamsRows.find(x => x.uid === uid); if (!row || !r) return;
+  const teams = [...row.querySelectorAll('.tm-team:checked')].map(x => x.dataset.team).filter(WG_TEAMS.valid), manager = row.querySelector('.tm-mgr').checked;
+  if (!teams.length && !confirm(`Take ${r.email || 'this account'} out of every team?\n\nThey will not be able to open anything until you tick a team again.`)) { teamsRender(); return; }
+  try {
+    await _memberRef(uid).update({ teams, manager, updatedBy: currentUser.email, updatedAt: new Date().toISOString() });
+    const was = (r.teams || []).map(WG_TEAMS.name).join(', ') || 'no team';
+    r.teams = teams; r.manager = manager;
+    audit('Team access changed', `${r.email || uid}: ${was} → ${teams.map(WG_TEAMS.name).join(', ') || 'no team'}${manager ? ' · can add staff' : ''}`);
+    showToast(`✓ ${r.email || 'Account'}: ${teams.map(WG_TEAMS.name).join(', ') || 'no team'}`);
+  } catch (e) { showToast('⚠️ Could not save: ' + (e.code || e.message)); }
+  teamsRender();
+}
+async function teamsSetLock(on) {
+  if (!isPlatformOwner()) return;
+  if (on && !confirm('Lock the teams?\n\nFrom now on only the accounts in the list can open anything. Anyone not listed is shut out until you tick them in.\n\nYou can unlock again here.')) return;
+  if (!on && !confirm('Unlock?\n\nAny sign-in that is not in the list will be treated as Worn Gundidj staff again.')) return;
+  try {
+    if (on) await _lockRef().set({ lockedBy: currentUser.email, lockedAt: new Date().toISOString() }); else await _lockRef().delete();
+    teamsLocked = on; audit(on ? 'Teams locked' : 'Teams unlocked', on ? 'Only listed accounts can open a team' : 'Unlisted accounts open Worn Gundidj again');
+    showToast(on ? '🔒 Locked — listed accounts only' : '🔓 Unlocked');
+  } catch (e) { showToast('⚠️ Could not change the lock: ' + (e.code || e.message)); }
+  teamsRender();
+}
+// Put a newly made account in THIS team. Returns true when its entry is saved.
+async function _teamAddMember(uid, email, name) {
+  const entry = { teams: [ACTIVE_TEAM], email: String(email || '').trim().toLowerCase(), name: String(name || '').slice(0, 120), addedBy: currentUser?.email || '', addedAt: new Date().toISOString() };
+  for (let i = 0; i < 3; i++) {
+    try { await _memberRef(uid).set(entry); return true; }
+    catch (e) { console.warn('Team entry:', e.code || e.message); if (e.code === 'permission-denied') return false; await new Promise(r => setTimeout(r, 800)); }
+  }
+  return false;
+}
+
 async function doLogin() {
   const errEl = document.getElementById('login-error');
 
@@ -16200,37 +16466,13 @@ async function doLogin() {
           cred = await _mfaChallengeFlow(e.resolver, email);
         } else { throw e; }
       }
-      // Pull the shared staff directory BEFORE resolving the profile. Without
-      // this, a device with no cached profile invents one defaulted to 'worker'
-      // — which is how the System Manager arrived as a Case Worker and lost
-      // access to the only screen that could have put it right.
-      try { if (FSYNC.isReady()) await FSYNC.fetchStaff?.(); } catch(_) {}
-      // Match Firebase user to local profile (keyed on email; self-healing)
-      let u = _resolveUserProfile(cred.user, email);
-      // Server-set role wins: once the role Cloud Function is deployed
-      // (docs/SECURITY-DEPLOY.md), the signed token carries {role, name} custom
-      // claims that a devtools localStorage edit can't forge. No claims yet
-      // (functions not deployed) → keep the local profile role as before.
-      try {
-        const tok = await cred.user.getIdTokenResult();
-        if (tok.claims && tok.claims.role) {
-          u.role = tok.claims.role;
-          if (tok.claims.name) u.name = tok.claims.name;
-          saveUserProfiles();
-        }
-      } catch(_) {}
-      // Pull this person's section-access rules (set by the System Manager)
-      // so restrictions follow them onto any device they sign in from.
-      try {
-        const acc = await _accessDocRef(email)?.get();
-        if (acc && acc.exists) { u.hiddenPages = acc.data().hiddenPages || []; saveUserProfiles(); }
-      } catch(_) {}
-      window._wgSigningIn = false;
-      _clearFailedLogins(email); saveCurrentUser(u); _auditLogin(u); _flagUnconfirmedRole(u, email); initApp();
+      if (await _finishSignIn(cred.user, email) === 'reloading') return;   // opening another team: the page reloads
     } catch(e) {
       window._wgSigningIn = false;
       btn.disabled=false; btn.textContent='Sign In →';
       if (e.code === 'auth/mfa-cancelled') { errEl.textContent = 'Sign-in cancelled — tap Sign In to get a new code.'; return; }
+      if (e.code === 'wg/no-team') { errEl.textContent = 'Your account has not been added to a team yet. Ask your System Manager to add you.'; return; }
+      if (e.code === 'wg/team-loop') { errEl.textContent = 'Could not open your team on this device. Please sign in again.'; return; }
       const msgs = {
         'auth/user-not-found':    'No account found with that email.',
         'auth/wrong-password':    'Incorrect password.',
@@ -16385,13 +16627,7 @@ async function logout(reason) {
   // confirm a cloud copy exists, keep the local data and say so.
   try {
     if (FSYNC.isReady()) {
-      clients=[]; notes=[]; timeLogs=[]; referrals=[];
-      smsOutbox=[]; intakeForms=[]; consentForms=[];   // cloud-held (re-read at next sign-in); they carry client names, numbers and signatures
-      ['clients','notes','timelogs','referrals','fphoApplications','fphoClients','resources','smsOutbox','intakeForms','consentForms'].forEach(k=>DB.save(k,[]));
-      // Calendar and walk-in register (client names) are whole lists held in the cloud and re-read at sign-in.
-      calEvents=[]; walkins=[]; DB.save('calevents',[]); DB.save('walkins',[]);
-      // Audit log: cleared only once every entry is confirmed in the cloud (it is re-read at sign-in).
-      if (auditInCloud) { auditLog=[]; DB.save('auditlog',[]); }
+      _purgeLocalRecords(auditInCloud);
     } else {
       console.warn('Logout: Cloud Sync not connected — local data kept to avoid destroying unsynced work.');
       alert('Note: you are not connected to Cloud Sync, so your data has been kept on this device rather than cleared (clearing it would lose anything not yet uploaded).\n\nReconnect and sign out again on a shared device.');
@@ -17040,7 +17276,7 @@ function initApp() {
     if(sidebar) sidebar.style.display='';
     if(main) {
       main.style.marginLeft='';
-      main.innerHTML=`
+      main.innerHTML=`${_teamBannerHtml()}
         <div id="topbar">
           <h2 id="page-title">Dashboard</h2>
           <div class="actions">
@@ -17063,6 +17299,7 @@ function initApp() {
   badge.className = 'user-badge-bar';
   badge.style.cssText = 'padding:10px 12px;border-top:1px solid rgba(255,255,255,0.15);margin-top:auto;display:flex;flex-direction:column;gap:8px';
   badge.innerHTML = `
+    ${_teamChipHtml()}
     <div style="display:flex;align-items:center;gap:10px">
       <div style="width:32px;height:32px;border-radius:50%;background:rgba(255,255,255,0.2);display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0">${ROLES[currentUser?.role]?.icon||'👤'}</div>
       <div style="flex:1;min-width:0">
@@ -18946,6 +19183,7 @@ document.addEventListener('keydown', e => {
 localStorage.removeItem('fb_cfg');
 // Always start at the login screen — initApp() is called by the login flow after auth
 showLoginScreen();
+_resumeTeamSignIn();   // only straight after a sign-in that had to reload into another team
 // Auto-connect Firebase on load using the built-in config. Retry a few times
 // with backoff so a slow network or a temporarily-blocked CDN doesn't leave
 // Cloud Sync stuck "Not connected" — it should always connect on its own.

@@ -85,6 +85,10 @@ function intakeMessage(client, linkUrl, days) {
   ]);
 }
 const money = v => '$' + (Math.round(v * 100) / 100).toFixed(2);
+// Several teams share the CMS. A link for a team other than Worn Gundidj carries the team:
+// /i#<team>.<link id>  (Worn Gundidj links stay /i#<link id>). Must agree with site/teams.js
+// linkPart() — a test checks.
+const teamLinkPart = (teamId, linkId) => (!teamId || teamId === 'worngundidj' || !/^[a-z0-9]{2,24}$/.test(String(teamId))) ? linkId : teamId + '.' + linkId;
 
 // Decide and (if allowed) send. deps are injected so this runs without
 // Firebase or a real provider in tests.
@@ -122,7 +126,7 @@ async function processRequest(req, deps) {
     const msLeft = Number(form.expiresAtMs || 0) - Date.now();
     if (!(msLeft > 0)) return out('skipped', 'Intake link has expired');
     if (await deps.alreadySentLink(linkId)) return out('skipped', 'This intake link was already texted', { to: maskPhone(mobile) });
-    body = intakeMessage(client, String(deps.appUrl).replace(/\/+$/, '') + '/i#' + linkId, Math.ceil(msLeft / 864e5));
+    body = intakeMessage(client, String(deps.appUrl).replace(/\/+$/, '') + '/i#' + teamLinkPart(deps.teamId, linkId), Math.ceil(msLeft / 864e5));
   }
 
   const parts = smsParts(body);
@@ -177,5 +181,5 @@ async function sendViaProvider(provider, creds, to, body, fetchImpl) {
   return data.sid;
 }
 
-module.exports = { auMobile, toE164, maskPhone, firstName, handbookMessage, intakeMessage, toGsm, smsParts, budgetMonth, processRequest, providerRequest, sendViaProvider,
+module.exports = { teamLinkPart, auMobile, toE164, maskPhone, firstName, handbookMessage, intakeMessage, toGsm, smsParts, budgetMonth, processRequest, providerRequest, sendViaProvider,
   HOURLY_CAP, DEFAULT_MONTHLY_BUDGET, DEFAULT_COST_PER_PART };

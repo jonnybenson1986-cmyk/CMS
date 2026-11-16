@@ -15,8 +15,10 @@ node tests/browser/vprintake.cjs        # VPR screening at intake, automatic add
 node tests/browser/forms.cjs            # the client's forms on a phone: signing, consent form, intake signature
 node tests/browser/consent.cjs          # consent forms in the CMS: send, check and file, print, intake signature
 node tests/browser/vpr.cjs              # Vulnerable Persons Register: screening, auto add/remove, Admin page
+node tests/browser/teams.cjs            # teams: each team kept apart, switching, the owner's Teams card, the lock
 node --test tests/unit/data-health.test.js   # the scoring engine on its own (no browser)
 node --test tests/unit/vpr.test.js           # the VPR rules on their own (no browser)
+node --test tests/unit/teams.test.js         # team ids, device storage per team, the team inside a form link
 ```
 
 Needs Playwright (`npm i -g playwright` or a local install) and its Chromium

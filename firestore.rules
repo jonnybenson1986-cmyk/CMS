@@ -27,6 +27,23 @@ service cloud.firestore {
     // Byte-identical re-write — what the app's "push everything" sync does.
     function unchanged() { return request.resource.data == resource.data; }
 
+    // ── Teams (multi-tenancy) ───────────────────────────────────────────────
+    // Every team's records live under teams/{teamId}/… and a signed-in account may
+    // only touch the teams it belongs to. Membership is the document members/{uid}:
+    //   { teams: ['worngundidj' | 'spare' | 'test', …], email, manager?, … }
+    // Team ids match site/teams.js (the tests check).
+    //   • The platform owner can use every team and manages membership.
+    //   • Moving in: an account that existed BEFORE teams has no membership document
+    //     yet. Until the owner locks it (the document platform/lock), such an account
+    //     is treated as Worn Gundidj staff — exactly what it was before — and the app
+    //     records its membership the next time it signs in. It can never reach the
+    //     other teams. Once platform/lock exists, no membership document = no access.
+    function isOwner()   { return signedIn() && 'email' in request.auth.token && request.auth.token.email == 'jon.benson@worngundidj.org.au'; }
+    function enrolled()  { return exists(/databases/$(database)/documents/members/$(request.auth.uid)); }
+    function me()        { return get(/databases/$(database)/documents/members/$(request.auth.uid)).data; }
+    function wgOpen()    { return !exists(/databases/$(database)/documents/platform/lock); }
+    function inTeam(t)   { return signedIn() && (isOwner() || (enrolled() ? t in me().teams : (t == 'worngundidj' && wgOpen()))); }
+
     // A signature sent with a client form (intake.html / consent.html): who signed, how, when,
     // and — for a drawn one — a small PNG (the keys match site/forms/signing.js SIG_KEYS).
     function validSignature(s) {
@@ -75,41 +92,41 @@ service cloud.firestore {
     }
 
     // ── Core client data ────────────────────────────────────────────────────
-    match /teams/{teamId}/clients/{id}       { allow read, write: if signedIn(); }
-    match /teams/{teamId}/notes/{id}         { allow read, write: if signedIn(); }
-    match /teams/{teamId}/timelogs/{id}      { allow read, write: if signedIn(); }
-    match /teams/{teamId}/referrals/{id}     { allow read, write: if signedIn(); }
+    match /teams/{teamId}/clients/{id}       { allow read, write: if inTeam(teamId); }
+    match /teams/{teamId}/notes/{id}         { allow read, write: if inTeam(teamId); }
+    match /teams/{teamId}/timelogs/{id}      { allow read, write: if inTeam(teamId); }
+    match /teams/{teamId}/referrals/{id}     { allow read, write: if inTeam(teamId); }
 
     // ── Team lists & tools ──────────────────────────────────────────────────
-    match /teams/{teamId}/workersList/{id}   { allow read, write: if signedIn(); }
-    match /teams/{teamId}/workflowTasks/{id} { allow read, write: if signedIn(); }
-    match /teams/{teamId}/policies/{id}      { allow read, write: if signedIn(); }
-    match /teams/{teamId}/chatConvs/{id}     { allow read, write: if signedIn(); }
-    match /teams/{teamId}/chatMsgs/{id}      { allow read, write: if signedIn(); }
+    match /teams/{teamId}/workersList/{id}   { allow read, write: if inTeam(teamId); }
+    match /teams/{teamId}/workflowTasks/{id} { allow read, write: if inTeam(teamId); }
+    match /teams/{teamId}/policies/{id}      { allow read, write: if inTeam(teamId); }
+    match /teams/{teamId}/chatConvs/{id}     { allow read, write: if inTeam(teamId); }
+    match /teams/{teamId}/chatMsgs/{id}      { allow read, write: if inTeam(teamId); }
 
     // ── Section-access rules (who sees which pages) ─────────────────────────
     // App-level UI restricts editing to the System Manager; server-side
     // tightening to sysmanager-only comes with custom claims (strict rules).
-    match /teams/{teamId}/userAccess/{id}    { allow read, write: if signedIn(); }
+    match /teams/{teamId}/userAccess/{id}    { allow read, write: if inTeam(teamId); }
 
     // ── Staff directory (roles + display names, doc id "list") ──────────────
     // Every device reads this on sign-in to learn its own role, so a worker
     // signing in on a clean device is no longer created as a fresh "worker".
-    match /teams/{teamId}/staff/{id}         { allow read, write: if signedIn(); }
+    match /teams/{teamId}/staff/{id}         { allow read, write: if inTeam(teamId); }
 
     // ── Newly-synced operational stores (QA C4/H5) ─────────────────────────
-    match /teams/{teamId}/fpho/{id}         { allow read, write: if signedIn(); }
-    match /teams/{teamId}/walkins/{id}      { allow read, write: if signedIn(); }
-    match /teams/{teamId}/calevents/{id}    { allow read, write: if signedIn(); }
-    match /teams/{teamId}/resources/{id}    { allow read, write: if signedIn(); }
+    match /teams/{teamId}/fpho/{id}         { allow read, write: if inTeam(teamId); }
+    match /teams/{teamId}/walkins/{id}      { allow read, write: if inTeam(teamId); }
+    match /teams/{teamId}/calevents/{id}    { allow read, write: if inTeam(teamId); }
+    match /teams/{teamId}/resources/{id}    { allow read, write: if inTeam(teamId); }
 
     // ── Audit log: append-only for EVERYONE, including admins ───────────────
     // create        → any signed-in staff (the app writes audit entries)
     // update        → only a byte-identical re-push (sync no-op); real edits denied
     // delete        → nobody, ever — "Clear audit log" only clears the local view
     match /teams/{teamId}/auditlog/{id} {
-      allow read, create: if signedIn();
-      allow update: if signedIn() && unchanged();
+      allow read, create: if inTeam(teamId);
+      allow update: if inTeam(teamId) && unchanged();
       allow delete: if false;
     }
 
@@ -119,8 +136,8 @@ service cloud.firestore {
     // cannot supply a number or message, and cannot change a request after
     // creating it — the Cloud Function (Admin SDK) writes the result.
     match /teams/{teamId}/smsOutbox/{id} {
-      allow read: if signedIn();
-      allow create: if signedIn()
+      allow read: if inTeam(teamId);
+      allow create: if inTeam(teamId)
         && request.resource.data.keys().hasOnly(['kind', 'clientId', 'requestedBy', 'requestedByName', 'requestedAt', 'linkId'])
         && request.resource.data.kind in ['handbook', 'intake']
         && (request.resource.data.kind == 'handbook'
@@ -133,13 +150,13 @@ service cloud.firestore {
     // Shared app settings, e.g. appConfig/outlook = the Azure client id for Outlook sync
     // (not a secret — it identifies the app). Set by the System Manager in Settings.
     match /teams/{teamId}/appConfig/{id} {
-      allow read: if signedIn();
-      allow write: if signedIn();
+      allow read: if inTeam(teamId);
+      allow write: if inTeam(teamId);
     }
     // On/off switch for automatic texts (the app shows it to the System Manager only).
     match /teams/{teamId}/smsConfig/{id} {
-      allow read: if signedIn();
-      allow write: if signedIn();
+      allow read: if inTeam(teamId);
+      allow write: if inTeam(teamId);
     }
 
     // ── Client intake forms sent by link (intake.html) ───────────────────────
@@ -156,14 +173,14 @@ service cloud.firestore {
     // intakeLinks holds no personal details: expiry, status, whether a DOB is asked.
     match /teams/{teamId}/intakeLinks/{linkId} {
       allow get: if true;
-      allow list, create, update: if signedIn();
+      allow list, create, update: if inTeam(teamId);
       allow delete: if false;
     }
     match /teams/{teamId}/intakeForms/{formId} {
-      allow list, create: if signedIn();
-      allow get: if signedIn()
+      allow list, create: if inTeam(teamId);
+      allow get: if inTeam(teamId)
         || (resource.data.expiresAt > request.time && resource.data.status in ['open', 'draft', 'submitted']);
-      allow update: if signedIn() || (
+      allow update: if inTeam(teamId) || (
            resource.data.status in ['open', 'draft']
         && resource.data.expiresAt > request.time
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['answers', 'signature', 'status', 'savedAt', 'submittedAt', 'step'])
@@ -186,18 +203,18 @@ service cloud.firestore {
     // personal details. The answer keys are exactly site/consent/consent-text.js KEYS.
     match /teams/{teamId}/consentLinks/{linkId} {
       allow get: if true;
-      allow list, create, update: if signedIn();
+      allow list, create, update: if inTeam(teamId);
       allow delete: if false;
     }
     match /teams/{teamId}/consentForms/{formId} {
-      allow list, create: if signedIn();
-      allow get: if signedIn()
+      allow list, create: if inTeam(teamId);
+      allow get: if inTeam(teamId)
         || (resource.data.expiresAt > request.time && resource.data.status in ['open', 'submitted']);
       // Two writes, because a request may evaluate at most 1000 expressions and a full sharing list is most of that:
       //   1. the sharing section on its own (who we may share with) — as often as they like before sending;
       //   2. the answers and signature, ONCE, which sends the form. The sharing must already have been saved,
       //      and cannot be changed in this write.
-      allow update: if signedIn() || (
+      allow update: if inTeam(teamId) || (
            resource.data.status == 'open'
         && resource.data.expiresAt > request.time
         && (
@@ -216,7 +233,7 @@ service cloud.firestore {
     }
     // Monthly text spend, written only by the SMS Cloud Function (Admin SDK).
     match /teams/{teamId}/smsUsage/{month} {
-      allow read: if signedIn();
+      allow read: if inTeam(teamId);
       allow write: if false;
     }
     // ── 💡 Ideas for improving the CMS (the light-globe button) ─────────────
@@ -224,8 +241,8 @@ service cloud.firestore {
     // and a few labels, nothing else. Updates may touch only the review fields
     // (status / reply); the app offers them to the System Manager. Never deleted.
     match /teams/{teamId}/ideas/{id} {
-      allow read: if signedIn();
-      allow create: if signedIn()
+      allow read: if inTeam(teamId);
+      allow create: if inTeam(teamId)
         && request.resource.data.keys().hasOnly(['text', 'category', 'page', 'submittedBy', 'submittedByName', 'submittedRole', 'createdAt', 'status'])
         && request.resource.data.submittedBy == request.auth.uid
         && request.resource.data.status == 'new'
@@ -235,7 +252,7 @@ service cloud.firestore {
         && request.resource.data.page is string && request.resource.data.page.size() <= 60
         && request.resource.data.submittedByName is string && request.resource.data.submittedByName.size() <= 120
         && request.resource.data.createdAt is string;
-      allow update: if signedIn() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'response', 'reviewedBy', 'reviewedAt'])
+      allow update: if inTeam(teamId) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'response', 'reviewedBy', 'reviewedAt'])
         && request.resource.data.status in ['new', 'considering', 'planned', 'done', 'notnow']
         && (!('response' in request.resource.data) || (request.resource.data.response is string && request.resource.data.response.size() <= 1000));
       allow delete: if false;
@@ -243,8 +260,50 @@ service cloud.firestore {
 
     // ── Roles mirror: written only by trusted server code (Admin SDK) ───────
     match /teams/{teamId}/roles/{uid} {
-      allow read: if signedIn();
+      allow read: if inTeam(teamId);
       allow write: if false;
+    }
+
+    // ── Team membership ──────────────────────────────────────────────────────
+    // Who may use which team. An account can read its own entry; only the owner can
+    // list, change or remove entries. New entries can be made by:
+    //   • the owner (any of the teams);
+    //   • a team manager (manager: true, set by the owner) — for ONE of their own teams;
+    //   • an account from before teams, for itself, as Worn Gundidj only, until the lock.
+    function validMember(m) {
+      return m.keys().hasOnly(['teams', 'email', 'name', 'manager', 'addedBy', 'addedAt', 'updatedBy', 'updatedAt'])
+        && m.teams is list && m.teams.size() <= 3 && m.teams.hasOnly(['worngundidj', 'spare', 'test'])
+        && m.email is string && m.email.size() <= 200
+        && (!('name' in m) || (m.name is string && m.name.size() <= 120))
+        && (!('manager' in m) || m.manager is bool)
+        && (!('addedBy' in m) || (m.addedBy is string && m.addedBy.size() <= 200))
+        && (!('addedAt' in m) || (m.addedAt is string && m.addedAt.size() <= 40))
+        && (!('updatedBy' in m) || (m.updatedBy is string && m.updatedBy.size() <= 200))
+        && (!('updatedAt' in m) || (m.updatedAt is string && m.updatedAt.size() <= 40));
+    }
+    match /members/{uid} {
+      allow get: if signedIn() && (request.auth.uid == uid || isOwner());
+      allow list: if isOwner();
+      allow create: if signedIn() && validMember(request.resource.data) && (
+           isOwner()
+        || (request.auth.uid == uid && wgOpen()
+            && request.resource.data.teams == ['worngundidj'] && !('manager' in request.resource.data)
+            && request.resource.data.email == request.auth.token.email)
+        || (request.auth.uid != uid && enrolled() && me().get('manager', false) == true
+            && request.resource.data.teams.size() == 1 && request.resource.data.teams[0] in me().teams
+            && !('manager' in request.resource.data))
+      );
+      allow update: if isOwner() && validMember(request.resource.data);
+      allow delete: if isOwner();
+    }
+    // platform/lock — once it exists, accounts with no membership entry get nothing.
+    match /platform/{id} {
+      allow get: if signedIn();
+      allow list: if isOwner();
+      allow create, update: if isOwner() && id == 'lock'
+        && request.resource.data.keys().hasOnly(['lockedBy', 'lockedAt'])
+        && request.resource.data.lockedBy is string && request.resource.data.lockedAt is string;
+      allow delete: if isOwner();
     }
 
     // No catch-all: any collection not listed above is denied by default.

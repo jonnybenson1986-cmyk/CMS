@@ -32,6 +32,22 @@ for (const file of Object.keys(RULES)) {
   const sigKeys = (src.match(/function validSignature[\s\S]*?s\.keys\(\)\.hasOnly\(\[([^\]]*)\]\)/) || [, ''])[1].split(',').map(x => x.trim().replace(/'/g, '')).filter(Boolean);
   await check(file + ': signature rule keys match site/forms/signing.js', JSON.stringify(sigKeys) === JSON.stringify(globalThis.WG_SIGN.SIG_KEYS) ? Promise.resolve() : Promise.reject(new Error('signature keys differ from signing.js')));
 }
+// ...and the teams an account can be put in must be exactly site/teams.js.
+const TEAMS = createRequire(import.meta.url)('../../site/teams.js');
+for (const file of Object.keys(RULES)) {
+  const src = fs.readFileSync(new URL(RULES[file], import.meta.url), 'utf8');
+  const ids = (src.match(/m\.teams\.hasOnly\(\[([^\]]*)\]\)/) || [, ''])[1].split(',').map(x => x.trim().replace(/'/g, '')).filter(Boolean);
+  await check(file + ': team ids in the rules match site/teams.js', JSON.stringify(ids) === JSON.stringify(TEAMS.IDS) && src.includes("t == '" + TEAMS.DEFAULT + "' && wgOpen()") ? Promise.resolve() : Promise.reject(new Error('team ids differ from teams.js')));
+  const appOwners = (fs.readFileSync(new URL('../../site/index.html', import.meta.url), 'utf8').match(/const OWNER_EMAILS = \[([^\]]*)\]/) || [, ''])[1].split(',').map(x => x.trim().replace(/'/g, '')).filter(Boolean);
+  const ruleOwner = (src.match(/function isOwner\(\)[^\n]*request\.auth\.token\.email == '([^']+)'/) || [])[1];
+  const storageSrc = fs.readFileSync(new URL(file.startsWith('strict') ? '../../storage.rules.strict' : '../../storage.rules', import.meta.url), 'utf8');
+  await check(file + ': the owner in the rules is the owner in the app — and the file rules (storage) use the same owner and the same team test', appOwners.length === 1 && appOwners[0] === ruleOwner
+    && storageSrc.includes("request.auth.token.email == '" + ruleOwner + "'") && storageSrc.includes("t == '" + TEAMS.DEFAULT + "' && !firestore.exists(/databases/(default)/documents/platform/lock)")
+    && storageSrc.includes('members/$(request.auth.uid)).data.teams') && !/allow (read|write)[^;]*if signedIn\(\)/.test(storageSrc.split('\n').filter(l => !l.trim().startsWith('//')).join('\n'))
+    ? Promise.resolve() : Promise.reject(new Error('owner / storage rules differ: ' + appOwners + ' vs ' + ruleOwner)));
+  await check(file + ': every team rule checks the team (no rule left on "any signed-in account")', (() => { const body = src.slice(src.indexOf('match /teams/{teamId}/'), src.indexOf('// ── Team membership'));
+    const loose = body.split('\n').filter(l => !l.trim().startsWith('//') && /signedIn\(\)|hasRole\(\)|isMgr\(\)|isSys\(\)/.test(l)); return loose.length ? Promise.reject(new Error('not team-checked: ' + loose[0].trim())) : Promise.resolve(); })());
+}
 for (const file of Object.keys(RULES)) {
   const env = await initializeTestEnvironment({ projectId: 'demo-wg-' + file.split('.')[0], firestore: { rules: fs.readFileSync(new URL(RULES[file], import.meta.url), 'utf8'), host: '127.0.0.1', port: 8089 } });
   const T = 'teams/worngundidj';
@@ -259,6 +275,132 @@ for (const file of Object.keys(RULES)) {
     assertSucceeds(updateDoc(doc(wkr, T + '/consentLinks/' + CL), { status: 'applied' })),
     assertFails(deleteDoc(doc(sys, T + '/consentForms/CF8'))), assertFails(deleteDoc(doc(sys, T + '/consentLinks/' + CL)))]));
   await check(f + ' existing collections still work (clients)', assertSucceeds(setDoc(doc(wkr, T + '/clients/c1'), { fullName: 'x' })));
+
+  // ══════════ TEAMS (multi-tenancy) ══════════
+  // Worn Gundidj, a spare team and a test team: an account only reaches the teams it belongs to.
+  const OWNER = 'jon.benson@worngundidj.org.au';
+  const as = (uid, email, role) => env.authenticatedContext(uid, { email, role: role || 'worker', name: uid }).firestore();
+  const owner = as('u-owner', OWNER, 'sysmanager');
+  const wgM = as('t-wg', 'wg@x.org'), testM = as('t-test', 'test@x.org'), spareM = as('t-spare', 'spare@x.org'), bothM = as('t-both', 'both@x.org');
+  const mgr = as('t-mgr', 'mgr@x.org', 'sysmanager'), none = as('t-none', 'none@x.org'), fresh = as('t-fresh', 'fresh@x.org'), fresh2 = as('t-fresh2', 'fresh2@x.org');
+  const fakeOwner = as('t-fake', 'jon.benson@worngundidj.org.au.evil.example');
+  const M = uid => 'members/' + uid, mem = (teams, email, o) => ({ teams, email, addedBy: OWNER, addedAt: '2026-11-16T01:00:00.000Z', ...(o || {}) });
+  const TT = 'teams/test', TS = 'teams/spare';
+  await check(f + ' teams: the owner can put accounts in teams (and make a team manager)', Promise.all([
+    assertSucceeds(setDoc(doc(owner, M('t-wg')), mem(['worngundidj'], 'wg@x.org'))),
+    assertSucceeds(setDoc(doc(owner, M('t-test')), mem(['test'], 'test@x.org'))),
+    assertSucceeds(setDoc(doc(owner, M('t-spare')), mem(['spare'], 'spare@x.org'))),
+    assertSucceeds(setDoc(doc(owner, M('t-both')), mem(['worngundidj', 'test'], 'both@x.org'))),
+    assertSucceeds(setDoc(doc(owner, M('t-mgr')), mem(['test'], 'mgr@x.org', { manager: true, name: 'Test Manager' }))),
+    assertSucceeds(setDoc(doc(owner, M('t-none')), mem([], 'none@x.org')))]));
+  await check(f + ' teams: the owner cannot invent a team, or add stray fields', Promise.all([
+    assertFails(setDoc(doc(owner, M('t-x1')), mem(['otherorg'], 'x@x.org'))),
+    assertFails(setDoc(doc(owner, M('t-x1')), mem(['test'], 'x@x.org', { role: 'sysmanager' }))),
+    assertFails(setDoc(doc(owner, M('t-x1')), { teams: 'test', email: 'x@x.org' })),
+    assertFails(setDoc(doc(owner, M('t-x1')), { teams: ['test'] }))]));
+  // each team's members can work in their own team…
+  const client = n => ({ id: n, fullName: 'Synthetic ' + n });
+  await check(f + ' teams: members of each team can read and write their own team’s records', Promise.all([
+    assertSucceeds(setDoc(doc(wgM, T + '/clients/tw1'), client('tw1'))), assertSucceeds(getDocs(collection(wgM, T + '/clients'))),
+    assertSucceeds(setDoc(doc(testM, TT + '/clients/tt1'), client('tt1'))), assertSucceeds(getDocs(collection(testM, TT + '/clients'))),
+    assertSucceeds(setDoc(doc(spareM, TS + '/clients/ts1'), client('ts1'))), assertSucceeds(getDocs(collection(spareM, TS + '/notes'))),
+    assertSucceeds(setDoc(doc(testM, TT + '/notes/n1'), { id: 'n1', clientId: 'tt1', text: 'x', worker: 't-test' })),
+    assertSucceeds(setDoc(doc(testM, TT + '/auditlog/a1'), { id: 'a1', action: 'x', ts: '2026-11-16T01:00:00Z' })),
+    assertSucceeds(setDoc(doc(testM, TT + '/smsOutbox/s1'), { kind: 'handbook', clientId: 'tt1', requestedBy: 't-test', requestedByName: 'T', requestedAt: '2026-11-16T01:00:00Z' }))]));
+  // …and nobody else's
+  const others = [['a Worn Gundidj account', wgM, [TT, TS]], ['a Test team account', testM, [T, TS]], ['a Spare team account', spareM, [T, TT]], ['an account removed from every team', none, [T, TT, TS]]];
+  for (const [who, ctx, teams] of others) for (const tp of teams) {
+    await check(f + ` teams: ${who} cannot read, list or write ${tp}`, Promise.all([
+      ...['clients', 'notes', 'timelogs', 'referrals', 'staff', 'auditlog', 'calevents', 'walkins', 'intakeForms', 'consentForms', 'smsOutbox', 'appConfig', 'userAccess', 'chatMsgs', 'ideas', 'workersList', 'policies', 'fpho', 'resources', 'smsConfig', 'smsUsage', 'roles', 'workflowTasks', 'chatConvs']
+        .map(c => assertFails(getDocs(collection(ctx, tp + '/' + c)))),
+      assertFails(getDoc(doc(ctx, tp + '/clients/tt1'))), assertFails(getDoc(doc(ctx, tp + '/clients/seed'))),
+      assertFails(setDoc(doc(ctx, tp + '/clients/evil'), client('evil'))), assertFails(setDoc(doc(ctx, tp + '/notes/evil'), { id: 'evil', text: 'x' })),
+      assertFails(setDoc(doc(ctx, tp + '/auditlog/evil'), { id: 'evil', action: 'x' })), assertFails(setDoc(doc(ctx, tp + '/staff/list'), { list: [] })),
+      assertFails(setDoc(doc(ctx, tp + '/intakeLinks/Zzzzzzzzzzzzzzzzzzzz'), { status: 'open', expiresAt: later })),
+      assertFails(setDoc(doc(ctx, tp + '/smsOutbox/evil'), { kind: 'handbook', clientId: 'c', requestedBy: 't-wg', requestedByName: 'x', requestedAt: 'x' }))]));
+  }
+  await check(f + ' teams: an account in two teams can use both, and still not the third', Promise.all([
+    assertSucceeds(getDocs(collection(bothM, T + '/clients'))), assertSucceeds(getDocs(collection(bothM, TT + '/clients'))), assertFails(getDocs(collection(bothM, TS + '/clients')))]));
+  await check(f + ' teams: the owner can use every team', Promise.all([
+    assertSucceeds(getDocs(collection(owner, T + '/clients'))), assertSucceeds(getDocs(collection(owner, TT + '/clients'))), assertSucceeds(setDoc(doc(owner, TS + '/clients/o1'), client('o1')))]));
+  await check(f + ' teams: an email that merely starts with the owner’s is not the owner', Promise.all([
+    assertFails(getDocs(collection(fakeOwner, TT + '/clients'))), assertFails(getDocs(collection(fakeOwner, 'members'))), assertFails(setDoc(doc(fakeOwner, M('t-fake')), mem(['test'], 'jon.benson@worngundidj.org.au.evil.example')))]));
+  await check(f + ' teams: a team that does not exist is closed to everyone but the owner', Promise.all([
+    assertFails(getDocs(collection(wgM, 'teams/other/clients'))), assertFails(setDoc(doc(testM, 'teams/other/clients/x'), client('x')))]));
+  // a client's own form link only works in its own team
+  await check(f + ' teams: a client form made in the Test team is opened by its own id there — and staff of another team cannot list or read it', (async () => {
+    await assertSucceeds(setDoc(doc(testM, TT + '/consentLinks/TestTeamL1nkTestTeam'), { status: 'open', expiresAt: later, needsDob: false }));
+    await assertSucceeds(setDoc(doc(testM, TT + '/consentForms/TF1'), { ...cform, linkId: 'TestTeamL1nkTestTeam' }));
+    await assertSucceeds(getDoc(doc(anon, TT + '/consentLinks/TestTeamL1nkTestTeam')));
+    await assertSucceeds(getDoc(doc(anon, TT + '/consentForms/TF1')));
+    await assertSucceeds(updateDoc(doc(anon, TT + '/consentForms/TF1'), { sharing: shareNo }));
+    await assertSucceeds(updateDoc(doc(anon, TT + '/consentForms/TF1'), sendWith()));
+    await assertFails(getDocs(collection(wgM, TT + '/consentForms')));
+    await assertFails(updateDoc(doc(wgM, TT + '/consentForms/TF1'), { status: 'applied' }));
+    await assertSucceeds(updateDoc(doc(testM, TT + '/consentForms/TF1'), { status: 'applied', appliedBy: 'T' }));
+  })());
+  // membership records
+  await check(f + ' teams: an account can read its own membership, and nobody else’s; only the owner can list them', Promise.all([
+    assertSucceeds(getDoc(doc(testM, M('t-test')))), assertFails(getDoc(doc(testM, M('t-wg')))), assertFails(getDocs(collection(testM, 'members'))),
+    assertFails(getDocs(collection(mgr, 'members'))), assertSucceeds(getDocs(collection(owner, 'members'))), assertFails(getDoc(doc(anon, M('t-test')))), assertFails(getDoc(doc(anonUser, M('u-anon'))))]));
+  await check(f + ' teams: nobody can put themselves in another team, make themselves a manager, or change anyone’s teams', Promise.all([
+    assertFails(setDoc(doc(testM, M('t-test')), mem(['test', 'worngundidj'], 'test@x.org'))),
+    assertFails(updateDoc(doc(testM, M('t-test')), { teams: ['worngundidj'] })),
+    assertFails(updateDoc(doc(testM, M('t-test')), { manager: true })),
+    assertFails(updateDoc(doc(mgr, M('t-mgr')), { teams: ['test', 'worngundidj'] })),
+    assertFails(updateDoc(doc(mgr, M('t-test')), { teams: [] })),
+    assertFails(deleteDoc(doc(testM, M('t-test')))), assertFails(deleteDoc(doc(mgr, M('t-test')))),
+    assertFails(setDoc(doc(none, M('t-none')), mem(['worngundidj'], 'none@x.org')))]));
+  await check(f + ' teams: a team manager can add a NEW account to their own team only — not another team, not as a manager, not two teams', Promise.all([
+    assertSucceeds(setDoc(doc(mgr, M('t-new1')), mem(['test'], 'new1@x.org', { addedBy: 'mgr@x.org', name: 'New One' }))),
+    assertFails(setDoc(doc(mgr, M('t-new2')), mem(['worngundidj'], 'new2@x.org'))),
+    assertFails(setDoc(doc(mgr, M('t-new2')), mem(['test', 'spare'], 'new2@x.org'))),
+    assertFails(setDoc(doc(mgr, M('t-new2')), mem(['test'], 'new2@x.org', { manager: true }))),
+    assertFails(setDoc(doc(mgr, M('t-new2')), mem([], 'new2@x.org')))]));
+  await check(f + ' teams: someone who is not a manager cannot add accounts', Promise.all([
+    assertFails(setDoc(doc(testM, M('t-new3')), mem(['test'], 'new3@x.org'))), assertFails(setDoc(doc(wgM, M('t-new3')), mem(['worngundidj'], 'new3@x.org')))]));
+  await check(f + ' teams: the owner can move an account, take it out of every team, and remove the entry', (async () => {
+    await assertSucceeds(setDoc(doc(owner, M('t-move')), mem(['test'], 'move@x.org')));
+    const mv = as('t-move', 'move@x.org');
+    await assertSucceeds(getDocs(collection(mv, TT + '/clients'))); await assertFails(getDocs(collection(mv, TS + '/clients')));
+    await assertSucceeds(updateDoc(doc(owner, M('t-move')), { teams: ['spare'], updatedBy: OWNER, updatedAt: '2026-11-16T02:00:00.000Z' }));
+    await assertFails(getDocs(collection(mv, TT + '/clients'))); await assertSucceeds(getDocs(collection(mv, TS + '/clients')));
+    await assertSucceeds(updateDoc(doc(owner, M('t-move')), { teams: [] }));
+    await assertFails(getDocs(collection(mv, TS + '/clients'))); await assertFails(getDocs(collection(mv, T + '/clients')));
+    await assertSucceeds(deleteDoc(doc(owner, M('t-move'))));
+  })());
+  // moving in: accounts from before teams
+  await check(f + ' teams: an account from before teams (no membership yet) still works as Worn Gundidj — and cannot reach the other teams', Promise.all([
+    assertSucceeds(getDocs(collection(fresh, T + '/clients'))), assertSucceeds(setDoc(doc(fresh, T + '/clients/fr1'), client('fr1'))),
+    assertFails(getDocs(collection(fresh, TT + '/clients'))), assertFails(getDocs(collection(fresh, TS + '/clients'))), assertFails(setDoc(doc(fresh, TT + '/clients/fr1'), client('fr1')))]));
+  await check(f + ' teams: it can record its own membership as Worn Gundidj — but not as another team, as a manager, for someone else, or under another email', Promise.all([
+    assertFails(setDoc(doc(fresh, M('t-fresh')), mem(['test'], 'fresh@x.org'))),
+    assertFails(setDoc(doc(fresh, M('t-fresh')), mem(['worngundidj', 'test'], 'fresh@x.org'))),
+    assertFails(setDoc(doc(fresh, M('t-fresh')), mem(['worngundidj'], 'fresh@x.org', { manager: true }))),
+    assertFails(setDoc(doc(fresh, M('t-fresh')), mem(['worngundidj'], 'someoneelse@x.org'))),
+    assertFails(setDoc(doc(fresh, M('t-other')), mem(['worngundidj'], 'fresh@x.org')))]).then(() => assertSucceeds(setDoc(doc(fresh, M('t-fresh')), mem(['worngundidj'], 'fresh@x.org', { addedBy: 'fresh@x.org' })))));
+  await check(f + ' teams: …after which it is an ordinary Worn Gundidj member', Promise.all([assertSucceeds(getDocs(collection(fresh, T + '/clients'))), assertFails(getDocs(collection(fresh, TT + '/clients'))), assertFails(updateDoc(doc(fresh, M('t-fresh')), { teams: ['test'] }))]));
+  // the lock — last, because it shuts out every account that has no membership
+  await check(f + ' teams: only the owner can lock (or unlock) — and anyone signed in can see whether it is locked', Promise.all([
+    assertFails(setDoc(doc(wgM, 'platform/lock'), { lockedBy: 'x', lockedAt: 'x' })), assertFails(setDoc(doc(mgr, 'platform/lock'), { lockedBy: 'x', lockedAt: 'x' })),
+    assertFails(setDoc(doc(owner, 'platform/other'), { lockedBy: 'x', lockedAt: 'x' })), assertFails(setDoc(doc(owner, 'platform/lock'), { lockedBy: 'x', lockedAt: 'x', extra: 1 })),
+    assertSucceeds(getDoc(doc(testM, 'platform/lock'))), assertFails(getDoc(doc(anon, 'platform/lock')))]));
+  await check(f + ' teams: once the owner locks it, an account with no membership gets nothing and can no longer add itself; members and the owner carry on', (async () => {
+    await assertSucceeds(getDocs(collection(fresh2, T + '/clients')));
+    await assertSucceeds(setDoc(doc(owner, 'platform/lock'), { lockedBy: OWNER, lockedAt: '2026-11-16T03:00:00.000Z' }));
+    await assertFails(getDocs(collection(fresh2, T + '/clients'))); await assertFails(getDoc(doc(fresh2, T + '/clients/seed')));
+    await assertFails(setDoc(doc(fresh2, T + '/clients/late'), client('late')));
+    await assertFails(setDoc(doc(fresh2, M('t-fresh2')), mem(['worngundidj'], 'fresh2@x.org')));
+    await assertFails(getDocs(collection(wkr, T + '/clients')));                                   // the older test accounts have no membership either
+    await assertSucceeds(getDocs(collection(wgM, T + '/clients'))); await assertSucceeds(getDocs(collection(fresh, T + '/clients')));
+    await assertSucceeds(getDocs(collection(testM, TT + '/clients'))); await assertSucceeds(getDocs(collection(owner, T + '/clients')));
+    await assertSucceeds(getDoc(doc(anon, T + '/consentLinks/' + CL)));                             // a client's own link still opens
+    await assertFails(deleteDoc(doc(wgM, 'platform/lock')));
+    await assertSucceeds(setDoc(doc(owner, M('t-fresh2')), mem(['worngundidj'], 'fresh2@x.org')));  // the owner lets them in
+    await assertSucceeds(getDocs(collection(fresh2, T + '/clients')));
+    await assertSucceeds(deleteDoc(doc(owner, 'platform/lock')));                                   // and can unlock in an emergency
+    await assertSucceeds(getDocs(collection(wkr, T + '/clients')));
+  })());
   await env.cleanup();
 }
 console.log(`RESULT: ${pass}/${pass + fail} passed`); process.exit(fail ? 1 : 0);

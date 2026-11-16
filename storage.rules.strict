@@ -16,13 +16,23 @@ service firebase.storage {
     function signedIn()   { return request.auth != null && request.auth.token.firebase.sign_in_provider != 'anonymous'; }
     function hasRole()    { return signedIn() && 'role' in request.auth.token; }
     function isMgr()      { return hasRole() && request.auth.token.role in ['sysmanager','admin','supervisor']; }
+    // Teams: an account may only reach the files of a team it belongs to. Membership is the
+    // Firestore document members/{uid} (see firestore.rules — the same test is used there).
+    // Publishing these rules asks once for permission for Storage rules to read Firestore: say yes.
+    function isOwner()  { return 'email' in request.auth.token && request.auth.token.email == 'jon.benson@worngundidj.org.au'; }
+    function inTeam(t)  {
+      return signedIn() && (isOwner()
+        || (firestore.exists(/databases/(default)/documents/members/$(request.auth.uid))
+              ? t in firestore.get(/databases/(default)/documents/members/$(request.auth.uid)).data.teams
+              : (t == 'worngundidj' && !firestore.exists(/databases/(default)/documents/platform/lock))));
+    }
     function underLimit() { return request.resource.size < 25 * 1024 * 1024; }
 
     match /teams/{teamId}/{allPaths=**} {
-      allow read: if signedIn();
+      allow read: if inTeam(teamId);
       // create/update (upload & replace)
-      allow write: if signedIn() && underLimit();
-      allow delete: if isMgr();
+      allow write: if inTeam(teamId) && underLimit();
+      allow delete: if (inTeam(teamId) && isMgr());
     }
   }
 }

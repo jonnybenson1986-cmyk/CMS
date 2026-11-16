@@ -22,7 +22,7 @@ async function handleOutbox(snap, teamId, env) {
   const month = lib.budgetMonth();
   const usageRef = team.collection('smsUsage').doc(month);
   const result = await lib.processRequest(req, {
-    handbookUrl: env.handbookUrl, appUrl: env.appUrl, monthlyBudget: env.monthlyBudget, costPerPart: env.costPerPart,
+    teamId, handbookUrl: env.handbookUrl, appUrl: env.appUrl, monthlyBudget: env.monthlyBudget, costPerPart: env.costPerPart,
     getRequesterEmail: async (uid) => { try { return (await env.auth.getUser(String(uid || ''))).email || ''; } catch (_) { return ''; } },
     getStaffEmails: async () => {
       const d = await team.collection('staff').doc('list').get();

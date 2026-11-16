@@ -36,6 +36,7 @@
 
 <script src="vendor/firebase/firebase-app-compat.js"></script>
 <script src="vendor/firebase/firebase-firestore-compat.js"></script>
+<script src="teams.js"></script>
 <script src="forms/signing.js"></script>
 <script src="consent/consent-text.js"></script>
 <script>
@@ -43,7 +44,8 @@
   'use strict';
   const CFG = { apiKey: 'AIzaSyB5llVjMjy0AOp9w5UlKW3FltUi8XUZj40', authDomain: 'worn-gundidj-cms.firebaseapp.com',
                 projectId: 'worn-gundidj-cms', appId: '1:1058581942911:web:6769b34a10ccf95ea9a54a' };
-  const TEAM = 'worngundidj', ORG_PHONE = '(03) 5561 5315', ORG_TEL = '0355615315';
+  let TEAM = WG_TEAMS.DEFAULT;                       // which team's form this is — it comes from the link (teams.js)
+  const ORG_PHONE = '(03) 5561 5315', ORG_TEL = '0355615315';
   const C = window.WG_CONSENT, SIGN = window.WG_SIGN;
   const $ = id => document.getElementById(id);
   const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -65,8 +67,10 @@
 
   // ---- open ----
   async function start() {
-    token = (location.hash || '').replace(/^#/, '').split(/[?&]/)[0];
-    if (!/^[A-Za-z0-9_-]{16,64}$/.test(token)) return screen('🔗', 'This link isn’t complete', 'Please open the link exactly as it was sent to you. If it still doesn’t work, contact us.');
+    const link0 = WG_TEAMS.parseLink(location.hash);     // #<link id>, or #<team>.<link id> for another team
+    token = link0 ? link0.token : ''; if (link0) TEAM = link0.team;
+    if (link0 && (WG_TEAMS.get(TEAM) || {}).test && !document.getElementById('test-team')) document.body.insertAdjacentHTML('afterbegin', '<div id="test-team" role="note" style="background:#b45309;color:#fff;font:600 14px/1.4 Arial,sans-serif;text-align:center;padding:8px 12px">Practice form (Test team) — not a real client form</div>');
+    if (!link0) return screen('🔗', 'This link isn’t complete', 'Please open the link exactly as it was sent to you. If it still doesn’t work, contact us.');
     if (!window.crypto || !crypto.subtle) return screen('⚠️', 'Please open this link in your phone’s web browser', 'This page needs a secure browser connection.');
     try {
       firebase.initializeApp(CFG);

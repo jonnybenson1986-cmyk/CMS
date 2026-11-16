@@ -61,11 +61,12 @@ storage.rules.strict        File rules — role-based, NOT yet deployed
 functions/                  Cloud Functions that set role custom claims (not deployed)
 functions-sms/              Automatic text service (handbook + intake links) and its tests
 scripts/                    One-off operational scripts
-tests/rules/                Firestore rules tests (run by the GitHub workflow)
+tests/rules/                Firestore and Storage rules tests (run by the GitHub workflow)
 tests/browser/              End-to-end browser checks against a fake cloud (synthetic data)
-tests/unit/                 Unit tests for site/data-health.js and site/vpr.js (node --test)
+tests/unit/                 Unit tests for site/data-health.js, site/vpr.js and site/teams.js (node --test)
 .github/workflows/          Tests and publishes the Firestore rules
 
+docs/TEAMS.md               Teams: Worn Gundidj, the Spare team and the Test team
 docs/DEPLOY-FIREBASE.md     Publishing rules / text service from GitHub
 docs/SECURITY-DEPLOY.md     How to roll out the strict rules safely
 docs/PRIVACY-ASSESSMENT.md  Privacy law assessment: findings, what changed, what the organisation must do
@@ -105,6 +106,30 @@ Anything other than `403` means client records are readable without signing in.
 Restore the previous rules immediately.
 
 **3 — Cloud Functions.** Not currently deployed. Follow `docs/SECURITY-DEPLOY.md`.
+
+## 🏢 Teams (Worn Gundidj · Spare team · Test team)
+
+Three teams share the system and are kept apart: each has its own clients,
+notes, staff list, settings, files and audit log, and an account can only open
+the teams it has been put in. **Full guide: [docs/TEAMS.md](docs/TEAMS.md).**
+
+* **Worn Gundidj** — its records are exactly where they were; nothing moved.
+  **Spare team** — empty, ready for another team. **Test team** — practice and
+  training with made-up people only (orange banner).
+* The teams are listed in `site/teams.js`. A page works in one team from load to
+  reload (`ACTIVE_TEAM`): it sets the cloud path (`teams/<team>/…`) and which
+  copy on the device is used, so records can't be mixed between teams.
+* **Who can open what** is the document `members/<account id>`
+  (`{ teams: [...] }`), checked by `firestore.rules` on every read and write
+  and by `storage.rules` for files. The owner's account can open every team and
+  manages the list in **Settings → 🏢 Teams** (tick teams, "can add staff", lock).
+* **Moving in:** accounts from before teams are treated as Worn Gundidj and are
+  listed the next time they sign in. When everyone is listed the owner presses
+  **Lock**; after that an unlisted sign-in opens nothing.
+* Client form links from another team carry the team: `/i#test.<link>`.
+  Worn Gundidj links are unchanged.
+* **By hand after release:** publish `storage.rules` in the Firebase console
+  (Storage → Rules); it asks once to let Storage rules read Firestore — say yes.
 
 ## Outlook calendar sync
 
