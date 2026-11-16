@@ -16,10 +16,10 @@ name: "Firebase: test & publish"
 
 on:
   pull_request:
-    paths: ['firestore.rules', 'firestore.rules.strict', 'site/intake/intake-fields.js', 'tests/rules/**', 'functions-sms/**', '.github/workflows/firebase-deploy.yml']
+    paths: ['firestore.rules', 'firestore.rules.strict', 'site/intake/intake-fields.js', 'site/teams.js', 'storage.rules', 'storage.rules.strict', 'tests/rules/**', 'functions-sms/**', '.github/workflows/firebase-deploy.yml']
   push:
     branches: [main]
-    paths: ['firestore.rules', 'firestore.rules.strict', 'site/intake/intake-fields.js', 'tests/rules/**', '.github/workflows/firebase-deploy.yml']
+    paths: ['firestore.rules', 'firestore.rules.strict', 'site/intake/intake-fields.js', 'site/teams.js', 'storage.rules', 'storage.rules.strict', 'tests/rules/**', '.github/workflows/firebase-deploy.yml']
   workflow_dispatch:
     inputs:
       deploy_sms_function:
@@ -56,7 +56,7 @@ jobs:
       - name: Install rules-test tools
         working-directory: tests/rules
         run: npm ci
-      - name: Rules tests (live + strict rules, Firestore emulator)
+      - name: Rules tests (live + strict rules; Firestore + Storage emulators)
         working-directory: tests/rules
         run: npm test
       - name: Text-service tests (no network, no Firebase)

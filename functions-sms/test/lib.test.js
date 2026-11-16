@@ -123,3 +123,14 @@ test('budget month is Melbourne time', () => {
   assert.equal(lib.budgetMonth(new Date('2026-10-31T14:30:00Z')), '2026-11');   // 1:30am 1 Nov in Melbourne
   assert.equal(lib.budgetMonth(new Date('2026-10-31T12:00:00Z')), '2026-10');
 });
+
+// ── teams: the link in a text opens the right team's form ──
+test('team link part agrees with the CMS (site/teams.js): Worn Gundidj unchanged, other teams prefixed', () => {
+  const TEAMS = require('../../site/teams.js'), L = 'AbCdEfGhIjKlMnOpQrStUv';
+  for (const id of TEAMS.IDS) assert.equal(lib.teamLinkPart(id, L), TEAMS.linkPart(id, L), id);
+  assert.equal(lib.teamLinkPart('worngundidj', L), L);
+  assert.equal(lib.teamLinkPart('test', L), 'test.' + L);
+  assert.equal(lib.teamLinkPart(undefined, L), L);
+  assert.equal(lib.teamLinkPart('../evil', L), L);
+  for (const id of TEAMS.IDS) assert.deepEqual(TEAMS.parseLink('#' + lib.teamLinkPart(id, L)), { team: id, token: L });
+});

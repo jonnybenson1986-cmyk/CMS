@@ -1,0 +1,4 @@
+rules_version = '2';
+// Only here so the Storage emulator can start. The tests load the real files
+// (../../storage.rules and ../../storage.rules.strict) themselves.
+service firebase.storage { match /b/{bucket}/o { match /{allPaths=**} { allow read, write: if false; } } }

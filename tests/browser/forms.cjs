@@ -172,6 +172,30 @@ const later=()=>new Date(Date.now()+5*864e5).toISOString(), past=()=>new Date(Da
   { const {p,ctx}=await page(); await p.goto(base+'/intake.html'); await seed(p,intakeDocs()); await openAt(p,'intake.html',TOKEN);
     ok('F9 the intake page works on a small phone (no sideways scrolling) and still saves as it goes', await p.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+1) && await (async()=>{ await p.fill('#q-preferredName','Jordy'); await p.waitForTimeout(1600); return p.evaluate(()=>window.__pub.updates.some(u=>u.patch.status==='draft' && u.patch.answers.preferredName==='Jordy' && !('signature' in u.patch))); })()); await ctx.close(); }
 
+  // ===================== teams: a link opens its own team's form, and only that =====================
+  { const TT='teams/test/'; const {p,ctx}=await page(); await p.goto(base+'/consent.html'); await p.waitForTimeout(200);
+    await seed(p,{[TT+'consentLinks/'+TOKEN]:{status:'open',expiresAt:later(),needsDob:false},[TT+'consentForms/'+sha(TOKEN+':')]:{linkId:TOKEN,clientId:'c1',status:'open',expiresAt:later(),needsDob:false}});
+    await openAt(p,'consent.html','test.'+TOKEN);
+    ok('M1 a Test team link (/c#test.<link>) opens the Test team\'s form — marked as a practice form', /what is informed consent/i.test(await p.innerText('#main')) && /Practice form \(Test team\)/.test(await p.evaluate(()=>(document.getElementById('test-team')||{}).textContent||'')));
+    for (const k of ['collect','programs','audit','video','transport']) await p.check(`input[name="ch-${k}"][value="Yes"]`); await p.check('input[name="sh-pro"][value="No"]'); await p.check('input[name="sh-per"][value="No"]'); for (const el of await p.$$('input[data-c]')) await el.check();
+    await p.fill('#sg-name','Practice Person'); await p.check('#sg-typed'); await p.click('#send'); await p.waitForTimeout(600);
+    const up=await p.evaluate(()=>window.__pub.updates.map(u=>u.path));
+    ok('M2 …and what the client sends is saved in the Test team, nowhere else', up.length===2 && up.every(x=>x===TT+'consentForms/'+sha(TOKEN+':')), JSON.stringify(up));
+    await openAt(p,'consent.html',TOKEN); await p.waitForTimeout(300);
+    ok('M3 the same link id without the team opens nothing (Worn Gundidj has no such form)', /has expired/i.test(await p.innerText('#main')) && await p.evaluate(()=>!document.getElementById('test-team')));
+    await openAt(p,'consent.html','otherorg.'+TOKEN); await p.waitForTimeout(300);
+    ok('M4 a link naming a team that does not exist is refused as incomplete', /isn’t complete/.test(await p.innerText('#main')));
+    await ctx.close(); }
+  { const TS='teams/spare/'; const {p,ctx}=await page(); await p.goto(base+'/intake.html'); await p.waitForTimeout(200);
+    await seed(p,{[TS+'intakeLinks/'+TOKEN]:{status:'open',expiresAt:later(),needsDob:false},[TS+'intakeForms/'+sha(TOKEN+':')]:{linkId:TOKEN,clientId:'c1',status:'open',expiresAt:later(),needsDob:false,answers:{fullName:'Spare Person'}}});
+    await openAt(p,'intake.html','spare.'+TOKEN);
+    ok('M5 an intake link for the Spare team (/i#spare.<link>) opens that team\'s form — no practice banner, it is a real team', await p.evaluate(()=>!!document.getElementById('btn-next') && !document.getElementById('test-team')), (await p.innerText('#main')).slice(0,120));
+    await p.click('#btn-next'); await p.waitForTimeout(900);
+    const up=await p.evaluate(()=>window.__pub.updates.map(u=>u.path));
+    ok('M6 …and its answers are saved in the Spare team', up.length>=1 && up.every(x=>x===TS+'intakeForms/'+sha(TOKEN+':')), JSON.stringify(up));
+    await openAt(p,'intake.html',TOKEN); await p.waitForTimeout(300);
+    ok('M7 a Worn Gundidj link (no team in it) still looks in Worn Gundidj only', !/Spare Person/.test(await p.innerText('#main')) && /has expired/i.test(await p.innerText('#main')), (await p.innerText('#main')).slice(0,120));
+    await ctx.close(); }
   ok('Z no page errors on any client page', errs.length===0, errs.slice(0,3).join(' | '));
   await browser.close(); srv.close();
   console.log('\n=== CLIENT FORMS ON A PHONE ==='); res.forEach(r=>console.log(r[0].padEnd(5),r[1],r[2]&&r[0]!=='PASS'?'\n        → '+r[2]:''));
