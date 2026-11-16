@@ -27,6 +27,30 @@ service cloud.firestore {
     // Byte-identical re-write — what the app's "push everything" sync does.
     function unchanged() { return request.resource.data == resource.data; }
 
+    // ⚖️ A conflict of interest declaration (site/index.html: CONFLICT OF INTEREST). The keys and the
+    // lists below match the app (the tests check).
+    function validCoi(d) {
+      return d.keys().hasOnly(['id', 'clientId', 'personName', 'personEmail', 'connection', 'nature', 'program', 'interest', 'declaredBy', 'declaredByEmail', 'declaredByUid', 'declaredAt', 'status', 'manage', 'managedNotes', 'reviewedBy', 'reviewedAt', 'updatedBy', 'updatedAt'])
+        && d.id is string && d.id.size() <= 80
+        && d.clientId is string && d.clientId.size() > 0 && d.clientId.size() <= 100
+        && d.personName is string && d.personName.size() > 0 && d.personName.size() <= 120
+        && d.personEmail is string && d.personEmail.matches('[^@ ]+@[^@ ]+')  && d.personEmail.size() <= 200
+        && d.connection in ['family', 'friend', 'community', 'work', 'history', 'other']
+        && d.nature in ['actual', 'potential', 'perceived']
+        && d.get('program', '') is string && d.get('program', '').size() <= 40
+        && d.interest is string && d.interest.size() > 0 && d.interest.size() <= 1000
+        && d.declaredBy is string && d.declaredBy.size() <= 120
+        && d.declaredByEmail is string && d.declaredByEmail.size() <= 200
+        && d.declaredByUid is string && d.declaredAt is string && d.declaredAt.size() <= 40
+        && d.status in ['open', 'managed', 'closed']
+        && (!('manage' in d) || (d.manage is map && d.manage.keys().hasOnly(['noAllocate', 'hideFile']) && d.manage.get('noAllocate', false) is bool && d.manage.get('hideFile', false) is bool))
+        && (!('managedNotes' in d) || (d.managedNotes is string && d.managedNotes.size() <= 1000))
+        && (!('reviewedBy' in d) || (d.reviewedBy is string && d.reviewedBy.size() <= 200))
+        && (!('reviewedAt' in d) || (d.reviewedAt is string && d.reviewedAt.size() <= 40))
+        && (!('updatedBy' in d) || (d.updatedBy is string && d.updatedBy.size() <= 200))
+        && (!('updatedAt' in d) || (d.updatedAt is string && d.updatedAt.size() <= 40));
+    }
+
     // ── Teams (multi-tenancy) ───────────────────────────────────────────────
     // Every team's records live under teams/{teamId}/… and a signed-in account may
     // only touch the teams it belongs to. Membership is the document members/{uid}:
@@ -262,6 +286,28 @@ service cloud.firestore {
     match /teams/{teamId}/roles/{uid} {
       allow read: if inTeam(teamId);
       allow write: if false;
+    }
+
+    // ── ⚖️ Conflict of interest declarations ───────────────────────────────
+    // Staff declare their own, from a client's file. The declaration itself can never be changed
+    // or deleted. How it is managed (manage / notes / status) can only be changed by someone OTHER
+    // than the person it is about, and the change records who made it (updatedBy = their account).
+    // Declaring for yourself = status 'open' with nothing about how it is managed yet.
+    // Reading: anyone in the team (the app shows the register only to the System Manager, Admins and Supervisors; the strict rules enforce it once staff roles are in the sign-in token).
+    match /teams/{teamId}/coi/{id} {
+      allow read: if inTeam(teamId);
+      allow create: if inTeam(teamId) && validCoi(request.resource.data) && request.resource.data.id == id
+        && request.resource.data.declaredByUid == request.auth.uid
+        && request.resource.data.declaredByEmail == request.auth.token.get('email', '')
+        && (request.resource.data.personEmail == request.auth.token.get('email', '')
+              ? (request.resource.data.status == 'open' && !request.resource.data.keys().hasAny(['manage', 'managedNotes', 'reviewedBy', 'reviewedAt', 'updatedBy', 'updatedAt']))
+              : true);
+      allow update: if inTeam(teamId) && validCoi(request.resource.data)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'manage', 'managedNotes', 'reviewedBy', 'reviewedAt', 'updatedBy', 'updatedAt'])
+        && request.auth.token.get('email', '') != resource.data.personEmail
+        && request.resource.data.updatedBy == request.auth.token.get('email', '')
+        && request.resource.data.updatedAt is string;
+      allow delete: if false;
     }
 
     // ── Team membership ──────────────────────────────────────────────────────

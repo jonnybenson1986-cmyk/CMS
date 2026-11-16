@@ -567,6 +567,9 @@
     <div class="nav-item" onclick="showPage('vpr')">
       <span class="icon">🚨</span><span>Vulnerable Persons Register</span><span id="vpr-nav-badge" style="display:none;margin-left:auto;background:#dc2626;color:#fff;font-size:10px;font-weight:700;border-radius:10px;padding:1px 7px"></span>
     </div>
+    <div class="nav-item" onclick="showPage('coi')">
+      <span class="icon">⚖️</span><span>Conflict of Interest Register</span><span id="coi-nav-badge" style="display:none;margin-left:auto;background:#7c3aed;color:#fff;font-size:10px;font-weight:700;border-radius:10px;padding:1px 7px"></span>
+    </div>
     <div class="nav-item" onclick="showPage('auditlog')">
       <span class="icon">🔍</span><span>Audit Log</span>
     </div>
@@ -905,6 +908,13 @@ const FSYNC = (() => {
     }));
     // 📲 Intake forms sent by link: staff see all of them (the rules keep signed-out visitors to one form by id).
     _listeners.push(col('intakeForms').onSnapshot(snap=>{ intakeForms = snap.docs.map(d=>{ const x=d.data(); const e=x.expiresAt; return Object.assign({id:d.id}, x, { expiresAt: e && e.toDate ? e.toDate().toISOString() : e }); }); DB.save('intakeForms', intakeForms); try{ _intakeFormsRefresh(); }catch(_){} }, e=>console.warn('intakeForms listener:', e.message)));
+    // ⚖️ Conflicts of interest: the register reads them all; everyone else only their own (declared by them, or about them)
+    // — which is also what lets a managed declaration hide a client's file from the person it is about.
+    { const parts = {}, _coiIn = key => snap => { parts[key] = snap.docs.map(d => d.data()); const m = new Map(); Object.values(parts).forEach(l => l.forEach(x => x && x.id && m.set(x.id, x))); coiList = [...m.values()]; DB.save('coi', coiList); try { _coiRefreshQuiet(); } catch (_) {} };
+      const u = firebase.auth().currentUser, em = String((u && u.email) || '').toLowerCase();
+      if (typeof coiRegisterAllowed === 'function' && coiRegisterAllowed()) _listeners.push(col('coi').onSnapshot(_coiIn('all'), e=>console.warn('coi listener:', e.message)));
+      else if (u) { _listeners.push(col('coi').where('declaredByUid','==',u.uid).onSnapshot(_coiIn('mine'), e=>console.warn('coi listener:', e.message)));
+        if (em) _listeners.push(col('coi').where('personEmail','==',em).onSnapshot(_coiIn('about'), e=>console.warn('coi listener:', e.message))); } }
     _listeners.push(col('consentForms').onSnapshot(snap=>{ consentForms = snap.docs.map(d=>{ const x=d.data(); const e=x.expiresAt; return Object.assign({id:d.id}, x, { expiresAt: e && e.toDate ? e.toDate().toISOString() : e }); }); DB.save('consentForms', consentForms); try{ _consentFormsRefresh(); }catch(_){} }, e=>console.warn('consentForms listener:', e.message)));
     _listeners.push(col('smsUsage').doc(smsBudgetMonth()).onSnapshot(doc=>{ smsUsageMonth = doc.exists ? doc.data() : null; DB.save('smsUsageMonth', smsUsageMonth); try{ _smsRefresh(); }catch(_){} }, e=>console.warn('smsUsage listener:', e.message)));
     _listeners.push(col('smsOutbox').onSnapshot(snap=>{ smsOutbox=snap.docs.map(d=>Object.assign({id:d.id},d.data())); DB.save('smsOutbox',smsOutbox); try{ _smsRefresh(); }catch(_){} }, e=>{ window._smsListenErr=e.code||e.message; console.warn('smsOutbox listener:',e.message); }));
@@ -1281,6 +1291,9 @@ const FSYNC = (() => {
     await col('consentForms').doc(formId).update(patch);
     if (linkId && patch.status) await col('consentLinks').doc(linkId).update({ status:patch.status });
   }
+  // ⚖️ Conflict of interest declarations: one document each, never deleted (firestore.rules: validCoi).
+  async function saveCoi(d) { if(!db) throw new Error('Not connected to the cloud'); await col('coi').doc(d.id).set(_clean(d)); }
+  async function updateCoi(id, patch) { if(!db) throw new Error('Not connected to the cloud'); await col('coi').doc(id).update(_clean(patch)); }
   async function cancelConsentForm(formId, linkId) { await updateConsentForm(formId, { status:'cancelled', cancelledAt:new Date().toISOString() }, linkId); }
   async function cancelIntakeForm(formId, linkId) { await updateIntakeForm(formId, { status:'cancelled', cancelledAt:new Date().toISOString() }, linkId); }
   async function setSmsConfig(cfg) { if(!db) throw new Error('Not connected to the cloud'); await col('smsConfig').doc('settings').set(cfg); }
@@ -1298,7 +1311,7 @@ const FSYNC = (() => {
   return { init, isReady, pushAll, pushClients, pushNotes, pushReferrals, pushWorkers, pushTasks, pushAudit, pushBrokerage, deleteDoc, getCfg, saveCfg, showSetupModal, clearConfig,
     storageReady, uploadFile, deleteStorageFile, getStorageURL, pushPolicies,
     pushFpho, pushWalkins, pushCalEvents, pushResources, resyncAll, pushStaff, fetchStaff, staffSyncStatus, queueSms, setSmsConfig, setAppConfig, submitIdea, updateIdea,
-    createIntakeForm, updateIntakeForm, cancelIntakeForm, createConsentForm, updateConsentForm, cancelConsentForm };
+    createIntakeForm, updateIntakeForm, cancelIntakeForm, createConsentForm, updateConsentForm, cancelConsentForm, saveCoi, updateCoi };
 })();
 
 let clients = DB.load('clients', []);
@@ -1324,7 +1337,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v115';
+const APP_VERSION = 'v116';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -1916,6 +1929,7 @@ function showPage(page) {
   }
   if(!pageAllowed(page)) { showToast("You don't have access to that section — ask your System Manager."); page = 'dashboard'; }
   if(page === 'vpr' && !vprPageAllowed()) { showToast('The Vulnerable Persons Register is available to managers and supervisors.'); page = 'dashboard'; }
+  if(page === 'coi' && !coiRegisterAllowed()) { showToast('The Conflict of Interest Register is for the System Manager, Admins and Supervisors. Declare a conflict from the client’s file.'); page = 'dashboard'; }
   currentPage = page;
   // Background refreshes (e.g. sync snapshots) can fire while the login screen
   // has replaced #main — nothing to render onto yet, so bail out safely.
@@ -1924,7 +1938,7 @@ function showPage(page) {
   setMobTab(page);
   document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
   const items = document.querySelectorAll('.nav-item');
-  const titles = { dashboard:'Dashboard', email:'Email', referrals:'Referral Holding Bay', clients:'Clients', sessions:'Session Log', notes:'All Case Notes', policies:'Policies & Procedures', walkins:'Walk-in Register', sewb:'SEWB Program', aod:'AOD Program', justice:'Justice Program', mensgroup:"Men's Group", cultural:'Cultural Strengthening', disability:'Disability Program', reports:'Reports', calendar:'Calendar', vpr:'Vulnerable Persons Register', auditlog:'Audit Log', settings:'Settings' };
+  const titles = { dashboard:'Dashboard', email:'Email', referrals:'Referral Holding Bay', clients:'Clients', sessions:'Session Log', notes:'All Case Notes', policies:'Policies & Procedures', walkins:'Walk-in Register', sewb:'SEWB Program', aod:'AOD Program', justice:'Justice Program', mensgroup:"Men's Group", cultural:'Cultural Strengthening', disability:'Disability Program', reports:'Reports', calendar:'Calendar', coi:'Conflict of Interest Register', vpr:'Vulnerable Persons Register', auditlog:'Audit Log', settings:'Settings' };
   document.getElementById('page-title').textContent = titles[page] || page;
   items.forEach(el => { if(el.getAttribute('onclick')?.includes(`'${page}'`)) el.classList.add('active'); });
   if (page !== 'auditlog' && page !== currentPage) audit('Page view', titles[page] || page);
@@ -1961,11 +1975,12 @@ function showPage(page) {
     btn.onclick = openNewClientModal;
   }
 
-  const pages = { dashboard: renderDashboard, email: renderEmailPage, referrals: renderReferrals, clients: renderClients, closedclients: renderClosedClients, sessions: renderSessions, notes: renderAllNotes, walkins: renderWalkins, sewb: renderSEWB, aod: renderAOD, justice: renderJustice, cultural: renderCultural, mensgroup: renderMensGroup, vpr: renderVprPage, disability: renderDisability, workfoundations: renderWorkFoundations, homeownership: renderHomeOwnership, reports: renderReportsPage, calendar: renderCalendarPage, resources: renderResourcesPage, policies: renderPoliciesPage, auditlog: renderAuditLog, settings: renderSettings, chat: renderChatPage };
+  const pages = { dashboard: renderDashboard, email: renderEmailPage, referrals: renderReferrals, clients: renderClients, closedclients: renderClosedClients, sessions: renderSessions, notes: renderAllNotes, walkins: renderWalkins, sewb: renderSEWB, aod: renderAOD, justice: renderJustice, cultural: renderCultural, mensgroup: renderMensGroup, vpr: renderVprPage, coi: renderCoiPage, disability: renderDisability, workfoundations: renderWorkFoundations, homeownership: renderHomeOwnership, reports: renderReportsPage, calendar: renderCalendarPage, resources: renderResourcesPage, policies: renderPoliciesPage, auditlog: renderAuditLog, settings: renderSettings, chat: renderChatPage };
   const fn = pages[page];
   document.getElementById('content').innerHTML = fn ? fn() : '<div class="empty-state"><p>This page could not be opened. Please refresh, or contact your system manager if it keeps happening.</p></div>';
   attachPageEvents(page);
   try { vprUpdateBadge(); } catch (_) {}
+  try { coiUpdateBadge(); } catch (_) {}
 }
 
 function attachPageEvents(page) {
@@ -2174,7 +2189,7 @@ function profileSectionGroups(c, counts) {
   const other = PROFILE_PROGRAMS.filter(p => p.tab && !programEnrolled(c, p)).map(p => progItem(p.key));
   const hr = homeRiskStatus(c).ok ? '' : ' ⚠️';
   return [
-    ['Client file', [{ v:'overview', l:'🏠 Overview' }, { v:'summary', l:'📄 Summary' }, { v:'demographics', l:'👤 Personal details' }, { v:'keyworkers', l:'👷 Key workers' }]],
+    ['Client file', [{ v:'overview', l:'🏠 Overview' }, { v:'summary', l:'📄 Summary' }, { v:'demographics', l:'👤 Personal details' }, { v:'keyworkers', l:'👷 Key workers' }, { v:'coi', l:`⚖️ Conflict of interest${(n => n ? ` (${n})` : '')(coiVisibleFor(c.id).filter(coiActive).length)}` }]],
     ['Case work', [{ v:'intake', l:'📋 Intake form' }, { v:'consents', l:`✍️ Consent forms (${consentRecordsOf(c).length})` }, { v:'notes', l:`📝 Case notes (${counts.notes})` }, { v:'goals', l:`🎯 Goals & progress (${counts.goals})` }, { v:'time', l:`⏱️ Time (${counts.time})` }, { v:'files', l:`📎 Files (${counts.files})` }]],
     ['Safety & feedback', [{ v:'safety', l:'🛡️ Safety plan' }, { v:'homerisk', l:`🏠 Home risk assessment${hr}` }, { v:'vpr', l:`🚨 Emergency plan & VPR${vprOnRegister(c) ? ' — on register' : ''}` }, { v:'feedback', l:'⭐ Feedback' }]],
     enrolled.length ? ['Programs — enrolled', enrolled] : null,
@@ -2348,6 +2363,7 @@ function renderProfileTab(tab, c, clientNotes, clientTime) {
 function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
   if(tab === 'vpr') return renderVprTab(c);
   if(tab === 'consents') return renderConsentsTab(c);
+  if(tab === 'coi') return renderCoiTab(c);
   if(tab === 'overview') {
     const totalMins = clientTime.reduce((a,t)=>a+(t.minutes||0),0);
     const recent = clientNotes.slice(0,3);
@@ -2365,6 +2381,7 @@ function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
       ...due.map(d=>`<div class="pf-attn-row"><span>⭐ Feedback due: ${sanitize(QF_POINTS[d])}</span><button class="btn btn-sm btn-outline" onclick="openFeedbackSendModal('${c.id}','${d}')">Ask →</button></div>`),
       ...vprAttention(c).map(t=>`<div class="pf-attn-row"><span>🚨 ${sanitize(t)}</span><button class="btn btn-sm btn-outline" onclick="gotoProfileSection('vpr')">Review →</button></div>`),
       ...consentAttention(c).map(t=>`<div class="pf-attn-row"><span>🤝 ${sanitize(t)}</span><button class="btn btn-sm btn-outline" onclick="gotoProfileSection('consents')">Review →</button></div>`),
+      ...coiAttention(c).map(t=>`<div class="pf-attn-row coi-attn"><span>⚖️ ${sanitize(t)}</span><button class="btn btn-sm btn-outline" onclick="gotoProfileSection('coi')">Review →</button></div>`),
     ];
     return `
     <div class="pf-glance">
@@ -4412,6 +4429,7 @@ function openWorkerModal(clientId, idx) {
   showModal(idx !== null ? '✏️ Edit Worker' : '➕ Add Key Worker', html, () => {
     const name = document.getElementById('wm-name')?.value?.trim();
     if(!name) { alert('Name is required'); return false; }
+    if ((idx === null || (c.keyWorkers[idx]||{}).name !== name) && !coiConfirmAllocation(clientId, [name])) return false;
     const entry = {
       name, role: document.getElementById('wm-role')?.value,
       organisation: document.getElementById('wm-org')?.value,
@@ -4659,12 +4677,14 @@ function openAssignWorkersModal(id) {
         <label style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;cursor:pointer;font-size:13px;${assigned.includes(w)?'background:#f0fdf4;border-color:#86efac':''}">
           <input type="checkbox" class="aw-worker" value="${sanitize(w)}" ${assigned.includes(w)?'checked':''}
             onchange="this.closest('label').style.background=this.checked?'#f0fdf4':'';this.closest('label').style.borderColor=this.checked?'#86efac':'var(--border)'">
-          <span>👤 ${sanitize(w)}</span>
+          <span>👤 ${sanitize(w)}</span>${coiBlocksAllocation(c.id, w)?'<span class="tag coi-flag" style="margin-left:6px;background:#ede9fe;color:#5b21b6;font-size:11px">⚖️ Conflict of interest — don’t allocate</span>':''}
           ${c.keyWorker===w?'<span style="margin-left:auto;font-size:11px;background:#dbeafe;color:#1e40af;padding:2px 8px;border-radius:10px">Key Worker</span>':''}
         </label>`).join('')}
     </div>`;
   showModal('👥 Assign Workers', html, () => {
-    c.assignedWorkers = [...document.querySelectorAll('.aw-worker:checked')].map(el=>el.value);
+    const picked = [...document.querySelectorAll('.aw-worker:checked')].map(el=>el.value);
+    if (!coiConfirmAllocation(c.id, picked.filter(w => !(c.assignedWorkers||[]).includes(w)))) return false;
+    c.assignedWorkers = picked;
     saveAll(); FSYNC.pushClients();
     showToast('Workers assigned ✓'); return true;
   }, '500px');
@@ -16357,8 +16377,8 @@ function _resumeTeamSignIn() {
 // (they are read again from the cloud next time).
 function _purgeLocalRecords(auditInCloud) {
   clients=[]; notes=[]; timeLogs=[]; referrals=[];
-  smsOutbox=[]; intakeForms=[]; consentForms=[];   // cloud-held (re-read at next sign-in); they carry client names, numbers and signatures
-  ['clients','notes','timelogs','referrals','fphoApplications','fphoClients','resources','smsOutbox','intakeForms','consentForms'].forEach(k=>DB.save(k,[]));
+  smsOutbox=[]; intakeForms=[]; consentForms=[]; coiList=[];   // cloud-held (re-read at next sign-in); they carry client names, numbers and signatures
+  ['clients','notes','timelogs','referrals','fphoApplications','fphoClients','resources','smsOutbox','intakeForms','consentForms','coi'].forEach(k=>DB.save(k,[]));
   // Calendar and walk-in register (client names) are whole lists held in the cloud and re-read at sign-in.
   calEvents=[]; walkins=[]; DB.save('calevents',[]); DB.save('walkins',[]);
   // Audit log: cleared only once every entry is confirmed in the cloud (it is re-read at sign-in).
@@ -16725,7 +16745,7 @@ const RESTRICTABLE_PAGES = {
   sessions:'Session Log', sewb:'SEWB Program', aod:'AOD Program', justice:'Justice Program',
   cultural:'Cultural Strengthening', mensgroup:"Men's Group", disability:'Disability Program',
   workfoundations:'Work Foundations', homeownership:'First Peoples Home Ownership',
-  policies:'Policies & Procedures', calendar:'Calendar', email:'Email', resources:'Resources', reports:'Reports', vpr:'Vulnerable Persons Register', auditlog:'Audit Log',
+  policies:'Policies & Procedures', calendar:'Calendar', email:'Email', resources:'Resources', reports:'Reports', vpr:'Vulnerable Persons Register', coi:'Conflict of Interest Register', auditlog:'Audit Log',
 };
 function _myHiddenPages(){
   if(!currentUser || currentUser.role==='sysmanager') return [];
@@ -16733,6 +16753,250 @@ function _myHiddenPages(){
   return (prof?.hiddenPages) || currentUser.hiddenPages || [];
 }
 function pageAllowed(page){ return !_myHiddenPages().includes(page); }
+
+// ===== CONFLICT OF INTEREST =====
+// Any worker can declare, on a client's file, a connection with that client that could be seen to
+// influence their work — family or kinship, friendship, community, business, a past relationship.
+// Declaring is not wrongdoing; not declaring can be. A manager or supervisor then records how it is
+// managed: not allocating the client to that worker, and/or hiding the client's file from them.
+// The person the declaration is about can never change how it is managed (the security rules
+// enforce that), and whoever does is recorded.
+// The register (Admin → Conflict of Interest Register) is for the System Manager, Admins and Supervisors.
+// Everyone else sees only their own declarations.
+// Stored one document each in teams/<team>/coi (firestore.rules: validCoi). Never deleted — closing
+// one ("no longer applies") keeps it on the register.
+const COI_NATURE = [['actual', 'Actual'], ['potential', 'Potential'], ['perceived', 'Perceived']];
+const COI_CONNECTION = [['family', 'Family or kinship'], ['friend', 'Friend'], ['community', 'Community or cultural connection'], ['work', 'Work or business'], ['history', 'Past relationship or history'], ['other', 'Other']];
+const COI_STATUS = [['open', 'Open — waiting for review'], ['managed', 'Managed'], ['closed', 'Closed — no longer applies']];
+const COI_MANAGE = [
+  ['noAllocate', 'Don’t allocate this client to them', 'The CMS warns if they are assigned to this client or added as a key worker, and flags it here and on the register.'],
+  ['hideFile', 'Hide this client’s file from them', 'They can’t open it or see it in any list. Applies to managers and supervisors too.'],
+];
+let coiList = DB.load('coi', []) || [];
+const _coiLabel = (list, k) => (list.find(x => x[0] === k) || [k, k || ''])[1];
+function coiRegisterAllowed() { return _clientOversightRole(); }        // System Manager, Admin, Supervisor
+function coiActive(d) { return !!d && d.status !== 'closed'; }
+function _coiMyEmail() { return String(currentUser?.email || '').trim().toLowerCase(); }
+function _coiMyUid() { try { return (window.firebase && firebase.auth && firebase.auth().currentUser?.uid) || ''; } catch (_) { return ''; } }
+function coiIsMe(d) { const e = _coiMyEmail(); return !!e && String(d.personEmail || '').toLowerCase() === e; }
+function coiMine(d) { return coiIsMe(d) || (!!d.declaredByUid && d.declaredByUid === _coiMyUid()); }
+function coiForClient(cid) { return coiList.filter(d => d.clientId === cid); }
+function coiVisibleFor(cid) { return coiForClient(cid).filter(d => coiRegisterAllowed() || coiMine(d)).sort((a, b) => String(b.declaredAt || '').localeCompare(String(a.declaredAt || ''))); }
+// An open or managed declaration about me says this file is hidden from me.
+function coiHidesFrom(c) { return !!c && coiList.some(d => d.clientId === c.id && coiActive(d) && d.manage && d.manage.hideFile && coiIsMe(d)); }
+// Is the person in a "don't allocate" declaration assigned to this client anyway?
+function coiAllocated(d, c) {
+  if (!c) return false;
+  const k = canonicalWorker(d.personName); if (!k) return false;
+  const names = [...(c.assignedWorkers || []), c.keyWorker, ...(c.keyWorkers || []).map(w => w && w.name)].filter(Boolean);
+  return names.some(n => canonicalWorker(n) === k);
+}
+function coiAgainstAdvice(d) { return coiActive(d) && !!(d.manage && d.manage.noAllocate) && coiAllocated(d, clients.find(x => x.id === d.clientId)); }
+// Declarations that say this worker should not be allocated to this client (for the assign / key worker windows).
+function coiBlocksAllocation(cid, name) { const k = canonicalWorker(name); return !!k && coiForClient(cid).some(d => coiActive(d) && d.manage && d.manage.noAllocate && canonicalWorker(d.personName) === k); }
+function coiAttention(c) {
+  if (!coiRegisterAllowed()) return [];
+  const out = [];
+  coiForClient(c.id).forEach(d => {
+    if (d.status === 'open' && !coiIsMe(d)) out.push(`${d.personName} declared a conflict of interest — review how it is managed`);
+    if (coiAgainstAdvice(d)) out.push(`${d.personName} has a conflict of interest and should not be allocated this client, but is`);
+  });
+  return out;
+}
+function coiStaffChoices() {
+  const seen = new Set(), out = [];
+  (userProfiles || []).forEach(u => { const e = String(u.email || '').trim().toLowerCase(); if (u.name && e && !seen.has(e)) { seen.add(e); out.push({ name: u.name, email: e }); } });
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+function _coiStatusPill(s) {
+  const m = { open: ['Open — to review', '#fef3c7', '#92400e'], managed: ['Managed', '#d1fae5', '#065f46'], closed: ['Closed', '#e5e7eb', '#374151'] }[s] || [s, '#e5e7eb', '#374151'];
+  return `<span class="tag coi-status" style="background:${m[1]};color:${m[2]}">${sanitize(m[0])}</span>`;
+}
+function _coiManageText(d) {
+  const m = d.manage || {}, on = COI_MANAGE.filter(x => m[x[0]]).map(x => x[1]);
+  return on.length ? on.join(' · ') : (d.status === 'open' ? 'Not reviewed yet' : 'No restrictions');
+}
+function _coiProgramLabel(k) { const p = PROFILE_PROGRAMS.find(x => x.key === k); return p ? p.label : 'The whole file'; }
+
+// ---- on the client's file ----
+function renderCoiTab(c) {
+  const list = coiVisibleFor(c.id), mgr = coiRegisterAllowed();
+  return `<div class="card" id="coi-tab">
+    <div class="card-header" style="flex-wrap:wrap;gap:8px"><div class="card-title">⚖️ Conflict of interest</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-sm btn-primary" id="coi-declare-btn" onclick="openCoiModal('${sanitize(c.id)}')">➕ Declare a conflict of interest</button>
+      ${mgr ? `<button class="btn btn-sm btn-outline" onclick="closeModal();showPage('coi')">Open the register →</button>` : ''}</div></div>
+    <p style="font-size:13px;color:var(--muted);margin:0 0 6px">If you have a connection with ${sanitize(c.fullName)} that could be seen to influence your work — family or kinship, a friendship, community, business, or a past relationship — declare it here. <strong>Declaring is not wrongdoing; not declaring can be.</strong></p>
+    <p style="font-size:12px;color:var(--muted);margin:0 0 12px">${mgr ? 'You can see every declaration about this client. The person a declaration is about can’t change how it is managed.' : 'Only you, and the System Manager, Admins and Supervisors, can see what you declare. A manager or supervisor reviews it and records how it is managed.'}</p>
+    ${list.length ? list.map(d => coiCardHTML(d, false)).join('') : `<div class="empty-state" style="padding:16px"><p>${mgr ? 'No conflicts of interest declared for this client.' : 'You haven’t declared a conflict of interest for this client.'}</p></div>`}
+  </div>`;
+}
+function coiCardHTML(d, withClient) {
+  const c = clients.find(x => x.id === d.clientId), canReview = coiRegisterAllowed() && !coiIsMe(d);
+  return `<div class="coi-card" data-coi="${sanitize(d.id)}" style="border:1px solid var(--border);border-left:4px solid ${d.status === 'open' ? '#d97706' : d.status === 'managed' ? '#059669' : '#9ca3af'};border-radius:8px;padding:10px 12px;margin-bottom:8px">
+    <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center">
+      <div><strong>${sanitize(d.personName)}</strong>${withClient && c ? ` — <a href="#" onclick="event.preventDefault();openClientProfile('${sanitize(c.id)}','coi')">${sanitize(c.fullName)}</a>` : ''}
+        <span style="font-size:12px;color:var(--muted)"> · ${sanitize(_coiLabel(COI_CONNECTION, d.connection))} · ${sanitize(_coiLabel(COI_NATURE, d.nature))} · ${sanitize(_coiProgramLabel(d.program))}</span></div>
+      <div style="display:flex;gap:6px;align-items:center">${_coiStatusPill(d.status)}${coiAgainstAdvice(d) ? '<span class="tag coi-against" style="background:#fee2e2;color:#991b1b">Allocated anyway</span>' : ''}
+        ${canReview ? `<button class="btn btn-sm btn-outline coi-review" onclick="openCoiModal('${sanitize(d.clientId)}','${sanitize(d.id)}')">Review</button>` : `<button class="btn btn-sm btn-outline" onclick="openCoiModal('${sanitize(d.clientId)}','${sanitize(d.id)}')">View</button>`}</div></div>
+    <div style="font-size:13px;margin-top:6px;white-space:pre-wrap">${sanitize(d.interest)}</div>
+    <div style="font-size:12px;color:var(--muted);margin-top:6px">Declared ${sanitize(fmtdt(d.declaredAt))} by ${sanitize(d.declaredBy)}${d.declaredByEmail && d.declaredByEmail !== d.personEmail ? ' (on their behalf)' : ''}
+      · <strong>How it is managed:</strong> ${sanitize(_coiManageText(d))}${d.managedNotes ? ` — ${sanitize(d.managedNotes)}` : ''}${d.reviewedBy ? ` · reviewed by ${sanitize(d.reviewedBy)} ${sanitize(fmtdt(d.reviewedAt))}` : ''}</div>
+  </div>`;
+}
+
+// ---- the declaration / review window (the "Declare a conflict of interest" form) ----
+function openCoiModal(clientId, id) {
+  const d = id ? coiList.find(x => x.id === id) : null;
+  if (id && !d) { showToast('That declaration could not be found'); return; }
+  const mgr = coiRegisterAllowed(), me = currentUser || {}, myEmail = _coiMyEmail();
+  if (d && !mgr && !coiMine(d)) return;
+  const staff = coiStaffChoices();
+  if (myEmail && !staff.some(s => s.email === myEmail)) staff.unshift({ name: me.name || myEmail, email: myEmail });
+  const c = clientId ? clients.find(x => x.id === clientId) : null;
+  const clientsToPick = clientId ? [] : visibleClients(clients).filter(x => (x.status || 'active') !== 'closed').sort((a, b) => String(a.fullName).localeCompare(String(b.fullName)));
+  const ro = !!d;                                          // a declaration can't be edited once made
+  const canManage = mgr && (!d ? true : !coiIsMe(d));      // never the person it is about
+  const m = (d && d.manage) || {};
+  const sel = (idx, list, v, dis) => `<select id="${idx}" ${dis ? 'disabled' : ''}>${list.map(([k, l]) => `<option value="${k}" ${k === v ? 'selected' : ''}>${sanitize(l)}</option>`).join('')}</select>`;
+  const html = `
+    <p style="font-size:13px;color:var(--muted);margin:-4px 0 14px">Declare any interest that could be seen to influence your work with this client. Declaring is not wrongdoing; not declaring can be.</p>
+    <div class="form-group"><label>Client</label>${c ? `<div style="font-weight:600" id="coi-client-name">${sanitize(c.fullName)}</div><input type="hidden" id="coi-client" value="${sanitize(c.id)}">`
+      : `<select id="coi-client"><option value="">Choose…</option>${clientsToPick.map(x => `<option value="${sanitize(x.id)}">${sanitize(x.fullName)}</option>`).join('')}</select>`}</div>
+    <div class="form-group"><label>Person *</label>${ro ? `<div id="coi-person-ro">${sanitize(d.personName)} <span style="color:var(--muted);font-size:12px">${sanitize(d.personEmail)}</span></div>`
+      : mgr ? `<select id="coi-person">${staff.map(s => `<option value="${sanitize(s.email)}" ${s.email === myEmail ? 'selected' : ''}>${sanitize(s.name)}${s.email === myEmail ? ' (me)' : ''}</option>`).join('')}</select>
+               <small style="color:var(--muted)">Usually yourself. A manager can record one for someone else.</small>`
+      : `<select id="coi-person" disabled><option value="${sanitize(myEmail)}">${sanitize(me.name || myEmail)} (me)</option></select>`}</div>
+    <div class="grid-2">
+      <div class="form-group"><label>Connection</label>${sel('coi-connection', COI_CONNECTION, d ? d.connection : 'family', ro)}</div>
+      <div class="form-group"><label>Nature</label>${sel('coi-nature', COI_NATURE, d ? d.nature : 'potential', ro)}</div>
+    </div>
+    <div class="form-group"><label>Interest *</label><textarea id="coi-interest" maxlength="1000" style="min-height:70px" ${ro ? 'readonly' : ''} placeholder="e.g. The client is my cousin. / I play footy with the client's partner.">${d ? sanitize(d.interest) : ''}</textarea></div>
+    <div class="form-group"><label>Applies to</label>${sel('coi-program', [['', 'The whole file'], ...PROFILE_PROGRAMS.map(p => [p.key, p.label + ' only'])], d ? d.program || '' : '', ro)}</div>
+    ${ro ? `<p style="font-size:12px;color:var(--muted)">Declared ${sanitize(fmtdt(d.declaredAt))} by ${sanitize(d.declaredBy)}. A declaration can’t be changed once made — if something changes, declare again and ask a manager to close this one.</p>` : ''}
+    <div style="border-top:1px solid var(--border);margin-top:10px;padding-top:12px" id="coi-manage">
+      <label style="font-weight:700">How it is managed</label>
+      ${canManage ? `
+        ${COI_MANAGE.map(([k, l, help]) => `<label style="display:flex;gap:10px;align-items:flex-start;margin:10px 0;font-weight:400;cursor:pointer"><input type="checkbox" id="coi-m-${k}" ${m[k] ? 'checked' : ''} style="margin-top:3px;width:18px;height:18px">
+          <span><strong>${sanitize(l)}</strong><br><small style="color:var(--muted)">${sanitize(help)}</small></span></label>`).join('')}
+        <p style="font-size:12px;color:var(--muted)">The person it is about cannot change these. Whoever does is recorded.</p>
+        <div class="form-group"><label>Notes on how it is managed</label><textarea id="coi-notes" maxlength="1000" style="min-height:56px" placeholder="e.g. Allocated to another worker; Sam will not attend appointments with this client.">${sanitize((d && d.managedNotes) || '')}</textarea></div>
+        <div class="form-group"><label>Status</label>${sel('coi-status', COI_STATUS, d ? d.status : 'open', false)}</div>`
+      : `<p style="font-size:13px;margin:6px 0 0">${d ? `${_coiStatusPill(d.status)} ${sanitize(_coiManageText(d))}${d.managedNotes ? ` — ${sanitize(d.managedNotes)}` : ''}` : ''}</p>
+         <p style="font-size:12px;color:var(--muted);margin-top:6px">${d && coiIsMe(d) && mgr ? 'This declaration is about you, so another manager or supervisor records how it is managed.' : 'The System Manager, an Admin or a Supervisor reviews each declaration and records how it is managed. The person who declared it cannot change this.'}</p>`}
+    </div>
+    <p id="coi-error" style="color:#dc2626;font-size:13px;min-height:16px;margin-top:8px"></p>`;
+  showModal(d ? (canManage ? '⚖️ Review a conflict of interest' : '⚖️ Conflict of interest') : '⚖️ Declare a conflict of interest', html, (d && !canManage) ? null : () => saveCoi(id), '600px', !!(d && !canManage));
+}
+async function saveCoi(id) {
+  const g = x => document.getElementById(x), err = t => { const e = g('coi-error'); if (e) e.textContent = t; return false; };
+  if (!FSYNC.isReady()) return err('Connect to the internet first — declarations are kept in the cloud, not on this device.');
+  const mgr = coiRegisterAllowed(), when = new Date().toISOString(), myEmail = _coiMyEmail();
+  const manage = () => ({ noAllocate: !!g('coi-m-noAllocate')?.checked, hideFile: !!g('coi-m-hideFile')?.checked });
+  if (id) {                                                   // a review: only how it is managed changes
+    const d = coiList.find(x => x.id === id); if (!d) return err('That declaration could not be found.');
+    if (!mgr || coiIsMe(d)) return err('Only another manager or supervisor can record how this is managed.');
+    const patch = { manage: manage(), managedNotes: (g('coi-notes')?.value || '').trim().slice(0, 1000), status: g('coi-status')?.value || d.status,
+      reviewedBy: currentUser?.name || myEmail, reviewedAt: when, updatedBy: myEmail, updatedAt: when };
+    try { await FSYNC.updateCoi(id, patch); } catch (e) { console.warn('COI review:', e); return err('Could not save: ' + (e.code || e.message)); }
+    Object.assign(d, patch); DB.save('coi', coiList);
+    audit('Conflict of interest reviewed', `${d.personName}: ${_coiLabel(COI_STATUS, patch.status)} — ${_coiManageText(d)}`, d.clientId);
+    showToast('✓ Saved'); _coiRefresh(); return true;
+  }
+  const clientId = g('coi-client')?.value || '', c = clients.find(x => x.id === clientId);
+  if (!c) return err('Choose the client.');
+  const personEmail = String(g('coi-person')?.value || myEmail).trim().toLowerCase();
+  const person = personEmail === myEmail ? { name: currentUser?.name || myEmail, email: myEmail } : coiStaffChoices().find(s => s.email === personEmail);
+  if (!person || !person.email) return err('Choose the person.');
+  if (!mgr && person.email !== myEmail) return err('You can only declare your own conflicts of interest.');
+  const interest = (g('coi-interest')?.value || '').trim();
+  if (!interest) return err('Describe the interest — for example, how you know the client.');
+  const d = { id: 'coi_' + uid(), clientId, personName: person.name, personEmail: person.email,
+    connection: g('coi-connection')?.value || 'other', nature: g('coi-nature')?.value || 'potential', program: g('coi-program')?.value || '', interest: interest.slice(0, 1000),
+    declaredBy: currentUser?.name || myEmail, declaredByEmail: myEmail, declaredByUid: _coiMyUid(), declaredAt: when, status: 'open' };
+  if (mgr && person.email !== myEmail) {                    // a manager recording one for someone else can record how it is managed too
+    const mm = manage(), notes = (g('coi-notes')?.value || '').trim(), st = g('coi-status')?.value || 'open';
+    if (mm.noAllocate || mm.hideFile || notes || st !== 'open') Object.assign(d, { manage: mm, managedNotes: notes.slice(0, 1000), status: st, reviewedBy: currentUser?.name || myEmail, reviewedAt: when });
+  }
+  try { await FSYNC.saveCoi(d); } catch (e) { console.warn('COI declare:', e); return err('Could not save: ' + (e.code || e.message)); }
+  coiList = coiList.filter(x => x.id !== d.id).concat([d]); DB.save('coi', coiList);
+  audit('Conflict of interest declared', `${d.personName} — ${_coiLabel(COI_CONNECTION, d.connection)}, ${_coiLabel(COI_NATURE, d.nature)}`, clientId);
+  showToast('✓ Declared. A manager or supervisor will review it.'); _coiRefresh(); return true;
+}
+function _coiRefreshQuiet() {
+  try { coiUpdateBadge(); } catch (_) {}
+  if (document.querySelector('#modal-container .modal-overlay #coi-interest')) return;     // someone is filling in a declaration
+  if (currentPage === 'coi' && document.getElementById('coi-table')) showPage('coi');
+  else if (currentClientId && document.getElementById('coi-tab')) { try { switchProfileTab('coi', currentClientId); } catch (_) {} }
+  else if (currentPage === 'clients' && typeof coiHidesFrom === 'function') showPage('clients');
+}
+function _coiRefresh() {
+  try { coiUpdateBadge(); } catch (_) {}
+  if (currentPage === 'coi') { showPage('coi'); return; }
+  if (currentClientId && document.getElementById('coi-tab')) { try { switchProfileTab('coi', currentClientId); } catch (_) {} }
+}
+// The "assign workers" and "key worker" windows: a worker who should not be allocated this client.
+function coiConfirmAllocation(clientId, names) {
+  const bad = [...new Set((names || []).filter(n => coiBlocksAllocation(clientId, n)))];
+  if (!bad.length) return true;
+  return confirm(`⚖️ Conflict of interest\n\n${bad.join(', ')} ${bad.length === 1 ? 'has' : 'have'} a declared conflict of interest with this client, and should not be allocated to them.\n\nAllocate anyway? It will be flagged on the Conflict of Interest Register.`);
+}
+
+// ---- Admin → Conflict of Interest Register ----
+let _coiTab = 'open';
+function coiSetTab(t) { _coiTab = t; showPage('coi'); }
+function coiUpdateBadge() {
+  const b = document.getElementById('coi-nav-badge'); if (!b) return;
+  const n = coiRegisterAllowed() ? coiList.filter(d => d.status === 'open' && !coiIsMe(d)).length : 0;
+  b.textContent = n || ''; b.style.display = n ? '' : 'none';
+  b.title = n ? `${n} declaration${n === 1 ? '' : 's'} waiting for review` : '';
+}
+function renderCoiPage() {
+  const all = coiList.slice().sort((a, b) => String(b.declaredAt || '').localeCompare(String(a.declaredAt || '')));
+  const count = s => all.filter(d => d.status === s).length, against = all.filter(coiAgainstAdvice);
+  const tabs = [['open', `Open — to review (${count('open')})`], ['managed', `Managed (${count('managed')})`], ['closed', `Closed (${count('closed')})`], ['all', `All (${all.length})`]];
+  if (!tabs.some(t => t[0] === _coiTab)) _coiTab = 'open';
+  const rows = all.filter(d => _coiTab === 'all' || d.status === _coiTab);
+  const clientName = d => { const c = clients.find(x => x.id === d.clientId); return c ? c.fullName : '(client not found)'; };
+  return `
+  <div class="card" style="border-left:4px solid #7c3aed">
+    <div class="card-header" style="flex-wrap:wrap;gap:8px"><div class="card-title">⚖️ Conflict of Interest Register</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-sm btn-primary" id="coi-register-declare" onclick="openCoiModal('')">➕ Record a declaration</button>
+      <button class="btn btn-sm btn-outline" id="coi-print" onclick="printCoiRegister()">🖨️ Print</button></div></div>
+    <p style="font-size:13px;color:var(--muted);margin:0">Every conflict of interest declared by staff about a client, and how each one is managed. Only the System Manager, Admins and Supervisors can see this register. Staff declare from the client’s file (⚖️ Conflict of interest); the person a declaration is about can’t change how it is managed. Declarations are never deleted — close one when it no longer applies.</p>
+  </div>
+  <div class="grid-4" style="margin-bottom:12px">
+    <div class="stat-card"><div class="label">Waiting for review</div><div class="value" id="coi-count-open">${count('open')}</div></div>
+    <div class="stat-card"><div class="label">Managed</div><div class="value" id="coi-count-managed">${count('managed')}</div></div>
+    <div class="stat-card"><div class="label">Closed</div><div class="value">${count('closed')}</div></div>
+    <div class="stat-card"><div class="label">Allocated against advice</div><div class="value" id="coi-count-against" style="color:${against.length ? '#991b1b' : 'inherit'}">${against.length}</div></div>
+  </div>
+  ${against.length ? `<div class="alert alert-warning" id="coi-against" style="display:block">⚠️ ${against.map(d => `<strong>${sanitize(d.personName)}</strong> is allocated to <a href="#" onclick="event.preventDefault();openClientProfile('${sanitize(d.clientId)}','coi')">${sanitize(clientName(d))}</a>`).join('; ')} — but a declaration says they shouldn’t be.</div>` : ''}
+  <div class="card">
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">${tabs.map(([k, l]) => `<button class="btn btn-sm ${k === _coiTab ? 'btn-primary' : 'btn-outline'}" data-coitab="${k}" onclick="coiSetTab('${k}')">${sanitize(l)}</button>`).join('')}</div>
+    <div style="overflow-x:auto"><table id="coi-table"><thead><tr><th>Declared</th><th>Person</th><th>Client</th><th>Connection · nature</th><th>Interest</th><th>How it is managed</th><th>Status</th><th></th></tr></thead><tbody>
+      ${rows.length ? rows.map(d => `<tr class="coi-row" data-coi="${sanitize(d.id)}">
+        <td style="font-size:12px;white-space:nowrap">${sanitize(fmt(d.declaredAt))}<div style="color:var(--muted)">by ${sanitize(d.declaredBy)}</div></td>
+        <td style="font-weight:600">${sanitize(d.personName)}</td>
+        <td><a href="#" onclick="event.preventDefault();openClientProfile('${sanitize(d.clientId)}','coi')">${sanitize(clientName(d))}</a><div style="font-size:11px;color:var(--muted)">${sanitize(_coiProgramLabel(d.program))}</div></td>
+        <td style="font-size:12px">${sanitize(_coiLabel(COI_CONNECTION, d.connection))}<br>${sanitize(_coiLabel(COI_NATURE, d.nature))}</td>
+        <td style="font-size:12px;max-width:260px;white-space:pre-wrap">${sanitize(d.interest)}</td>
+        <td style="font-size:12px;max-width:220px">${sanitize(_coiManageText(d))}${d.managedNotes ? `<div style="color:var(--muted)">${sanitize(d.managedNotes)}</div>` : ''}${d.reviewedBy ? `<div style="color:var(--muted)">${sanitize(d.reviewedBy)}, ${sanitize(fmt(d.reviewedAt))}</div>` : ''}${coiAgainstAdvice(d) ? '<div><span class="tag" style="background:#fee2e2;color:#991b1b">Allocated anyway</span></div>' : ''}</td>
+        <td>${_coiStatusPill(d.status)}</td>
+        <td style="white-space:nowrap">${coiIsMe(d) ? '<span style="font-size:11px;color:var(--muted)">About you</span>' : `<button class="btn btn-sm btn-outline coi-review" onclick="openCoiModal('${sanitize(d.clientId)}','${sanitize(d.id)}')">Review</button>`}</td></tr>`).join('')
+      : `<tr><td colspan="8"><div class="empty-state" style="padding:24px"><div class="icon">⚖️</div><p>${_coiTab === 'open' ? 'Nothing waiting for review.' : 'No declarations here.'}</p></div></td></tr>`}
+    </tbody></table></div>
+  </div>`;
+}
+function printCoiRegister() {
+  if (!coiRegisterAllowed()) return;
+  const all = coiList.slice().sort((a, b) => String(b.declaredAt || '').localeCompare(String(a.declaredAt || '')));
+  const name = d => (clients.find(x => x.id === d.clientId) || {}).fullName || '(client not found)';
+  const body = `<table><tr><th>Declared</th><th>Person</th><th>Client</th><th>Connection / nature</th><th>Interest</th><th>How it is managed</th><th>Status</th></tr>
+    ${all.map(d => `<tr><td>${sanitize(fmt(d.declaredAt))}<br>by ${sanitize(d.declaredBy)}</td><td>${sanitize(d.personName)}</td><td>${sanitize(name(d))}<br>${sanitize(_coiProgramLabel(d.program))}</td><td>${sanitize(_coiLabel(COI_CONNECTION, d.connection))}<br>${sanitize(_coiLabel(COI_NATURE, d.nature))}</td><td>${sanitize(d.interest)}</td><td>${sanitize(_coiManageText(d))}${d.managedNotes ? '<br>' + sanitize(d.managedNotes) : ''}${d.reviewedBy ? `<br>${sanitize(d.reviewedBy)}, ${sanitize(fmt(d.reviewedAt))}` : ''}</td><td>${sanitize(_coiLabel(COI_STATUS, d.status))}</td></tr>`).join('') || '<tr><td colspan="7">No declarations.</td></tr>'}</table>
+    <p class="note">Confidential — for the System Manager, Admins and Supervisors. Printed ${sanitize(fmtdt(new Date().toISOString()))} by ${sanitize(currentUser?.name || '')}.</p>`;
+  audit('Printed the Conflict of Interest Register', `${all.length} declarations`);
+  _openPrintWindow(wgPrintDoc('Conflict of Interest Register', 'Conflict of Interest Register', 'Confidential · Worn Gundidj Aboriginal Co-operative', body));
+}
 
 // ===== PER-CLIENT ACCESS RESTRICTION =====
 // General rule: every worker can open every client file. A System Manager can
@@ -16743,6 +17007,7 @@ function pageAllowed(page){ return !_myHiddenPages().includes(page); }
 function _clientOversightRole(){ return ['sysmanager','admin','supervisor'].includes(currentUser?.role); }
 function canViewClient(c){
   if(!c || !currentUser) return false;
+  if(coiHidesFrom(c)) return false;                // a managed conflict of interest hides it from that person — managers included
   if(_clientOversightRole()) return true;          // managers/supervisors always see (oversight)
   if(!c.accessRestricted) return true;             // default: open to all workers
   const me = (currentUser.name||'').trim();
@@ -16758,7 +17023,7 @@ function applyNavRestrictions(){
     const m = (el.getAttribute('onclick')||'').match(/showPage\('([^']+)'\)/);
     const page = m && m[1];
     // Settings is System-Manager only; everything else respects hiddenPages.
-    const blocked = page && ((page==='settings' && !isSys) || (page==='vpr' && !vprPageAllowed()) || hidden.includes(page));
+    const blocked = page && ((page==='settings' && !isSys) || (page==='vpr' && !vprPageAllowed()) || (page==='coi' && !coiRegisterAllowed()) || hidden.includes(page));
     el.style.display = blocked ? 'none' : '';
   });
 }

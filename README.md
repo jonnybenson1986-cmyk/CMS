@@ -107,6 +107,26 @@ Restore the previous rules immediately.
 
 **3 — Cloud Functions.** Not currently deployed. Follow `docs/SECURITY-DEPLOY.md`.
 
+## ⚖️ Conflict of interest
+
+* **Declaring (every worker):** client file → **⚖️ Conflict of interest** → *Declare a
+  conflict of interest*. Connection (family or kinship, friend, community or cultural,
+  work or business, past relationship, other), nature (actual / potential / perceived),
+  the interest in their own words, and what it applies to (whole file or one program).
+  A worker can only declare for themselves and sees only their own declarations.
+* **The register (System Manager, Admin, Supervisor only):** Admin → **Conflict of
+  Interest Register** — open / managed / closed tabs, a badge for ones waiting for
+  review, *Allocated against advice*, and Print. Managers can also record one for a worker.
+* **How it is managed** (set by a manager or supervisor, never by the person it is
+  about — the security rules enforce this, and record who changed it):
+  *Don't allocate this client to them* (the Assign workers and Key worker windows warn,
+  and the register flags it) and *Hide this client's file from them* (applies to
+  managers too). Notes and a status (open → managed → closed).
+* A declaration can't be edited or deleted once made; close it when it no longer applies.
+* Stored in `teams/<team>/coi` (rules: `validCoi`). Under the live rules any team member
+  could technically read the collection — the app shows the register to managers and
+  supervisors only; the strict rules enforce it once roles are in the sign-in token.
+
 ## 🏢 Teams (Worn Gundidj · Spare team · Test team)
 
 Three teams share the system and are kept apart: each has its own clients,
