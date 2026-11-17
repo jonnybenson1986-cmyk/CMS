@@ -2,7 +2,7 @@
 // rule files. Run:  cd tests/rules && npm ci && npm test
 // (CI runs this before publishing the rules — .github/workflows/firebase-deploy.yml)
 import { initializeTestEnvironment, assertSucceeds, assertFails } from '@firebase/rules-unit-testing';
-import { doc, setDoc, addDoc, updateDoc, deleteDoc, getDoc, getDocs, collection, Timestamp } from 'firebase/firestore';
+import { doc, setDoc, addDoc, updateDoc, deleteDoc, getDoc, getDocs, collection, query, where, Timestamp } from 'firebase/firestore';
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 let pass = 0, fail = 0;
@@ -31,6 +31,19 @@ for (const file of Object.keys(RULES)) {
     same(grab(/m\.what\.hasOnly\(\[([^\]]*)\]\)/), globalThis.WG_CONSENT.SHARE_WHAT.map(x => x[0]), '"what" codes differ')]));
   const sigKeys = (src.match(/function validSignature[\s\S]*?s\.keys\(\)\.hasOnly\(\[([^\]]*)\]\)/) || [, ''])[1].split(',').map(x => x.trim().replace(/'/g, '')).filter(Boolean);
   await check(file + ': signature rule keys match site/forms/signing.js', JSON.stringify(sigKeys) === JSON.stringify(globalThis.WG_SIGN.SIG_KEYS) ? Promise.resolve() : Promise.reject(new Error('signature keys differ from signing.js')));
+}
+// ...and a conflict of interest declaration's keys and lists must be the app's.
+{
+  const app = fs.readFileSync(new URL('../../site/index.html', import.meta.url), 'utf8');
+  const keysOf = re => ((app.match(re) || [, ''])[1].match(/\['([A-Za-z]+)'/g) || []).map(x => x.slice(2, -1));
+  const appLists = { connection: keysOf(/const COI_CONNECTION = \[(.*)\];/), nature: keysOf(/const COI_NATURE = \[(.*)\];/), status: keysOf(/const COI_STATUS = \[(.*)\];/), manage: keysOf(/const COI_MANAGE = \[([\s\S]*?)\];\n/) };
+  for (const file of Object.keys(RULES)) {
+    const src = fs.readFileSync(new URL(RULES[file], import.meta.url), 'utf8'), fn = (src.match(/function validCoi[\s\S]*?\n    }/) || [''])[0];
+    const list = re => (fn.match(re) || [, ''])[1].split(',').map(x => x.trim().replace(/'/g, '')).filter(Boolean);
+    const ok = JSON.stringify(list(/d\.connection in \[([^\]]*)\]/)) === JSON.stringify(appLists.connection) && JSON.stringify(list(/d\.nature in \[([^\]]*)\]/)) === JSON.stringify(appLists.nature)
+      && JSON.stringify(list(/d\.status in \[([^\]]*)\]/)) === JSON.stringify(appLists.status) && JSON.stringify(list(/d\.manage\.keys\(\)\.hasOnly\(\[([^\]]*)\]\)/)) === JSON.stringify(appLists.manage) && appLists.connection.length === 6;
+    await check(file + ': conflict of interest lists in the rules match the app (connection, nature, status, how it is managed)', ok ? Promise.resolve() : Promise.reject(new Error(JSON.stringify(appLists))));
+  }
 }
 // ...and the teams an account can be put in must be exactly site/teams.js.
 const TEAMS = createRequire(import.meta.url)('../../site/teams.js');
@@ -276,6 +289,56 @@ for (const file of Object.keys(RULES)) {
     assertFails(deleteDoc(doc(sys, T + '/consentForms/CF8'))), assertFails(deleteDoc(doc(sys, T + '/consentLinks/' + CL)))]));
   await check(f + ' existing collections still work (clients)', assertSucceeds(setDoc(doc(wkr, T + '/clients/c1'), { fullName: 'x' })));
 
+
+  // ══════════ ⚖️ conflict of interest declarations ══════════
+  { const strict = file.startsWith('strict');
+    const sup = env.authenticatedContext('u-sup', { email: 'sup@x.org', role: 'supervisor', name: 'Sup' }).firestore();
+    const C = T + '/coi/';
+    const decl = (id, o) => ({ id, clientId: 'c1', personName: 'Wendy Worker', personEmail: 'w@x.org', connection: 'family', nature: 'potential', program: '', interest: 'The client is my cousin.',
+      declaredBy: 'Wendy Worker', declaredByEmail: 'w@x.org', declaredByUid: 'u-wkr', declaredAt: '2026-11-17T01:00:00.000Z', status: 'open', ...(o || {}) });
+    const review = (o) => ({ manage: { noAllocate: true, hideFile: true }, managedNotes: 'Allocated to another worker.', status: 'managed', reviewedBy: 'Sup', reviewedAt: '2026-11-17T02:00:00.000Z', updatedBy: 'sup@x.org', updatedAt: '2026-11-17T02:00:00.000Z', ...(o || {}) });
+    await check(f + ' conflict of interest: a worker can declare their own, as open with nothing yet about how it is managed', assertSucceeds(setDoc(doc(wkr, C + 'coi1'), decl('coi1'))));
+    await check(f + ' conflict of interest: …but cannot decide how their own is managed, or mark it managed, or pass it off as someone else’s', Promise.all([
+      assertFails(setDoc(doc(wkr, C + 'coi2'), decl('coi2', { manage: { noAllocate: false, hideFile: false } }))),
+      assertFails(setDoc(doc(wkr, C + 'coi2'), decl('coi2', { status: 'managed' }))),
+      assertFails(setDoc(doc(wkr, C + 'coi2'), decl('coi2', { managedNotes: 'fine' }))),
+      assertFails(setDoc(doc(wkr, C + 'coi2'), decl('coi2', { declaredByUid: 'u-sys' }))),
+      assertFails(setDoc(doc(wkr, C + 'coi2'), decl('coi2', { declaredByEmail: 'jon@x.org' }))),
+      assertFails(setDoc(doc(wkr, C + 'coi2'), decl('coi3')))]));
+    await check(f + ' conflict of interest: a declaration must be complete and use the known lists', Promise.all([
+      assertFails(setDoc(doc(wkr, C + 'coi4'), decl('coi4', { interest: '' }))), assertFails(setDoc(doc(wkr, C + 'coi4'), decl('coi4', { interest: 'x'.repeat(1001) }))),
+      assertFails(setDoc(doc(wkr, C + 'coi4'), decl('coi4', { nature: 'huge' }))), assertFails(setDoc(doc(wkr, C + 'coi4'), decl('coi4', { connection: 'enemy' }))),
+      assertFails(setDoc(doc(wkr, C + 'coi4'), decl('coi4', { status: 'deleted' }))), assertFails(setDoc(doc(wkr, C + 'coi4'), decl('coi4', { clientId: '' }))),
+      assertFails(setDoc(doc(wkr, C + 'coi4'), decl('coi4', { personEmail: 'not an email' }))), assertFails(setDoc(doc(wkr, C + 'coi4'), decl('coi4', { extra: 1 })))]));
+    await check(f + ' conflict of interest: a manager or supervisor records how it is managed — and who did is recorded as their own account', Promise.all([
+      assertSucceeds(updateDoc(doc(sup, C + 'coi1'), review())), assertFails(updateDoc(doc(sys, C + 'coi1'), review({ updatedBy: 'someone@else.org' })))]));
+    await check(f + ' conflict of interest: the person it is about can never change how it is managed (not even to close it)', Promise.all([
+      assertFails(updateDoc(doc(wkr, C + 'coi1'), review({ manage: { noAllocate: false, hideFile: false }, updatedBy: 'w@x.org' }))),
+      assertFails(updateDoc(doc(wkr, C + 'coi1'), { status: 'closed', updatedBy: 'w@x.org', updatedAt: 'x' }))]));
+    await check(f + ' conflict of interest: the declaration itself can’t be changed by anyone, and nobody can delete one', Promise.all([
+      assertFails(updateDoc(doc(sys, C + 'coi1'), { interest: 'Nothing to see', updatedBy: 'jon@x.org', updatedAt: 'x' })),
+      assertFails(updateDoc(doc(sys, C + 'coi1'), { personEmail: 'other@x.org', updatedBy: 'jon@x.org', updatedAt: 'x' })),
+      assertFails(updateDoc(doc(sys, C + 'coi1'), { declaredAt: '2020-01-01', updatedBy: 'jon@x.org', updatedAt: 'x' })),
+      assertFails(deleteDoc(doc(sys, C + 'coi1'))), assertFails(deleteDoc(doc(wkr, C + 'coi1')))]));
+    await check(f + ' conflict of interest: a manager’s own declaration is managed by someone else', (async () => {
+      await assertSucceeds(setDoc(doc(sys, C + 'coi5'), decl('coi5', { personName: 'Jon', personEmail: 'jon@x.org', declaredBy: 'Jon', declaredByEmail: 'jon@x.org', declaredByUid: 'u-sys' })));
+      await assertFails(updateDoc(doc(sys, C + 'coi5'), review({ updatedBy: 'jon@x.org' })));
+      await assertSucceeds(updateDoc(doc(sup, C + 'coi5'), review()));
+    })());
+    await check(f + ' conflict of interest: a manager can record one for a worker, including how it is managed', assertSucceeds(setDoc(doc(sys, C + 'coi6'),
+      decl('coi6', { declaredBy: 'Jon', declaredByEmail: 'jon@x.org', declaredByUid: 'u-sys', ...review({ updatedBy: 'jon@x.org' }) }))));
+    await check(f + ' conflict of interest: the person and who declared it can read it' + (strict ? '' : ' (the live rules let the team read the register; the app shows it to managers and supervisors only)'), Promise.all([
+      assertSucceeds(getDocs(query(collection(wkr, T + '/coi'), where('personEmail', '==', 'w@x.org')))), assertSucceeds(getDocs(query(collection(wkr, T + '/coi'), where('declaredByUid', '==', 'u-wkr')))),
+      assertSucceeds(getDocs(collection(sup, T + '/coi'))), assertSucceeds(getDocs(collection(sys, T + '/coi')))]));
+    if (strict) {
+      await check(f + ' conflict of interest (strict): only managers and supervisors can read the whole register — a worker cannot, or read someone else’s', Promise.all([
+        assertFails(getDocs(collection(wkr, T + '/coi'))), assertFails(getDoc(doc(wkr, C + 'coi5')))]));
+      await check(f + ' conflict of interest (strict): a worker cannot record one about someone else', assertFails(setDoc(doc(wkr, C + 'coi7'), decl('coi7', { personName: 'Sam', personEmail: 'sam@x.org' }))));
+    }
+    await check(f + ' conflict of interest: a signed-out visitor or an anonymous session gets nothing', Promise.all([
+      assertFails(getDocs(collection(anon, T + '/coi'))), assertFails(getDoc(doc(anonUser, C + 'coi1'))), assertFails(setDoc(doc(anon, C + 'coi9'), decl('coi9')))]));
+  }
+
   // ══════════ TEAMS (multi-tenancy) ══════════
   // Worn Gundidj, a spare team and a test team: an account only reaches the teams it belongs to.
   const OWNER = 'jon.benson@worngundidj.org.au';
@@ -311,7 +374,7 @@ for (const file of Object.keys(RULES)) {
   const others = [['a Worn Gundidj account', wgM, [TT, TS]], ['a Test team account', testM, [T, TS]], ['a Spare team account', spareM, [T, TT]], ['an account removed from every team', none, [T, TT, TS]]];
   for (const [who, ctx, teams] of others) for (const tp of teams) {
     await check(f + ` teams: ${who} cannot read, list or write ${tp}`, Promise.all([
-      ...['clients', 'notes', 'timelogs', 'referrals', 'staff', 'auditlog', 'calevents', 'walkins', 'intakeForms', 'consentForms', 'smsOutbox', 'appConfig', 'userAccess', 'chatMsgs', 'ideas', 'workersList', 'policies', 'fpho', 'resources', 'smsConfig', 'smsUsage', 'roles', 'workflowTasks', 'chatConvs']
+      ...['clients', 'notes', 'timelogs', 'referrals', 'staff', 'auditlog', 'calevents', 'walkins', 'intakeForms', 'consentForms', 'smsOutbox', 'appConfig', 'userAccess', 'chatMsgs', 'ideas', 'workersList', 'policies', 'fpho', 'resources', 'smsConfig', 'smsUsage', 'roles', 'workflowTasks', 'chatConvs', 'coi']
         .map(c => assertFails(getDocs(collection(ctx, tp + '/' + c)))),
       assertFails(getDoc(doc(ctx, tp + '/clients/tt1'))), assertFails(getDoc(doc(ctx, tp + '/clients/seed'))),
       assertFails(setDoc(doc(ctx, tp + '/clients/evil'), client('evil'))), assertFails(setDoc(doc(ctx, tp + '/notes/evil'), { id: 'evil', text: 'x' })),

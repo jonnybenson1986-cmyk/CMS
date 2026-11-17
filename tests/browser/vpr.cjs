@@ -18,7 +18,7 @@ const SEED=new Function('w',`
   const lastToast=()=>p.evaluate(()=>window.__toasts[window.__toasts.length-1]||'');
 
   // ---- the Admin page ----
-  ok('V1 Admin has a "Vulnerable Persons Register" item, above Audit Log', await p.evaluate(()=>{ const items=[...document.querySelectorAll('#sidebar .nav-item')].map(n=>n.textContent.trim()); const i=items.findIndex(t=>/Vulnerable Persons Register/.test(t)); return i>0 && /Audit Log/.test(items[i+1]); }));
+  ok('V1 Admin has a "Vulnerable Persons Register" item, above Audit Log', await p.evaluate(()=>{ const items=[...document.querySelectorAll('#sidebar .nav-item')].map(n=>n.textContent.trim()); const i=items.findIndex(t=>/Vulnerable Persons Register/.test(t)); const a=items.findIndex(t=>/Audit Log/.test(t)); return i>0 && a>i && a-i<=2; }));
   await p.evaluate(()=>showPage('vpr')); await T();
   const pg=await p.evaluate(()=>({ title:document.getElementById('page-title')?.textContent||document.title, txt:document.getElementById('main').innerText, on:document.getElementById('vpr-count-on')?.textContent, rows:[...document.querySelectorAll('.vpr-row')].map(r=>r.dataset.id), tabs:[...document.querySelectorAll('[data-vpr-tab]')].map(b=>b.textContent.trim()) }));
   ok('V2 the page opens and lists who is on the register (1 seeded)', pg.on==='1' && pg.rows.join()==='c' && /all four criteria/i.test(pg.txt), JSON.stringify({on:pg.on,rows:pg.rows}));
