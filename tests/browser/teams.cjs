@@ -94,8 +94,16 @@ const SEED=new Function('w',`
   await p.click('#teams-lock-btn'); await W(600);
   ok('T30 locking is recorded, shown, and audited', !!(await cloud('platform')).lock && (await cloud('platform')).lock.lockedBy===OWNER && /Locked/.test(await p.innerText('#teams-lock')) && (await audits('^Teams locked$')).length===1);
   await signOut(); await signIn('stranger@example.org',1800); s=await st();
-  ok('T31 once locked, a sign-in that is not in the list opens nothing: it is told to ask to be added, and is signed out', s.login && !s.authed && /not been added to a team/.test(s.err) && await p.evaluate(()=>!firebase.auth().currentUser), JSON.stringify(s));
-  ok('T32 …and no membership was made for it', !(await cloud('members'))['uid-stranger@example.org']);
+  ok('T31 once locked, a sign-in that is not in the list opens nothing: it is told to ask to be added, and is signed out', s.login && !s.authed && /not been added to a team/.test(s.err) && /can now see it in Settings → Teams/.test(s.err) && await p.evaluate(()=>!firebase.auth().currentUser), JSON.stringify(s));
+  ok('T32 …it leaves only a request — an entry with NO teams, which opens nothing', await (async()=>{ const m=(await cloud('members'))['uid-stranger@example.org']; return !!m && Array.isArray(m.teams) && m.teams.length===0 && m.email==='stranger@example.org' && !('manager' in m); })());
+  await signIn('stranger@example.org',1800); s=await st();
+  ok('T32a …and trying again still opens nothing', s.login && !s.authed && /not been added to a team/.test(s.err), JSON.stringify(s));
+  await signIn(OWNER,2200); await p.evaluate(()=>showPage('settings')); await W(900);
+  ok('T32b the owner sees the request in the Teams list: "Asked to be added", no team ticked', await p.evaluate(()=>{ const r=document.querySelector('#teams-table tr[data-uid="uid-stranger@example.org"]'); return !!r && /Asked to be added/.test(r.innerText) && !r.querySelector('.tm-team:checked'); }));
+  await p.check('#teams-table tr[data-uid="uid-stranger@example.org"] .tm-team[data-team="test"]'); await W(600);
+  await signOut(); await signIn('stranger@example.org',2600); s=await st();
+  ok('T32c once the owner ticks a team, that account can sign in — to that team only', s.authed && s.team==='test' && s.user==='stranger@example.org' && !s.sw && s.names.join()==='Practice Person' && await p.evaluate(async()=>(await firebase.firestore().collection('teams/worngundidj/clients').get().then(()=>'ok',e=>e.code))==='permission-denied'), JSON.stringify(s));
+  await signOut();
   // an account in two teams
   await signIn(SAM,2400); s=await st();
   ok('T33 an account ticked into two teams gets the Switch button, and opens only those two', s.user===SAM && s.sw && await p.evaluate(()=>myTeams.join()==='worngundidj,test') && s.team==='test', JSON.stringify(s));

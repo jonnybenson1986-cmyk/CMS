@@ -552,6 +552,11 @@ client's first name only and no links.
 Tracked so they are not quietly forgotten:
 
 - Server-side role enforcement is not deployed (`functions/` + `.strict` rules).
+  Until it is, within a team the roles (who sees the registers, who can manage a
+  conflict of interest, restricted or hidden client files) are applied by the app only.
+  `functions/` and `scripts/bootstrap-sysmanager.js` are still written for one team.
+- `storage.rules` is published by hand (Firebase console); uploaded files are only
+  separated by team once that is done. The team **Lock** is a manual step too (`docs/TEAMS.md`).
 - Firebase App Check is registered but not enforced.
 - MFA is available but not required for privileged accounts.
 - Feedback requests are sent from the worker's own phone. The handbook text

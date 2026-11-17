@@ -29,7 +29,7 @@
     if(path==='members'){ if(owner) return op!=='write' || (Array.isArray((data||{}).teams) ? data.teams.every(x=>TEAM_IDS.includes(x)) : !!(c.members||{})[id]);
       if(op==='get') return id===u.uid; if(op!=='write') return false; if((c.members||{})[id]) return false;
       const t=(data||{}).teams; if(!Array.isArray(t) || 'manager' in data) return false;
-      if(id===u.uid) return !mine && !locked && t.length===1 && t[0]==='worngundidj' && data.email===u.email;
+      if(id===u.uid) return !mine && data.email===u.email && (locked ? t.length===0 : (t.length===1 && t[0]==='worngundidj'));
       return !!(mine && mine.manager===true && t.length===1 && (mine.teams||[]).includes(t[0])); }
     if(path==='platform') return op==='get' || (owner && id==='lock');
     return true; };

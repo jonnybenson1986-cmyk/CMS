@@ -394,7 +394,8 @@ service cloud.firestore {
     // list, change or remove entries. New entries can be made by:
     //   • the owner (any of the teams);
     //   • a team manager (manager: true, set by the owner) — for ONE of their own teams;
-    //   • an account from before teams, for itself, as Worn Gundidj only, until the lock.
+    //   • an account from before teams, for itself, as Worn Gundidj only, until the lock;
+    //   • after the lock, an unlisted account, for itself, with NO teams (a request to be added).
     function validMember(m) {
       return m.keys().hasOnly(['teams', 'email', 'name', 'manager', 'addedBy', 'addedAt', 'updatedBy', 'updatedAt'])
         && m.teams is list && m.teams.size() <= 3 && m.teams.hasOnly(['worngundidj', 'spare', 'test'])
@@ -413,7 +414,12 @@ service cloud.firestore {
            isOwner()
         || (request.auth.uid == uid && wgOpen()
             && request.resource.data.teams == ['worngundidj'] && !('manager' in request.resource.data)
-            && request.resource.data.email == request.auth.token.email)
+            && request.resource.data.email == request.auth.token.email.lower())
+        // After the lock: an account that is not listed can ask to be added. The entry gives it
+        // nothing (no teams) — it only puts its email in the owner's list, to be ticked in or ignored.
+        || (request.auth.uid == uid && !wgOpen()
+            && request.resource.data.teams == [] && !('manager' in request.resource.data)
+            && request.resource.data.email == request.auth.token.email.lower())
         || (request.auth.uid != uid && enrolled() && me().get('manager', false) == true
             && request.resource.data.teams.size() == 1 && request.resource.data.teams[0] in me().teams
             && !('manager' in request.resource.data))
