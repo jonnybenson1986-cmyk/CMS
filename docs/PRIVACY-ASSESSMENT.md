@@ -28,7 +28,7 @@ Risk is the likelihood and seriousness of harm to a client, or of a breach of th
 
 | # | Finding | Principle | Risk | Outcome |
 |---|---|---|---|---|
-| 1 | **Voice to text sends speech to Google or Microsoft.** The 🎤 button uses the browser's speech service. Dictated case notes left the CMS, possibly overseas, with no notice to staff and no way to switch it off. | APP 8, APP 11, HPP 9 | High | **Fixed.** Staff see a notice before first use; the System Manager can switch it off for everyone (Settings → Privacy). Whether to keep it on is a decision for the organisation (4.3). |
+| 1 | **Voice to text sent speech to Google or Microsoft.** The 🎤 button used the browser's speech service. Dictated case notes left the CMS, possibly overseas, with no notice to staff and no way to switch it off. | APP 8, APP 11, HPP 9 | High | **Fixed, then removed.** v106 added a first-use notice and an off switch. In v118 voice to text was **removed from the CMS altogether**, and the site no longer asks the browser for the microphone. |
 | 2 | **The client's online intake form had no proper privacy notice**, and said information is "only seen by Worn Gundidj staff", which is not the whole picture (audits, funders, sharing with consent or by law). | APP 5, HPP 1.4 | High | **Fixed.** The form now explains why information is collected, that answering is a choice, who sees it, where it is kept, and how to get access, corrections or make a complaint. |
 | 3 | **The built-in privacy policy was inaccurate.** It left out the Health Records Act, said there was no overseas disclosure at all, and gave no retention period, breach process or Victorian complaint body. | APP 1.3–1.4 | High | **Fixed** in the CMS text. It is a starting draft: the organisation must approve it (4.1). |
 | 4 | **Settings showed green "compliant" ticks** for six APPs. The software cannot establish that, and the "no overseas disclosure" tick was wrong. | APP 1.2 | Medium | **Fixed.** Replaced with a plain statement of where information goes and what the organisation must have in place. |
@@ -62,7 +62,7 @@ Risk is the likelihood and seriousness of harm to a client, or of a breach of th
 
 ## 3. What changed in the software (v106)
 
-1. Voice to text: first-use notice per worker, and an organisation-wide off switch.
+1. Voice to text: first-use notice per worker, and an organisation-wide off switch. (Since v118 voice to text has been removed entirely.)
 2. Client intake form: full collection notice; declaration wording tightened.
 3. Privacy policy rewritten to match what the system does; privacy contact is a setting.
 4. Settings → Privacy: where information goes, and what the organisation needs in place.
@@ -82,7 +82,7 @@ These cannot be done in software.
 
 1. **Approve the privacy policy.** Read the text in the CMS (login page → Privacy Policy), correct anything that does not match practice, and have it approved. Put the same policy on the public website and offer a paper copy.
 2. **Name a privacy contact** and enter it in Settings → Privacy. It appears in the policy as the place for access requests and complaints.
-3. **Decide on voice to text.** If it stays on, staff must not dictate identifying details. If in doubt, switch it off.
+3. ~~Decide on voice to text.~~ Done: voice to text was removed from the CMS in v118. (A worker's own phone or computer may still offer dictation in its keyboard; that is outside the CMS, so staff should be told not to dictate client details that way either.)
 4. **Write a data breach response plan.** Who decides, who is told, and within what time. A suspected breach must be assessed within 30 days; if serious harm is likely, notify the people affected and the OAIC. A lost laptop, a shared password, or an email to the wrong person all count.
 5. **Have a process for access and correction requests** (APP 12–13, HPP 6): who handles them, proof of identity, and a written reply. The CMS can print or export a full client file, and that is audited.
 6. **Check the contracts** with Google (Firebase), Microsoft 365 and ClickSend: where data is processed, and that their terms meet APP 8 and APP 11.

@@ -1337,7 +1337,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v117';
+const APP_VERSION = 'v118';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -1354,7 +1354,8 @@ function _applyOutlookConfig(cfg) {
   outlookOrgConfig = cfg; DB.save('outlookOrgConfig', cfg);
   if (changed) { try { _msalInstance = null; if (currentPage === 'calendar' || currentPage === 'settings') setTimeout(() => showPage(currentPage), 50); } catch (_) {} }
 }
-// Privacy settings shared with all staff (appConfig/privacy): { voiceOff, contact, updatedBy, updatedAt }
+// Privacy settings shared with all staff (appConfig/privacy): { contact, updatedBy, updatedAt }.
+// (Voice to text was removed from the CMS in v118; an old voiceOff value is simply ignored.)
 let privacyConfig = DB.load('privacyConfig', {}) || {};
 function _applyPrivacyConfig(cfg) { privacyConfig = cfg || {}; DB.save('privacyConfig', privacyConfig); try { if (currentPage === 'settings') showPage('settings'); } catch (_) {} }
 let policies = DB.load('policies', []); // organisation policies & procedures library
@@ -1389,57 +1390,6 @@ function audit(action, detail, clientId) {
 let currentClientId = null;
 let activeTimer = null;
 
-// ===== VOICE-TO-TEXT ENGINE =====
-let _voiceRecog = null;
-let _voiceTarget = null;
-let _voiceBtnId  = null;
-
-function toggleVoiceInput(textareaId, btnId) {
-  if(_voiceRecog && _voiceTarget === textareaId) { stopVoiceInput(); return; }
-  if(_voiceRecog) stopVoiceInput();
-  if(!voiceGate()) return;
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if(!SR) { alert('Voice input is not supported in this browser.\nPlease use Google Chrome or Microsoft Edge.'); return; }
-  const ta = document.getElementById(textareaId);
-  const btn = document.getElementById(btnId);
-  const statusEl = document.getElementById(textareaId==='nm-text'?'nm-voice-status':null);
-  if(!ta) return;
-  _voiceTarget = textareaId; _voiceBtnId = btnId;
-  _voiceRecog = new SR();
-  _voiceRecog.lang = 'en-AU';
-  _voiceRecog.continuous = true;
-  _voiceRecog.interimResults = true;
-  let baseText = ta.value;
-  _voiceRecog.onstart = () => {
-    if(btn) { btn.style.background='#fee2e2'; btn.style.color='#dc2626'; btn.style.borderColor='#dc2626'; btn.innerHTML='🔴 Recording… (click to stop)'; }
-    if(statusEl) statusEl.textContent = '🎤 Listening… speak clearly';
-  };
-  _voiceRecog.onresult = (ev) => {
-    let interim='', final='';
-    for(let i=ev.resultIndex;i<ev.results.length;i++){
-      const t=ev.results[i][0].transcript;
-      if(ev.results[i].isFinal){final+=t+' ';}else{interim+=t;}
-    }
-    if(ta._rte) { if(final) rteInsertText(ta, final); if(statusEl) statusEl.textContent = interim ? `🎤 Hearing: "${interim.slice(0,60)}…"` : '🎤 Listening…'; return; }
-    if(final) { baseText+=final; }
-    ta.value = baseText + interim;
-    ta.scrollTop = ta.scrollHeight;
-    if(statusEl) statusEl.textContent = interim ? `🎤 Hearing: "${interim.slice(0,60)}…"` : '🎤 Listening…';
-  };
-  _voiceRecog.onerror = (ev) => { if(ev.error!=='no-speech'){stopVoiceInput();console.warn('Voice input error:', ev.error); showToast("Voice input didn't work — please try again.");} };
-  _voiceRecog.onend = () => { if(_voiceRecog) stopVoiceInput(); };
-  _voiceRecog.start();
-}
-
-function stopVoiceInput() {
-  if(_voiceRecog) { try{_voiceRecog.stop();}catch(e){} _voiceRecog=null; }
-  const btn = _voiceBtnId ? document.getElementById(_voiceBtnId) : null;
-  if(btn) { btn.style.background=''; btn.style.color=''; btn.style.borderColor=''; btn.innerHTML='🎤 Voice Input'; }
-  const statusEl = document.getElementById('nm-voice-status');
-  if(statusEl) statusEl.textContent='';
-  _voiceTarget=null; _voiceBtnId=null;
-}
-
 // ============================================================
 // ✍️ WRITING TOOLS
 //  • Rich editor (rteEnhance) for case notes: Edit / Insert / Format / Table
@@ -1447,7 +1397,7 @@ function stopVoiceInput() {
 //    and size, bold / italic / underline, text and highlight colour, alignment,
 //    lists, indent, quote, tables, pictures, Australian-English spell check and a
 //    word count. The original <textarea> stays in the page, hidden, and always
-//    holds a plain-text copy — so autosave drafts, validation, voice input,
+//    holds a plain-text copy — so autosave drafts, validation,
 //    reports, exports and search keep working unchanged. The formatted version
 //    is saved alongside (note.html) after passing rteSanitize, and is sanitised
 //    again whenever it is shown.
@@ -1599,7 +1549,6 @@ let _rteMenuOpen = null;
 function rteEnhance(id, opts) {
   const ta = document.getElementById(id); if (!ta || ta._rte) return null;
   opts = opts || {};
-  ta.dataset.voiceAttached = '1';                       // the editor has its own voice button
   const wrap = document.createElement('div');
   wrap.className = 'rte'; wrap.dataset.for = id;
   const minH = parseInt(ta.style.minHeight) || 140;
@@ -4999,24 +4948,11 @@ function openNoteModal(clientId, defaultType) {
     </div>
   </div>
   <div class="form-group">
-    <label style="display:flex;align-items:center;justify-content:space-between">
-      <span>Case Note *</span>
-      <button type="button" id="nm-mic-btn" onclick="toggleVoiceInput('nm-text','nm-mic-btn')"
-        style="display:flex;align-items:center;gap:5px;background:var(--bg);border:1px solid var(--border);border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer;color:var(--text);transition:all 0.2s">
-        🎤 Voice Input
-      </button>
-    </label>
-    <div id="nm-voice-status" style="font-size:11px;color:var(--muted);min-height:16px;margin-bottom:4px"></div>
-    <textarea id="nm-text" style="min-height:180px" placeholder="Record what occurred, client's presentation, interventions used, outcomes, follow-up required… (or use 🎤 Voice Input)"></textarea>
+    <label>Case Note *</label>
+    <textarea id="nm-text" style="min-height:180px" placeholder="Record what occurred, client's presentation, interventions used, outcomes, follow-up required…"></textarea>
   </div>
   <div class="form-group">
-    <label style="display:flex;align-items:center;justify-content:space-between">
-      <span>Follow-up Required</span>
-      <button type="button" onclick="toggleVoiceInput('nm-followup','nm-fu-btn')" id="nm-fu-btn"
-        style="display:flex;align-items:center;gap:5px;background:var(--bg);border:1px solid var(--border);border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer;color:var(--text);transition:all 0.2s">
-        🎤 Voice Input
-      </button>
-    </label>
+    <label>Follow-up Required</label>
     <textarea id="nm-followup" style="min-height:60px" placeholder="Any actions, referrals, or follow-up tasks…"></textarea>
   </div>
   <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;padding:4px 0">
@@ -5026,7 +4962,6 @@ function openNoteModal(clientId, defaultType) {
   showModal('📝 Add Case Note', html, () => {
     const text = document.getElementById('nm-text')?.value?.trim();
     if(!text) { alert('Note text is required'); return false; }
-    stopVoiceInput(); // stop any active recording
     const noteDate = document.getElementById('nm-date')?.value;
     const n = {
       id: uid(), clientId: document.getElementById('nm-client')?.value,
@@ -9691,7 +9626,7 @@ function _attachSessionDraft(requestedClientId) {
   if (d && d.fields) indicator('💾 Draft autosaved ' + _draftTime(d.savedAt));
 
   // Autosave: shortly after typing stops, and every 5 seconds as a backstop
-  // (voice input fills the text box without a keystroke).
+  // (pasted pictures and menu edits don't always fire an input event).
   const kick = () => { clearTimeout(state.timer); state.timer = setTimeout(save, 600); };
   body.addEventListener('input', kick);
   body.addEventListener('change', kick);
@@ -9769,24 +9704,11 @@ function openSessionModal(clientId, defaultType) {
   </div>
 
   <div class="form-group">
-    <label style="display:flex;align-items:center;justify-content:space-between">
-      <span>Session Notes *</span>
-      <button type="button" id="sm-mic-btn" onclick="toggleVoiceInput('sm-text','sm-mic-btn')"
-        style="display:flex;align-items:center;gap:5px;background:var(--bg);border:1px solid var(--border);border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer;color:var(--text)">
-        🎤 Voice Input
-      </button>
-    </label>
-    <div id="sm-voice-status" style="font-size:11px;color:var(--muted);min-height:14px"></div>
+    <label>Session Notes *</label>
     <textarea id="sm-text" style="min-height:160px" placeholder="Client presentation, interventions used, client response, outcomes, next steps… Paste or drag a photo or screenshot straight in."></textarea>
   </div>
   <div class="form-group">
-    <label style="display:flex;align-items:center;justify-content:space-between">
-      <span>Follow-up / Action Required</span>
-      <button type="button" id="sm-fu-btn" onclick="toggleVoiceInput('sm-followup','sm-fu-btn')"
-        style="display:flex;align-items:center;gap:5px;background:var(--bg);border:1px solid var(--border);border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer;color:var(--text)">
-        🎤 Voice Input
-      </button>
-    </label>
+    <label>Follow-up / Action Required</label>
     <textarea id="sm-followup" style="min-height:60px" placeholder="Actions, referrals, next appointment, tasks…"></textarea>
   </div>
   <div class="form-group"><label>Follow-up Date (creates calendar reminder)</label>
@@ -9817,7 +9739,6 @@ function openSessionModal(clientId, defaultType) {
     if (document.querySelector('.rte[data-for="sm-text"] img[data-att^="pending"]')) { alert('A picture is still uploading \u2014 give it a moment, then press Save.'); return false; }
     const text = document.getElementById('sm-text')?.value?.trim();
     if(!text) { alert('Session notes required'); return false; }
-    stopVoiceInput();
 
     const sessionDate = document.getElementById('sm-date')?.value;
     const mins = parseInt(document.getElementById('sm-duration')?.value||'0');
@@ -15683,25 +15604,14 @@ function retention(c) {
   if (last < _addYears(dob, ADULT_AGE)) return { until: _addYears(dob, RETENTION_CHILD_AGE), why: `Under ${ADULT_AGE} at the last service (${fmt(last)}): keep until they turn ${RETENTION_CHILD_AGE}.` };
   return { until: seven, why: `${RETENTION_YEARS_ADULT} years after the last service (${fmt(last)}).` };
 }
-// Voice to text is done by the browser maker's speech service, outside the CMS.
-// The System Manager can switch it off for everyone; each worker sees the notice once.
-function voiceGate() {
-  if (privacyConfig.voiceOff) { showToast('Voice to text is switched off for Worn Gundidj (Settings → Privacy).'); return false; }
-  const key = String(currentUser?.email || currentUser?.name || '').toLowerCase(), acks = DB.load('voiceAck', {}) || {};
-  if (acks[key]) return true;
-  if (!confirm('Voice to text — please read\n\nYour browser turns speech into text by sending the sound to its maker\'s speech service (Google for Chrome, Microsoft for Edge). That happens outside the CMS and may be processed outside Australia.\n\n • Avoid saying a client\'s full name or other identifying details.\n • Don\'t use it where other people can be overheard.\n • Type instead if you are unsure.\n\nPress OK to use voice to text.')) return false;
-  acks[key] = now(); DB.save('voiceAck', acks); audit('Voice-to-text notice accepted', '');
-  return true;
-}
 function privacyContactText() { return String(privacyConfig.contact || '').trim() || 'the System Manager'; }
 async function savePrivacySettings() {
   if (currentUser?.role !== 'sysmanager') { showToast('Only the System Manager can change privacy settings'); return; }
-  const cfg = { voiceOff: !document.getElementById('pv-voice')?.checked, contact: (document.getElementById('pv-contact')?.value || '').trim().slice(0, 200), updatedBy: currentUser?.name || '', updatedAt: now() };
-  const was = !!privacyConfig.voiceOff;
+  const cfg = { contact: (document.getElementById('pv-contact')?.value || '').trim().slice(0, 200), updatedBy: currentUser?.name || '', updatedAt: now() };
   privacyConfig = cfg; DB.save('privacyConfig', cfg);
   let shared = false;
   try { if (FSYNC.isReady()) { await FSYNC.setAppConfig('privacy', cfg); shared = true; } } catch (e) { console.warn('Privacy settings not shared:', e.message); }
-  audit('Privacy settings changed', `Voice to text ${cfg.voiceOff ? 'off' : 'on'}${was !== cfg.voiceOff ? ' (changed)' : ''}${cfg.contact ? ', privacy contact set' : ''}${shared ? '' : ' (this device only)'}`);
+  audit('Privacy settings changed', `${cfg.contact ? 'Privacy contact set' : 'Privacy contact cleared'}${shared ? '' : ' (this device only)'}`);
   showToast(shared ? '✓ Privacy settings saved for all staff' : '⚠️ Saved on this device only — Cloud Sync isn\'t connected');
   showPage('settings');
 }
@@ -15719,7 +15629,6 @@ function privacyCardHTML() {
       ${row('Staff sign-in', 'Google sign-in service', 'Staff email addresses only; may be processed outside Australia.')}
       ${row('Text messages', 'ClickSend (only if automatic texts are switched on)', 'Mobile number and the words of the text.')}
       ${row('Outlook calendar and email', "Worn Gundidj's own Microsoft 365", 'Calendar entries carry first name and initial only. Emails are not stored in the CMS.')}
-      ${row('Voice to text', privacyConfig.voiceOff ? '<strong>Switched off</strong>' : "The browser maker's speech service (Google or Microsoft)", privacyConfig.voiceOff ? 'Nothing is sent.' : 'Spoken words; may be processed outside Australia. Each worker is shown a notice first.')}
     </table></div>
     <div style="font-size:12px;font-weight:700;margin:12px 0 4px">For Worn Gundidj to have in place</div>
     <ul style="font-size:12px;line-height:1.7;margin-left:18px;color:#374151">
@@ -15730,8 +15639,7 @@ function privacyCardHTML() {
       <li>Two-step sign-in for every staff member, and staff who know not to share logins or leave files open.</li>
     </ul>
     ${sys ? `<div style="background:var(--bg);border-radius:8px;padding:12px;margin-top:12px">
-      <label style="display:flex;gap:8px;align-items:center;font-size:13px;font-weight:400"><input type="checkbox" id="pv-voice" style="width:auto" ${privacyConfig.voiceOff ? '' : 'checked'}> Allow voice to text (🎤) on notes</label>
-      <div class="form-group" style="margin:10px 0 8px"><label for="pv-contact">Privacy contact shown in the policy</label><input id="pv-contact" maxlength="200" value="${sanitize(privacyConfig.contact || '')}" placeholder="e.g. Privacy Officer, 03 5561 5315, privacy@…"></div>
+      <div class="form-group" style="margin:0 0 8px"><label for="pv-contact">Privacy contact shown in the policy</label><input id="pv-contact" maxlength="200" value="${sanitize(privacyConfig.contact || '')}" placeholder="e.g. Privacy Officer, 03 5561 5315, privacy@…"></div>
       <button class="btn btn-sm btn-primary" onclick="savePrivacySettings()">Save privacy settings</button>
       ${privacyConfig.updatedBy ? `<span style="font-size:11px;color:var(--muted);margin-left:8px">Last changed by ${sanitize(privacyConfig.updatedBy)} · ${fmtdt(privacyConfig.updatedAt)}</span>` : ''}
     </div>` : ''}
@@ -15771,7 +15679,6 @@ function showPrivacyPolicy() {
         <li><strong>Staff sign-in</strong> (Google): staff email addresses, not client records.</li>
         <li><strong>Text messages</strong> (ClickSend), when used: the mobile number and the words of the text.</li>
         <li><strong>Outlook calendar and email</strong> (Worn Gundidj's Microsoft 365): calendar entries show a first name and initial only; emails staff send are held in their mailbox.</li>
-        <li><strong>Voice to text</strong>, when a worker uses it: the spoken words are processed by the web browser's speech service (Google or Microsoft). ${privacyConfig.voiceOff ? 'This is currently switched off.' : 'Staff are told not to dictate identifying details.'}</li>
       </ul>
       ${h('7. Seeing and correcting your information')}
       <p>You can ask to see the information we hold about you, and ask us to correct it. Contact ${sanitize(privacyContactText())}. We will respond within 30 days. Health records are not deleted when corrected: the correction is added to the record. If we cannot give access or make a change, we will explain why in writing, and you can ask for a statement of what you believe is correct to be kept with the record.</p>
@@ -17535,80 +17442,6 @@ function _aodHTML_comprehensive(){
     _afYN('ct_consent','Has the agency "consent to share information" form been completed?'))
 }
 
-// ===== VOICE TO TEXT =====
-const _voiceSupported = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
-let _voiceActive = null;
-
-function _attachVoiceButtons() {
-  if(!_voiceSupported || privacyConfig.voiceOff) return;
-  document.querySelectorAll('textarea:not([data-voice-attached])').forEach(ta => {
-    ta.dataset.voiceAttached = '1';
-    const wrap = document.createElement('div');
-    wrap.style.cssText = 'position:relative;display:block';
-    ta.parentNode.insertBefore(wrap, ta);
-    wrap.appendChild(ta);
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.title = 'Voice to text';
-    btn.style.cssText = 'position:absolute;bottom:6px;right:6px;background:none;border:none;cursor:pointer;font-size:18px;line-height:1;opacity:.5;transition:opacity .2s,color .2s;z-index:2';
-    btn.innerHTML = '🎤';
-    btn.onclick = () => _toggleVoice(ta, btn);
-    wrap.appendChild(btn);
-    ta.style.paddingBottom = '32px';
-  });
-}
-
-function _toggleVoice(ta, btn) {
-  if(_voiceActive) {
-    _voiceActive.recognition.stop();
-    return;
-  }
-  if(!voiceGate()) return;
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  const rec = new SR();
-  rec.lang = 'en-AU';
-  rec.continuous = true;
-  rec.interimResults = true;
-  const baseVal = ta.value;
-  let interim = '';
-  rec.onstart = () => {
-    btn.innerHTML = '🔴';
-    btn.style.opacity = '1';
-    btn.title = 'Stop recording';
-    _voiceActive = { recognition: rec, btn, ta };
-  };
-  rec.onresult = e => {
-    interim = '';
-    let final = baseVal + (baseVal && !baseVal.endsWith(' ') ? ' ' : '');
-    for(let i = e.resultIndex; i < e.results.length; i++) {
-      if(e.results[i].isFinal) final += e.results[i][0].transcript + ' ';
-      else interim += e.results[i][0].transcript;
-    }
-    ta.value = final + interim;
-    ta.dispatchEvent(new Event('input', {bubbles:true}));
-  };
-  rec.onfinal = () => {};
-  rec.onerror = rec.onend = () => {
-    btn.innerHTML = '🎤';
-    btn.style.opacity = '.5';
-    btn.title = 'Voice to text';
-    _voiceActive = null;
-  };
-  rec.start();
-}
-
-function _observeVoice() {
-  _attachVoiceButtons();
-  new MutationObserver(() => _attachVoiceButtons()).observe(
-    document.getElementById('main-content') || document.body,
-    { childList: true, subtree: true }
-  );
-  const modalContainer = document.getElementById('modal-container');
-  if(modalContainer) {
-    new MutationObserver(() => _attachVoiceButtons()).observe(modalContainer, { childList: true, subtree: true });
-  }
-}
-
 function initApp() {
   // Reveal the app chrome (sidebar, topbar, mobile nav) now that the user is authenticated.
   document.body.classList.add('app-authed');
@@ -17669,7 +17502,6 @@ function initApp() {
   // Unsaved note drafts from last time (e.g. an inactivity sign-out): say so.
   setTimeout(() => { try { _draftLoginNotice(); } catch(e) {} }, 1500);
   showPage('dashboard');
-  setTimeout(_observeVoice, 500);
   applySidebarBg();
 }
 

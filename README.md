@@ -205,7 +205,7 @@ red ✕ still deletes permanently.
   rows and columns); pictures (attached to the session); clear formatting;
   UPPER/lower/Sentence case; word count. Spell check is Australian English.
 * The original text box stays in the page, hidden, holding a **plain-text
-  copy** — so drafts, validation, voice input, reports, exports, search and
+  copy** — so drafts, validation, reports, exports, search and
   texts work unchanged. The formatted version is saved as `note.html` after
   `rteSanitize` (a short allow-list of tags and styles; scripts, images, links
   and event handlers are removed), and is sanitised again whenever shown.
@@ -362,7 +362,7 @@ or the **✍️ Consent forms** section of the file.
 A light-globe button floats at the bottom right of every page (above the
 phone menu bar; behind open windows, so it never covers a Save button). Any
 staff member can send the System Manager an idea for improving the CMS — a
-category, the idea (up to 2,000 characters, voice typing works) and,
+category, the idea (up to 2,000 characters) and,
 automatically, the screen they were on. It warns, without blocking, if an idea
 names a client or carries a phone number or email address.
 
