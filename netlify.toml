@@ -15,7 +15,7 @@
     # Only send referrer to same origin
     Referrer-Policy = "strict-origin-when-cross-origin"
     # Restrict permissions
-    Permissions-Policy = "camera=(), microphone=(self), geolocation=()"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=()"
     # Content Security Policy
     # - default: self only
     # - scripts: self (incl. self-hosted Firebase + Microsoft MSAL) + Google + reCAPTCHA (SMS MFA)

@@ -1,5 +1,5 @@
 // QA — privacy: no outside look-ups, what is left on a device after sign-out, the audit trail for
-// exports and deletions, voice-to-text notice and switch, record retention dates, privacy wording.
+// exports and deletions, voice to text removed, record retention dates, privacy wording.
 // Synthetic people only.
 const {start}=require('./harness.cjs'); const fs=require('fs'), path=require('path');
 const SITE=path.join(__dirname,'..','..','site');
@@ -46,23 +46,23 @@ const SEED=new Function('w',`
   const df=await audits('^Removed file from client record$');
   ok('P9 removing a file from a client record is audited with its name and type', df.length===1 && /Consent form\.pdf \(consent\)/.test(df[0].d));
 
-  // ---- voice to text ----
-  await p.evaluate(()=>{ DB.save('voiceAck',{}); }); dialogs=0;
-  const v1=await p.evaluate(()=>voiceGate()), d1=dialogs, v2=await p.evaluate(()=>voiceGate()), d2=dialogs;
-  ok('P10 the first use of voice to text shows a notice (speech goes to the browser maker\'s service); after that it is not repeated', v1===true && d1===1 && v2===true && d2===1 && (await audits('^Voice-to-text notice accepted$')).length===1);
+  // ---- voice to text has been removed (v118) ----
+  await p.evaluate(()=>{ closeModal(); openNoteModal && openNoteModal('a'); }); await T(300);
+  const vNote=await p.evaluate(()=>({ mic:document.querySelectorAll('#modal-container [id$="mic-btn"], #modal-container [id$="fu-btn"], .voice-btn').length, txt:document.querySelector('#modal-container')?.innerText||'' }));
+  await p.evaluate(()=>{ closeModal(); });
+  ok('P10 voice to text is gone: no 🎤 buttons on notes, and none of its code is left in the CMS', vNote.mic===0 && !/Voice Input|🎤/.test(vNote.txt) && await p.evaluate(()=>['toggleVoiceInput','stopVoiceInput','voiceGate','_attachVoiceButtons','_toggleVoice','_observeVoice'].every(f=>typeof window[f]==='undefined') && !document.querySelector('textarea[data-voice-attached]') && !/SpeechRecognition/.test([...document.scripts].map(s=>s.textContent).join(''))), JSON.stringify(vNote));
   await p.evaluate(()=>{ closeModal(); showPage('settings'); }); await T();
   ok('P11 Settings has a Privacy card saying where information goes — and no blanket "no overseas disclosure" claim', await p.evaluate(()=>{ const t=document.getElementById('privacy-card')?.innerText||''; return /Health Records Act 2001/.test(t) && /Sydney/.test(t) && /may be processed outside Australia/.test(t) && !/No overseas disclosure/i.test(document.getElementById('content').innerText); }));
-  await p.uncheck('#pv-voice'); await p.fill('#pv-contact','Privacy Officer, (03) 5550 0000'); await p.click('#privacy-card .btn-primary:has-text("Save privacy settings")'); await T(500);
+  ok('P11b the Privacy card no longer lists voice to text, and has no switch for it', await p.evaluate(()=>!/Voice to text/i.test(document.getElementById('privacy-card').innerText) && !document.getElementById('pv-voice')));
+  await p.fill('#pv-contact','Privacy Officer, (03) 5550 0000'); await p.click('#privacy-card .btn-primary:has-text("Save privacy settings")'); await T(500);
   const cfg=await p.evaluate(()=>window.__cloud.read('teams/worngundidj/appConfig').privacy);
-  ok('P12 the System Manager can switch voice to text off for everyone and set the privacy contact (shared, audited)', cfg && cfg.voiceOff===true && /Privacy Officer/.test(cfg.contact) && (await audits('^Privacy settings changed$')).length===1, JSON.stringify(cfg));
-  dialogs=0;
-  ok('P13 switched off → voice to text is refused, and no microphone buttons are added', await p.evaluate(()=>voiceGate()===false) && dialogs===0 && await p.evaluate(()=>{ const ta=document.createElement('textarea'); document.body.appendChild(ta); _attachVoiceButtons(); const had=!!ta.dataset.voiceAttached; ta.remove(); return !had; }));
+  ok('P12 the System Manager can set the privacy contact (shared, audited)', cfg && !('voiceOff' in cfg) && /Privacy Officer/.test(cfg.contact) && (await audits('^Privacy settings changed$')).length===1, JSON.stringify(cfg));
 
   // ---- privacy policy ----
   await p.evaluate(()=>showPrivacyPolicy()); await T();
   const pol=await p.evaluate(()=>document.getElementById('privacy-policy')?.innerText||'');
   ok('P14 the policy names both laws, the 7-year / age-25 retention rule, breach notification and both complaint bodies', /Privacy Act 1988/.test(pol) && /Health Records Act 2001/.test(pol) && /7 years/.test(pol) && /turns 25/.test(pol) && /Office of the Australian Information Commissioner/.test(pol) && /Health Complaints Commissioner/.test(pol) && /Data breaches/i.test(pol));
-  ok('P15 it is accurate about overseas handling and uses the privacy contact that was set', /Information handled outside Australia/i.test(pol) && !/no cross-border disclosure/i.test(pol) && !/IP address/i.test(pol) && /Privacy Officer, \(03\) 5550 0000/.test(pol) && /currently switched off/.test(pol));
+  ok('P15 it is accurate about overseas handling (no voice to text any more) and uses the privacy contact that was set', /Information handled outside Australia/i.test(pol) && !/no cross-border disclosure/i.test(pol) && !/IP address/i.test(pol) && /Privacy Officer, \(03\) 5550 0000/.test(pol) && !/voice to text/i.test(pol));
   await p.evaluate(()=>closeModal());
 
   // ---- retention ----
