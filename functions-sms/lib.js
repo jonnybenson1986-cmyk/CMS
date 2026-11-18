@@ -58,8 +58,18 @@ function smsParts(text) {
 
 // First name only, letters/spaces/hyphens/apostrophes — whatever is on file,
 // the text can't carry anything else. Accents are dropped (they would cost UCS-2).
+// Client names are recorded surname first ("Burns Jason"): the preferred name if there is one, else the
+// name after a comma ("Burns, Jason"), else the second word. Same rule as site/index.html clientGivenName.
+const _nameWords = s => String(s || '').replace(/<[^>]*>/g, ' ').replace(/"[^"]*"/g, ' ').trim().split(/\s+/).filter(Boolean);
+function givenName(client) {
+  const pref = _nameWords(client.preferredName)[0]; if (pref) return pref;
+  const full = String(client.fullName || '');
+  if (full.includes(',')) { const after = _nameWords(full.slice(full.indexOf(',') + 1).replace(/,/g, ' '))[0]; if (after) return after; }
+  const w = _nameWords(full.replace(/,/g, ' '));
+  return w.length >= 2 ? w[1] : (w[0] || '');
+}
 function firstName(client, max) {
-  const raw = String(client.preferredName || client.fullName || '').replace(/<[^>]*>/g, ' ').replace(/"[^"]*"/g, ' ').trim().split(/\s+/)[0] || '';
+  const raw = givenName(client || {});
   const clean = raw.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z'\-]/g, '').slice(0, max || 20);
   return clean || 'there';
 }
@@ -181,5 +191,5 @@ async function sendViaProvider(provider, creds, to, body, fetchImpl) {
   return data.sid;
 }
 
-module.exports = { teamLinkPart, auMobile, toE164, maskPhone, firstName, handbookMessage, intakeMessage, toGsm, smsParts, budgetMonth, processRequest, providerRequest, sendViaProvider,
+module.exports = { givenName, teamLinkPart, auMobile, toE164, maskPhone, firstName, handbookMessage, intakeMessage, toGsm, smsParts, budgetMonth, processRequest, providerRequest, sendViaProvider,
   HOURLY_CAP, DEFAULT_MONTHLY_BUDGET, DEFAULT_COST_PER_PART };

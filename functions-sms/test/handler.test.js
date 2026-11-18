@@ -90,7 +90,7 @@ test('intake link: texted once, only for that client, only while open', async ()
   const { store, snap, db } = memoryFirestore();
   const T = 'teams/worngundidj', LINK = 'AbCdEfGhIjKlMnOpQrStUv';
   store.set(T + '/staff/list', { list: [{ email: 'a@b.org' }] });
-  store.set(T + '/clients/c1', { fullName: 'Jordan Citizen', phone: '0491570156', ifSafeContact: 'Yes' });
+  store.set(T + '/clients/c1', { fullName: 'Citizen Jordan', phone: '0491570156', ifSafeContact: 'Yes' });   // recorded surname first
   store.set(T + '/clients/c2', { fullName: 'Riley Tester', phone: '0491570157', ifSafeContact: 'Yes' });
   store.set(T + '/intakeForms/f1', { linkId: LINK, clientId: 'c1', status: 'open', expiresAtIso: new Date(Date.now() + 7 * 864e5 - 60000).toISOString() });
   store.set(T + '/intakeForms/f2', { linkId: 'OldLinkOldLinkOldLink1', clientId: 'c1', status: 'open', expiresAtIso: new Date(Date.now() - 1000).toISOString() });

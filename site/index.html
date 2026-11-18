@@ -1337,7 +1337,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v119';
+const APP_VERSION = 'v120';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -3247,8 +3247,8 @@ function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
     <div class="card">
       <div class="card-header"><div class="card-title" style="color:#7c2d12">📋 Personal Details</div></div>
       <div class="grid-3">
-        <div class="form-group"><label>First Name</label><input id="wf-firstName" value="${sanitize(wf.firstName||c.fullName?.split(' ')[0]||'')}"></div>
-        <div class="form-group"><label>Last Name</label><input id="wf-lastName" value="${sanitize(wf.lastName||c.fullName?.split(' ').slice(1).join(' ')||'')}"></div>
+        <div class="form-group"><label>First Name</label><input id="wf-firstName" value="${sanitize(wf.firstName||clientGivenName({fullName:c.fullName})||'')}"></div>
+        <div class="form-group"><label>Last Name</label><input id="wf-lastName" value="${sanitize(wf.lastName||clientSurname(c)||'')}"></div>
         <div class="form-group"><label>Other Names</label><input id="wf-otherNames" value="${sanitize(wf.otherNames||'')}"></div>
         <div class="form-group"><label>Preferred Name</label><input id="wf-preferredName" value="${sanitize(wf.preferredName||c.preferredName||'')}"></div>
         <div class="form-group"><label>Contact Number</label><input id="wf-phone" value="${sanitize(wf.phone||c.phone||'')}"></div>
@@ -5359,7 +5359,7 @@ function renderCultural() {
     });
     // Merge first+last into fullName if no fullName
     if(!obj.fullName && (obj._firstName || obj._lastName)) {
-      obj.fullName = [obj._firstName||'', obj._lastName||''].join(' ').trim();
+      obj.fullName = [obj._lastName||'', obj._firstName||''].join(' ').trim();   // surname first, as names are recorded
     }
     delete obj._firstName; delete obj._lastName;
     return obj;
@@ -6596,7 +6596,7 @@ function parseImportText(raw) {
   const records = [], notImported = new Set();
   const finish = r => {
     if (!r) return;
-    if (!r.fullName && (r.firstName || r.surname)) r.fullName = [r.firstName, r.surname].filter(Boolean).join(' ');
+    if (!r.fullName && (r.firstName || r.surname)) r.fullName = [r.surname, r.firstName].filter(Boolean).join(' ');   // surname first, as names are recorded
     delete r.firstName; delete r.surname;
     if (Object.keys(r).length) records.push(r);
   };
@@ -12814,9 +12814,8 @@ async function _getOutlookToken(forceRefresh) {
 function _hhmm(t, d) { return /^\d{1,2}:\d{2}$/.test(String(t || '')) ? String(t).padStart(5, '0') : d; }
 function _shortClientName(c) {
   if (!c) return '';
-  const parts = String(c.preferredName || c.fullName || '').replace(/"[^"]*"/g, ' ').trim().split(/\s+/);
-  const surname = String(c.fullName || '').replace(/"[^"]*"/g, ' ').trim().split(/\s+/).pop() || '';
-  return parts[0] ? parts[0] + (surname && surname !== parts[0] ? ' ' + surname[0] + '.' : '') : '';
+  const first = clientGivenName(c), surname = clientSurname(c);           // names are recorded surname first
+  return first ? first + (surname && surname !== first ? ' ' + surname[0] + '.' : '') : '';
 }
 // My appointments (as worker or second worker) for today or this week.
 function outlookCmsEvents(kind) {
@@ -14138,8 +14137,27 @@ function toGsmText(t) {
     .replace(/[–—−]/g, '-').replace(/…/g, '...').replace(/[   ]/g, ' ')
     .normalize('NFD').replace(/[̀-ͯ]/g, '');
 }
+// ===== A client's first name =====
+// Client names are recorded SURNAME FIRST ("Burns Jason"). Greetings in emails and texts use the
+// person's first name: their preferred name if one is recorded; otherwise the name after a comma
+// ("Burns, Jason" → Jason); otherwise the second word ("Burns Jason" → Jason). A one-word name is
+// used as it is. Words in quotes (a nickname) and any HTML are ignored, as before.
+// The text service (functions-sms/lib.js firstName) uses the same rule — a test checks they agree.
+function _nameWords(s) { return String(s || '').replace(/<[^>]*>/g, ' ').replace(/"[^"]*"/g, ' ').trim().split(/\s+/).filter(Boolean); }
+function clientGivenName(c) {
+  if (!c) return '';
+  const pref = _nameWords(c.preferredName)[0]; if (pref) return pref;
+  const full = String(c.fullName || '');
+  if (full.includes(',')) { const after = _nameWords(full.slice(full.indexOf(',') + 1).replace(/,/g, ' '))[0]; if (after) return after; }
+  const w = _nameWords(full.replace(/,/g, ' '));
+  return w.length >= 2 ? w[1] : (w[0] || '');
+}
+function clientSurname(c) {
+  const full = String((c && c.fullName) || '');
+  return _nameWords(full.includes(',') ? full.slice(0, full.indexOf(',')) : full)[0] || '';
+}
 function smsFirstName(c, max) {
-  const raw = String(c.preferredName || c.fullName || '').replace(/"[^"]*"/g, ' ').trim().split(/\s+/)[0] || '';
+  const raw = clientGivenName(c);
   return toGsmText(raw).replace(/[^A-Za-z'\-]/g, '').slice(0, max || 20) || 'there';
 }
 function _ifB64url(bytes) { return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
@@ -17883,7 +17901,7 @@ function feedbackDue(c) {
   return due;
 }
 function feedbackMessage(c, point) {
-  const first = String(c.preferredName || c.fullName || '').trim().split(/\s+/)[0] || 'there';
+  const first = clientGivenName(c) || 'there';
   const me = (currentUser?.name || '').split(' ')[0] || 'your worker';
   return `Hi ${first}, it's ${me} from Worn Gundidj. We'd like to know how we're going for you. You can just reply to this message — it's fine to skip any question, and you don't have to answer at all.\n\n`
     + QF_QUESTIONS.map((q, i) => `${i + 1}. ${q.q} (${q.a.join(' / ')})`).join('\n')

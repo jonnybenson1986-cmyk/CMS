@@ -1,14 +1,14 @@
 // QA — consent forms and signatures in the CMS (staff side): making and sending the link (copy, text, email,
 // open on this device), the client signing (simulated in the cloud), checking and filing the signed form on the
 // profile, the intake ticks, printing in the WG style, and the client's signature on the intake.
-// Synthetic people only.
+// Synthetic people only. Client names are recorded surname first, as in the CMS.
 const {start}=require('./harness.cjs'); const crypto=require('crypto');
 const sha=t=>crypto.createHash('sha256').update(t).digest('hex'), T='teams/worngundidj/';
 const PNG='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
 const SEED=new Function('w',`
-  w('clients','a',{id:'a',fullName:'Jordan Citizen',status:'active',sewb:true,dob:'1985-03-14',phone:'0491 570 156',email:'jordan.citizen@example.com',ifSafeContact:'Yes',created:'2026-09-01T09:00'});
+  w('clients','a',{id:'a',fullName:'Citizen Jordan',status:'active',sewb:true,dob:'1985-03-14',phone:'0491 570 156',email:'jordan.citizen@example.com',ifSafeContact:'Yes',created:'2026-09-01T09:00'});
   w('clients','d',{id:'d',fullName:'Dana Older-Form',status:'active',sewb:true,created:'2026-01-01T09:00'});
-  w('clients','b',{id:'b',fullName:'Alex Sample',status:'active',sewb:true,created:'2026-01-01T09:00'});
+  w('clients','b',{id:'b',fullName:'Sample Alex',status:'active',sewb:true,created:'2026-01-01T09:00'});
   w('clients','x',{id:'x',fullName:'Casey <img src=x onerror=window.__xss=1> Example',status:'active',sewb:true,dob:'1990-01-01',created:'2026-01-01T09:00'});
 `);
 const ANS={collect:'Yes',programs:'Yes',audit:'No',video:'Yes',transport:'No',understood:true,questions:true,voluntary:true,limits:true,change:true};
@@ -123,7 +123,7 @@ const ANS_V1={collect:'Yes',programs:'Yes',audit:'No',external:'Yes',video:'Yes'
   const recB=await p.evaluate(()=>{ const c=clients.find(x=>x.id==='b'); const r=c.consentRecords[0]; return { role:r.role, rel:r.relationship, sup:r.supportPerson, img:'image' in r, sig:c.ifClientSig }; });
   ok('K28 filed: the record keeps the role, relationship and support person; no image for a typed name; the signature note reads "Pat Guardian (mother)"', recB.role==='representative' && recB.rel==='mother' && recB.sup==='Interpreter Lee' && recB.img===false && recB.sig==='Pat Guardian (mother)', JSON.stringify(recB));
   await p.evaluate(()=>{ window.__reports.length=0; printConsentRecord('b',clients.find(x=>x.id==='b').consentRecords[0].id); });
-  { const r=await p.evaluate(()=>window.__reports.join('')); ok('K29 its printout says they signed for the client as their mother, in a signature font', /signing for Alex Sample, as their mother/.test(r) && /Brush Script MT/.test(r) && !/class="box sig"><img/.test(r), (r.match(/Signature<\/h2>[\s\S]{0,700}/)||['(no signature section) '+r.slice(0,200)])[0]); }
+  { const r=await p.evaluate(()=>window.__reports.join('')); ok('K29 its printout says they signed for the client as their mother, in a signature font', /signing for Sample Alex, as their mother/.test(r) && /Brush Script MT/.test(r) && !/class="box sig"><img/.test(r), (r.match(/Signature<\/h2>[\s\S]{0,700}/)||['(no signature section) '+r.slice(0,200)])[0]); }
   const idX=await make('x','1990-01-01');
   await submit(idX,{answers:{...ANS,collect:undefined}}); await T0(500);
   await p.evaluate(()=>{ const f=consentForms.find(x=>x.clientId==='x'); delete f.answers.collect; }); await p.evaluate(id=>fileConsentForm(id),idX); await T0(200);
@@ -147,7 +147,7 @@ const ANS_V1={collect:'Yes',programs:'Yes',audit:'No',external:'Yes',video:'Yes'
 
   // ---- the client's signature on the intake ----
   await p.evaluate(({T,PNG})=>{ const id='intakeform-a'; window.__cloud.write(T+'intakeLinks','L1ntakeL1ntakeL1ntake',{status:'submitted',expiresAt:new Date(Date.now()+864e5).toISOString()});
-    window.__cloud.write(T+'intakeForms',id,{linkId:'L1ntakeL1ntakeL1ntake',clientId:'a',status:'submitted',expiresAtIso:new Date(Date.now()+864e5).toISOString(),submittedAt:new Date().toISOString(),answers:{fullName:'Jordan Citizen',preferredName:'Jordy',declaration:true},signature:{method:'drawn',name:'Jordan Citizen',image:PNG,at:new Date().toISOString(),role:'self'}}); },{T,PNG}); await T0(600);
+    window.__cloud.write(T+'intakeForms',id,{linkId:'L1ntakeL1ntakeL1ntake',clientId:'a',status:'submitted',expiresAtIso:new Date(Date.now()+864e5).toISOString(),submittedAt:new Date().toISOString(),answers:{fullName:'Citizen Jordan',preferredName:'Jordy',declaration:true},signature:{method:'drawn',name:'Jordan Citizen',image:PNG,at:new Date().toISOString(),role:'self'}}); },{T,PNG}); await T0(600);
   await p.evaluate(()=>openIntakeReviewModal('intakeform-a')); await T0();
   { const d=await p.evaluate(()=>({img:!!document.querySelector('#if-signature img[alt^="Signature"]'), box:!!document.getElementById('if-signature'), txt:(document.getElementById('if-signature')||{innerText:''}).innerText, modal:document.querySelector('#modal-container .modal-body')?.innerText.slice(0,300)})); ok('K33 the intake review shows the client\'s signature, name and when', d.img && /signed by the client on screen/i.test(d.txt) && /Jordan Citizen/.test(d.txt), JSON.stringify(d)); }
   await p.click('#if-apply'); await T0(700);
