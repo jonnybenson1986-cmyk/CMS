@@ -69,7 +69,7 @@ test('provider error is recorded as failed', async () => {
   assert.equal(r.status, 'failed'); assert.match(r.reason, /insufficient credit/);
 });
 test('first name is cleaned (no quotes, symbols or long text)', () => {
-  assert.equal(lib.firstName({ fullName: 'Taylor "Sam" Samantha' }), 'Taylor');
+  assert.equal(lib.firstName({ fullName: 'Taylor "Sam" Samantha' }), 'Samantha');   // surname first; the quoted nickname is ignored
   assert.equal(lib.firstName({ preferredName: '<b>Jo</b>', fullName: 'x' }), 'Jo');
   assert.equal(lib.firstName({ fullName: '' }), 'there');
 });
@@ -108,7 +108,7 @@ test('every text is plain GSM and ONE SMS (160 chars) — the old dash made it 4
   assert.equal(lib.smsParts(i), 1, i);
   assert.equal(lib.smsParts('a\u2014b'), 1); assert.equal(lib.smsParts('x'.repeat(71) + '\u2014'), 2);   // UCS-2: 70 per SMS
   assert.equal(lib.smsParts('x'.repeat(161)), 2); assert.equal(lib.toGsm('it\u2019s \u201Cok\u201D \u2014 fine\u2026'), 'it\'s "ok" - fine...');
-  assert.equal(lib.firstName({ fullName: 'Zoë Smith' }), 'Zoe');
+  assert.equal(lib.firstName({ fullName: 'Smith Zoë' }), 'Zoe');
 });
 test('monthly budget: refuses a text that would go over, says so plainly', async () => {
   const d = deps({ monthSpend: async () => 9.95, monthlyBudget: 10, costPerPart: 0.10 });
@@ -133,4 +133,25 @@ test('team link part agrees with the CMS (site/teams.js): Worn Gundidj unchanged
   assert.equal(lib.teamLinkPart(undefined, L), L);
   assert.equal(lib.teamLinkPart('../evil', L), L);
   for (const id of TEAMS.IDS) assert.deepEqual(TEAMS.parseLink('#' + lib.teamLinkPart(id, L)), { team: id, token: L });
+});
+
+// ── names are recorded surname first: greet people by their first name ──
+test('greeting name: preferred name, else after a comma, else the second word (names are recorded surname first)', () => {
+  assert.equal(lib.firstName({ fullName: 'Burns Jason' }), 'Jason');
+  assert.equal(lib.firstName({ fullName: 'Burns Jason Michael' }), 'Jason');
+  assert.equal(lib.firstName({ fullName: 'Burns, Jason' }), 'Jason');
+  assert.equal(lib.firstName({ fullName: 'Burns,Jason' }), 'Jason');
+  assert.equal(lib.firstName({ fullName: 'Burns Jason', preferredName: 'Jase' }), 'Jase');
+  assert.equal(lib.firstName({ fullName: 'Burns' }), 'Burns');
+  assert.equal(lib.firstName({ fullName: '   ' }), 'there');
+  assert.equal(lib.firstName({ fullName: "O'Brien Mary-Anne" }), "Mary-Anne");
+});
+test('greeting name: the text service and the CMS use exactly the same rule', () => {
+  const src = require('fs').readFileSync(require('path').join(__dirname, '../../site/index.html'), 'utf8');
+  const grab = re => { const m = src.match(re); assert.ok(m, 'not found: ' + re); return m[0]; };
+  const code = grab(/function _nameWords\(s\)[^\n]*\n/) + grab(/function clientGivenName\(c\) \{[\s\S]*?\n\}\n/);
+  const cms = new Function(code + '; return clientGivenName;')();
+  const cases = [{ fullName: 'Burns Jason' }, { fullName: 'Burns, Jason' }, { fullName: 'Burns Jason Michael' }, { fullName: 'Burns' }, { fullName: 'Burns Jason', preferredName: 'Jase' },
+    { fullName: 'Taylor "Sam" Samantha' }, { fullName: '<b>Smith</b> Zoe' }, { fullName: '' }, { fullName: 'Lee,  Ann  Marie' }, { preferredName: '  ', fullName: 'Ng Tom' }];
+  for (const c of cases) assert.equal(lib.givenName(c), cms(c), JSON.stringify(c));
 });

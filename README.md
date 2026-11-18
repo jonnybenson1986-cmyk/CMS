@@ -402,6 +402,16 @@ domains so the email's "Continue" button returns to the CMS.
 Roles sync across devices through the `staff` collection, so a role belongs to
 the person rather than the browser they signed in on.
 
+**Reports — the Key Worker rule.** A report for a worker covers only the clients
+where they are the **current Key Worker** (the Key Worker on the client's file
+today). Having seen a client, or written a note or time for them, does not count.
+Every record on those clients is included, whoever wrote it. Case Workers and
+Reception can only run reports on their own Key Worker clients (every report,
+including the funding reports and single-client reports); System Managers, Admins
+and Supervisors can run them for everyone or pick a Key Worker. A client hidden
+from the person running a report (restricted file, conflict of interest) is never
+in it. Tests: `tests/browser/reports.cjs`.
+
 > **These roles are enforced in the browser only.** The deployed rules grant any
 > signed-in staff account read and write access to every collection. Role-based
 > access becomes a real security boundary only once the Cloud Functions and
