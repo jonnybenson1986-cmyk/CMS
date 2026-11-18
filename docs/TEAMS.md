@@ -50,8 +50,10 @@ is locked out on the day this is released:
 2. **Lock.** When the Teams card shows everyone has signed in, press
    **🔒 Lock: listed accounts only**. From then on a sign-in that is not in the
    list opens nothing at all. The card names anyone who has not signed in yet,
-   so you can see who locking would shut out (you can tick them in afterwards).
-   You can unlock again.
+   so you can see who locking would shut out. If one of them tries to sign in
+   after the lock, nothing opens for them, but their account appears in the
+   list as "Asked to be added" — tick a team to let them in (only if you know
+   the person; anyone else, leave unticked). You can unlock again.
 
 Lock it once everyone is listed — until then, an old sign-in nobody remembers
 would still open Worn Gundidj.

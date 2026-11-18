@@ -436,6 +436,7 @@ for (const file of Object.keys(RULES)) {
   await check(f + ' teams: an account from before teams (no membership yet) still works as Worn Gundidj — and cannot reach the other teams', Promise.all([
     assertSucceeds(getDocs(collection(fresh, T + '/clients'))), assertSucceeds(setDoc(doc(fresh, T + '/clients/fr1'), client('fr1'))),
     assertFails(getDocs(collection(fresh, TT + '/clients'))), assertFails(getDocs(collection(fresh, TS + '/clients'))), assertFails(setDoc(doc(fresh, TT + '/clients/fr1'), client('fr1')))]));
+  await check(f + ' teams: before the lock, an account cannot leave an empty entry for itself (that would only shut itself out)', assertFails(setDoc(doc(fresh2, M('t-fresh2')), mem([], 'fresh2@x.org', { addedBy: 'fresh2@x.org' }))));
   await check(f + ' teams: it can record its own membership as Worn Gundidj — but not as another team, as a manager, for someone else, or under another email', Promise.all([
     assertFails(setDoc(doc(fresh, M('t-fresh')), mem(['test'], 'fresh@x.org'))),
     assertFails(setDoc(doc(fresh, M('t-fresh')), mem(['worngundidj', 'test'], 'fresh@x.org'))),
@@ -454,6 +455,17 @@ for (const file of Object.keys(RULES)) {
     await assertFails(getDocs(collection(fresh2, T + '/clients'))); await assertFails(getDoc(doc(fresh2, T + '/clients/seed')));
     await assertFails(setDoc(doc(fresh2, T + '/clients/late'), client('late')));
     await assertFails(setDoc(doc(fresh2, M('t-fresh2')), mem(['worngundidj'], 'fresh2@x.org')));
+    // …but it can leave a request to be added: an entry with NO teams, for itself, under its own email — which opens nothing
+    const knock = as('t-knock', 'knock@x.org');
+    await assertFails(setDoc(doc(knock, M('t-knock')), mem(['test'], 'knock@x.org', { addedBy: 'knock@x.org' })));
+    await assertFails(setDoc(doc(knock, M('t-knock')), mem([], 'knock@x.org', { addedBy: 'knock@x.org', manager: true })));
+    await assertFails(setDoc(doc(knock, M('t-knock')), mem([], 'someoneelse@x.org', { addedBy: 'knock@x.org' })));
+    await assertFails(setDoc(doc(knock, M('t-other2')), mem([], 'knock@x.org', { addedBy: 'knock@x.org' })));
+    await assertSucceeds(setDoc(doc(knock, M('t-knock')), mem([], 'knock@x.org', { addedBy: 'knock@x.org' })));
+    await assertFails(getDocs(collection(knock, T + '/clients'))); await assertFails(getDocs(collection(knock, TT + '/clients')));
+    await assertFails(updateDoc(doc(knock, M('t-knock')), { teams: ['worngundidj'] }));
+    await assertSucceeds(updateDoc(doc(owner, M('t-knock')), { teams: ['worngundidj'], updatedBy: OWNER, updatedAt: '2026-11-17T03:00:00.000Z' }));
+    await assertSucceeds(getDocs(collection(knock, T + '/clients'))); await assertFails(getDocs(collection(knock, TT + '/clients')));
     await assertFails(getDocs(collection(wkr, T + '/clients')));                                   // the older test accounts have no membership either
     await assertSucceeds(getDocs(collection(wgM, T + '/clients'))); await assertSucceeds(getDocs(collection(fresh, T + '/clients')));
     await assertSucceeds(getDocs(collection(testM, TT + '/clients'))); await assertSucceeds(getDocs(collection(owner, T + '/clients')));

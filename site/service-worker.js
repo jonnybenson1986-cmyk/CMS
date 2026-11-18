@@ -1,4 +1,4 @@
-const CACHE_NAME = 'wg-cms-v116';
+const CACHE_NAME = 'wg-cms-v117';
 
 self.addEventListener('install', e => {
   // Take control immediately — don't wait for old SW to finish
@@ -49,11 +49,27 @@ self.addEventListener('fetch', e => {
     return;
   }
 
+  // The app's own scripts and styles (teams.js, vpr.js, the consent wording, the form styles…)
+  // change with releases, and index.html is always fetched fresh — so these are too. Otherwise a
+  // new index.html could run, for one load, with the last release's helpers. The stored copy is
+  // only the fallback when there is no connection. The big third-party files in /vendor/ don't
+  // change between releases and stay cache-first.
+  if (!url.pathname.startsWith('/vendor/') && /\.(js|css)$/.test(url.pathname)) {
+    e.respondWith(
+      fetch(e.request).then(resp => {
+        if (resp && resp.ok) { const clone = resp.clone(); caches.open(CACHE_NAME).then(c => c.put(e.request, clone)); }
+        return resp;
+      }).catch(() => caches.match(e.request).then(cached => cached || Response.error()))
+    );
+    return;
+  }
+
   // Other same-origin assets — cache first, network fallback
   e.respondWith(
     caches.match(e.request).then(cached => {
       if (cached) return cached;
       return fetch(e.request).then(resp => {
+        if (!resp || !resp.ok) return resp;          // never store an error page as if it were the file
         const clone = resp.clone();
         caches.open(CACHE_NAME).then(c => c.put(e.request, clone));
         return resp;

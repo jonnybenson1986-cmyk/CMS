@@ -5,7 +5,7 @@ rules_version = '2';
 // (or `firebase deploy --only storage` if using the CLI).
 //
 // Baseline posture: only signed-in staff (email/password accounts) can read or
-// write team files. This matches what is currently live (verified: anonymous =
+// write team files — and only the files of a team they belong to (see inTeam below). This matches what is currently live (verified: anonymous =
 // 403). Client attachments (proof of income, COA, pre-approval) and resource
 // files live under teams/{teamId}/**.
 //

@@ -74,6 +74,10 @@ const SEED=new Function('w',`
   // a manager's own declaration
   await openFile('b'); await p.click('#coi-declare-btn'); await W(250);
   ok('K22 a manager can record one for someone else (person list) — or for themselves', await p.evaluate(()=>!document.getElementById('coi-person').disabled && [...document.getElementById('coi-person').options].some(o=>/Sam Worker/.test(o.text)) && /Jon Benson \(me\)/.test(document.getElementById('coi-person').selectedOptions[0].text)));
+  ok('K22a declaring for themselves, a manager can\'t set how it is managed — the boxes are switched off and it says another manager will review', await p.evaluate(()=>document.getElementById('coi-m-hideFile').disabled && document.getElementById('coi-status').disabled && getComputedStyle(document.getElementById('coi-self-note')).display!=='none'));
+  await p.selectOption('#coi-person','sam.worker@worngundidj.org.au'); await W(100);
+  ok('K22b …recording one for a worker, they can', await p.evaluate(()=>!document.getElementById('coi-m-hideFile').disabled && getComputedStyle(document.getElementById('coi-self-note')).display==='none'));
+  await p.selectOption('#coi-person','jon.benson@worngundidj.org.au'); await W(100);
   await p.fill('#coi-interest','I sit on a board with Alex.'); await p.selectOption('#coi-connection','community'); await p.evaluate(()=>handleModalSave()); await W(600);
   await p.evaluate(()=>{ closeModal(); coiSetTab('open'); }); await W(300);
   ok('K23 a manager\'s own declaration goes on the register as "About you" — they can\'t review their own', await p.evaluate(()=>{ const r=[...document.querySelectorAll('#coi-table .coi-row')].find(x=>/Alex Sample/.test(x.innerText)); return !!r && /About you/.test(r.innerText) && !r.querySelector('.coi-review'); }));

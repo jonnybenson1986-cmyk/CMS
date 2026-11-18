@@ -1337,7 +1337,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v116';
+const APP_VERSION = 'v117';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -16293,7 +16293,13 @@ async function _teamAccess(user) {
   teamsLocked = await lockP;
   if (snap.exists) { const d = snap.data() || {}; return { teams: (Array.isArray(d.teams) ? d.teams : []).filter(WG_TEAMS.valid), known: true, member: d }; }
   if (teamsLocked === null) return { teams: [ACTIVE_TEAM], known: false };
-  if (teamsLocked) return { teams: [], known: true };
+  if (teamsLocked) {
+    // Locked and not listed: nothing opens. Leave a request (an entry with no teams) so the owner
+    // sees this account in Settings → Teams and can tick it in.
+    let asked = false;
+    try { await _memberRef(user.uid).set({ teams: [], email, addedBy: email, addedAt: new Date().toISOString() }); asked = true; } catch (e) { console.warn('Team request:', e.code || e.message); }
+    return { teams: [], known: true, asked };
+  }
   // An account from before teams existed: it is Worn Gundidj staff. Record that, so the owner
   // can see everyone who has moved across before locking.
   const entry = { teams: [WG_TEAMS.DEFAULT], email, addedBy: email, addedAt: new Date().toISOString() };
@@ -16312,7 +16318,7 @@ async function _finishSignIn(user, email, resumed) {
   const access = await _teamAccess(user);
   if (!access.teams.length) {
     try { await firebase.auth().signOut(); } catch (_) {}
-    throw Object.assign(new Error('This account is not in any team'), { code: 'wg/no-team' });
+    throw Object.assign(new Error('This account is not in any team'), { code: access.asked ? 'wg/no-team-asked' : 'wg/no-team' });
   }
   const team = WG_TEAMS.pick(access.teams, ACTIVE_TEAM);
   if (team !== ACTIVE_TEAM) {
@@ -16369,7 +16375,7 @@ function _resumeTeamSignIn() {
       await _finishSignIn(user, user.email, true);
     } catch (e) {
       console.warn('Team resume:', e);
-      reset(e && e.code === 'wg/no-team' ? 'Your account has not been added to a team yet. Ask your System Manager to add you.' : 'Please sign in again.');
+      reset(e && /^wg\/no-team/.test(e.code || '') ? 'Your account has not been added to a team yet. Ask your System Manager to add you.' : 'Please sign in again.');
     }
   })();
 }
@@ -16456,7 +16462,7 @@ function teamsRender() {
       <tbody>
         <tr><td style="${td}"><strong>${sanitize(currentUser.email)}</strong><br><span style="font-size:11px;color:var(--muted)">Owner</span></td>${WG_TEAMS.LIST.map(() => `<td style="${td};text-align:center">✓</td>`).join('')}<td style="${td};text-align:center">✓</td></tr>
         ${_teamsRows.filter(r => !_isOwnerEmail(r.email)).map(r => `<tr data-uid="${sanitize(r.uid)}">
-          <td style="${td}"><strong>${sanitize(r.email || r.uid)}</strong>${r.name ? `<br><span style="font-size:11px;color:var(--muted)">${sanitize(r.name)}</span>` : ''}${!(r.teams || []).length ? `<br><span style="font-size:11px;color:#b91c1c">No team — cannot open anything</span>` : ''}</td>
+          <td style="${td}"><strong>${sanitize(r.email || r.uid)}</strong>${r.name ? `<br><span style="font-size:11px;color:var(--muted)">${sanitize(r.name)}</span>` : ''}${!(r.teams || []).length ? `<br><span class="tm-noteam" style="font-size:11px;color:#b91c1c">${r.addedBy && r.addedBy === r.email && !r.updatedBy ? 'Asked to be added — tick a team to let them in (only if you know this person)' : 'No team — cannot open anything'}</span>` : ''}</td>
           ${WG_TEAMS.LIST.map(t => `<td style="${td};text-align:center"><input type="checkbox" class="tm-team" data-team="${t.id}" ${(r.teams || []).includes(t.id) ? 'checked' : ''} onchange="teamsSetMember('${sanitize(r.uid)}')" aria-label="${sanitize(r.email || '')} in ${sanitize(t.name)}"></td>`).join('')}
           <td style="${td};text-align:center"><input type="checkbox" class="tm-mgr" ${r.manager === true ? 'checked' : ''} onchange="teamsSetMember('${sanitize(r.uid)}')" aria-label="${sanitize(r.email || '')} can add staff"></td></tr>`).join('')}
       </tbody></table></div>
@@ -16467,7 +16473,7 @@ function teamsRender() {
         ? `<div style="background:#d1fae5;border:1px solid #6ee7b7;color:#065f46;border-radius:8px;padding:10px 12px">🔒 <strong>Locked.</strong> Only the accounts listed above can open a team. A sign-in that is not listed gets nothing.
             <div style="margin-top:8px"><button class="btn btn-sm btn-outline" id="teams-unlock-btn" onclick="teamsSetLock(false)">Unlock</button></div></div>`
         : `<div style="background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:8px;padding:10px 12px">🔓 <strong>Moving in.</strong> Accounts from before teams still open Worn Gundidj, and are added to this list the next time they sign in. When everyone is listed, lock it — after that, only listed accounts can open anything.
-            ${waiting.length ? `<div id="teams-waiting" style="margin-top:6px">Not signed in since teams were added (${waiting.length}): ${waiting.map(u => sanitize(u.name || u.email)).join(', ')}. If you lock now they will be shut out until you tick them in.</div>` : (ACTIVE_TEAM === WG_TEAMS.DEFAULT ? `<div id="teams-waiting" style="margin-top:6px">Everyone on the Worn Gundidj staff list has signed in since teams were added.</div>` : '')}
+            ${waiting.length ? `<div id="teams-waiting" style="margin-top:6px">Not signed in since teams were added (${waiting.length}): ${waiting.map(u => sanitize(u.name || u.email)).join(', ')}. If you lock now they will be shut out: when they next try to sign in they will appear in this list, and you can tick them in.</div>` : (ACTIVE_TEAM === WG_TEAMS.DEFAULT ? `<div id="teams-waiting" style="margin-top:6px">Everyone on the Worn Gundidj staff list has signed in since teams were added.</div>` : '')}
             <div style="margin-top:8px"><button class="btn btn-sm btn-primary" id="teams-lock-btn" onclick="teamsSetLock(true)">🔒 Lock: listed accounts only</button></div></div>`}
     </div>`;
 }
@@ -16556,6 +16562,7 @@ async function doLogin() {
       btn.disabled=false; btn.textContent='Sign In →';
       if (e.code === 'auth/mfa-cancelled') { errEl.textContent = 'Sign-in cancelled — tap Sign In to get a new code.'; return; }
       if (e.code === 'wg/no-team') { errEl.textContent = 'Your account has not been added to a team yet. Ask your System Manager to add you.'; return; }
+      if (e.code === 'wg/no-team-asked') { errEl.textContent = 'Your account has not been added to a team yet. Your System Manager can now see it in Settings → Teams — ask them to add you, then sign in again.'; return; }
       if (e.code === 'wg/team-loop') { errEl.textContent = 'Could not open your team on this device. Please sign in again.'; return; }
       const msgs = {
         'auth/user-not-found':    'No account found with that email.',
@@ -16863,7 +16870,7 @@ function openCoiModal(clientId, id) {
     <div class="form-group"><label>Client</label>${c ? `<div style="font-weight:600" id="coi-client-name">${sanitize(c.fullName)}</div><input type="hidden" id="coi-client" value="${sanitize(c.id)}">`
       : `<select id="coi-client"><option value="">Choose…</option>${clientsToPick.map(x => `<option value="${sanitize(x.id)}">${sanitize(x.fullName)}</option>`).join('')}</select>`}</div>
     <div class="form-group"><label>Person *</label>${ro ? `<div id="coi-person-ro">${sanitize(d.personName)} <span style="color:var(--muted);font-size:12px">${sanitize(d.personEmail)}</span></div>`
-      : mgr ? `<select id="coi-person">${staff.map(s => `<option value="${sanitize(s.email)}" ${s.email === myEmail ? 'selected' : ''}>${sanitize(s.name)}${s.email === myEmail ? ' (me)' : ''}</option>`).join('')}</select>
+      : mgr ? `<select id="coi-person" onchange="coiPersonChanged()">${staff.map(s => `<option value="${sanitize(s.email)}" ${s.email === myEmail ? 'selected' : ''}>${sanitize(s.name)}${s.email === myEmail ? ' (me)' : ''}</option>`).join('')}</select>
                <small style="color:var(--muted)">Usually yourself. A manager can record one for someone else.</small>`
       : `<select id="coi-person" disabled><option value="${sanitize(myEmail)}">${sanitize(me.name || myEmail)} (me)</option></select>`}</div>
     <div class="grid-2">
@@ -16879,6 +16886,7 @@ function openCoiModal(clientId, id) {
         ${COI_MANAGE.map(([k, l, help]) => `<label style="display:flex;gap:10px;align-items:flex-start;margin:10px 0;font-weight:400;cursor:pointer"><input type="checkbox" id="coi-m-${k}" ${m[k] ? 'checked' : ''} style="margin-top:3px;width:18px;height:18px">
           <span><strong>${sanitize(l)}</strong><br><small style="color:var(--muted)">${sanitize(help)}</small></span></label>`).join('')}
         <p style="font-size:12px;color:var(--muted)">The person it is about cannot change these. Whoever does is recorded.</p>
+        <p id="coi-self-note" style="display:none;font-size:13px;background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:8px;padding:8px 10px">This declaration is about you, so you can’t set how it is managed. Another manager or supervisor will review it.</p>
         <div class="form-group"><label>Notes on how it is managed</label><textarea id="coi-notes" maxlength="1000" style="min-height:56px" placeholder="e.g. Allocated to another worker; Sam will not attend appointments with this client.">${sanitize((d && d.managedNotes) || '')}</textarea></div>
         <div class="form-group"><label>Status</label>${sel('coi-status', COI_STATUS, d ? d.status : 'open', false)}</div>`
       : `<p style="font-size:13px;margin:6px 0 0">${d ? `${_coiStatusPill(d.status)} ${sanitize(_coiManageText(d))}${d.managedNotes ? ` — ${sanitize(d.managedNotes)}` : ''}` : ''}</p>
@@ -16886,6 +16894,14 @@ function openCoiModal(clientId, id) {
     </div>
     <p id="coi-error" style="color:#dc2626;font-size:13px;min-height:16px;margin-top:8px"></p>`;
   showModal(d ? (canManage ? '⚖️ Review a conflict of interest' : '⚖️ Conflict of interest') : '⚖️ Declare a conflict of interest', html, (d && !canManage) ? null : () => saveCoi(id), '600px', !!(d && !canManage));
+  if (!d) coiPersonChanged();
+}
+// In a new declaration: when the person is yourself, how it is managed is for someone else to decide.
+function coiPersonChanged() {
+  const sel = document.getElementById('coi-person'), note = document.getElementById('coi-self-note'); if (!sel || !note) return;
+  const self = String(sel.value || '').toLowerCase() === _coiMyEmail();
+  note.style.display = self ? '' : 'none';
+  ['coi-m-noAllocate', 'coi-m-hideFile', 'coi-notes', 'coi-status'].forEach(id => { const el = document.getElementById(id); if (!el) return; el.disabled = self; if (self) { if (el.type === 'checkbox') el.checked = false; else if (id === 'coi-status') el.value = 'open'; else el.value = ''; } });
 }
 async function saveCoi(id) {
   const g = x => document.getElementById(x), err = t => { const e = g('coi-error'); if (e) e.textContent = t; return false; };
