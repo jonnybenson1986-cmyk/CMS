@@ -306,6 +306,14 @@
   .modal-body { padding: 24px; max-height: 70vh; overflow-y: auto; overflow-x: hidden; }
   .modal-footer { padding: 16px 24px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 10px; }
   .close-btn { background: none; border: none; font-size: 20px; cursor: pointer; color: var(--muted); line-height: 1; }
+  .modal-head-btns { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+  .modal-fs-btn { background: none; border: 1px solid var(--border); border-radius: 7px; font-size: 12px; font-weight: 600; cursor: pointer; color: var(--text); padding: 5px 10px; line-height: 1.2; white-space: nowrap; }
+  .modal-fs-btn:hover { background: var(--bg); }
+  /* A window opened full screen: it fills the screen, the body scrolls, the buttons stay at the bottom. */
+  .modal-overlay.modal-full { padding: 0 !important; align-items: stretch !important; overflow: hidden; }
+  .modal-overlay.modal-full .modal { max-width: none !important; width: 100% !important; height: 100vh; height: 100dvh; max-height: none !important; border-radius: 0 !important; margin: 0; display: flex; flex-direction: column; }
+  .modal-overlay.modal-full .modal-body { max-height: none !important; flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+  .modal-overlay.modal-full .modal-header, .modal-overlay.modal-full .modal-footer { flex-shrink: 0; }
 
   /* NOTES */
   .note-entry { border-left: 3px solid var(--border); padding: 12px 16px; margin-bottom: 12px; border-radius: 0 6px 6px 0; background: #fafaf8; }
@@ -1337,7 +1345,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v120';
+const APP_VERSION = 'v121';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -2223,7 +2231,7 @@ function renderClientProfile(id, tab) {
   <div id="profile-tab-content">${renderProfileTab(tab, c, clientNotes, clientTime)}</div>
   `;
   _showingClientFile = true;
-  try { showModal('👤 Client Profile', html, null, '900px', true); } finally { _showingClientFile = false; }
+  try { showModal('👤 Client Profile', html, null, '900px', true, { fullscreen: 'profile' }); } finally { _showingClientFile = false; }
   if (tab === 'intake') startIntakeAutoSave(id); else stopIntakeAutoSave();
 }
 
@@ -9874,7 +9882,7 @@ function openSessionModal(clientId, defaultType) {
     // Saved for real — the draft has done its job.
     document.getElementById('modal-container')._draft?.saved();
     return true;
-  }, '720px');
+  }, '720px', false, { fullscreen: 'session' });
   rteEnhance('sm-text', { label: 'Session notes', pictures: true, clientId: () => document.getElementById('sm-client')?.value || '', attachFiles: files => sessHandleFiles({ files }) });
   _attachSessionDraft(clientId);
 }
@@ -15404,18 +15412,24 @@ function openNewGroupModal() {
 // and scroll position. (They used to leave the worker on the Clients list.) A
 // form that opens another form passes the way back along to it.
 let _showingClientFile = false;
-function showModal(title, html, onSave, maxWidth='720px', noSave=false) {
+// opts.fullscreen: a name for this kind of window (e.g. 'profile'). It gets a "Full screen" button, and
+// the choice is remembered on this device for that kind of window, so it reopens the way the worker left it.
+function showModal(title, html, onSave, maxWidth='720px', noSave=false, opts={}) {
   const mc = document.getElementById('modal-container');
+  const fsKey = opts && opts.fullscreen, fsOn = !!(fsKey && (DB.load('modalFull', {}) || {})[fsKey]);
   const place = _showingClientFile ? null
     : (currentClientId && _clientFilePlace(currentClientId)) || mc._returnPlace || null;
   _modalClosing(mc);
   mc._returnPlace = null;
   mc.innerHTML = `
-  <div class="modal-overlay" onclick="closeModalOnOverlay(event)">
+  <div class="modal-overlay${fsOn ? ' modal-full' : ''}" onclick="closeModalOnOverlay(event)"${fsKey ? ` data-fs="${sanitize(fsKey)}"` : ''}>
     <div class="modal" style="max-width:${maxWidth}">
       <div class="modal-header">
         <h3>${title}</h3>
-        <button class="close-btn" onclick="closeModal()">✕</button>
+        <div class="modal-head-btns">
+          ${fsKey ? `<button type="button" class="modal-fs-btn" id="modal-fs-btn" onclick="toggleModalFullscreen()" aria-pressed="${fsOn}" title="${fsOn ? 'Back to the normal size' : 'Use the whole screen'}">${fsOn ? '🗗 Normal size' : '⛶ Full screen'}</button>` : ''}
+          <button class="close-btn" onclick="closeModal()" aria-label="Close">✕</button>
+        </div>
       </div>
       <div class="modal-body">${html}</div>
       ${!noSave?`<div class="modal-footer">
@@ -15430,6 +15444,15 @@ function showModal(title, html, onSave, maxWidth='720px', noSave=false) {
 }
 
 function closeModalOnOverlay(e) { if(e.target.classList.contains('modal-overlay')) closeModal(); }
+// Full screen ⇄ normal size for the open window; remembered on this device for that kind of window.
+function toggleModalFullscreen() {
+  const ov = document.querySelector('#modal-container .modal-overlay'); if (!ov) return;
+  const on = !ov.classList.contains('modal-full'), key = ov.dataset.fs;
+  ov.classList.toggle('modal-full', on);
+  const b = document.getElementById('modal-fs-btn');
+  if (b) { b.textContent = on ? '🗗 Normal size' : '⛶ Full screen'; b.setAttribute('aria-pressed', String(on)); b.title = on ? 'Back to the normal size' : 'Use the whole screen'; }
+  if (key) { const m = DB.load('modalFull', {}) || {}; if (on) m[key] = true; else delete m[key]; DB.save('modalFull', m); }
+}
 function _modalClosing(mc) {
   try { _intakeLeaving(); } catch (e) { console.warn('Intake autosave:', e); }   // an open intake is saved before it goes
   const f = mc._onClose; mc._onClose = null; if (f) { try { f(); } catch (e) { console.warn(e); } }
