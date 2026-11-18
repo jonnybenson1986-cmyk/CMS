@@ -17,6 +17,7 @@ node tests/browser/consent.cjs          # consent forms in the CMS: send, check 
 node tests/browser/vpr.cjs              # Vulnerable Persons Register: screening, auto add/remove, Admin page
 node tests/browser/msalpopup.cjs         # Microsoft sign-in windows open straight from a click (a stand-in pop-up blocker)
 node tests/browser/coi.cjs              # conflict of interest: declaring on a file, the register, how it is managed, who sees it
+node tests/browser/fullscreen.cjs       # client profile and Log Session: Full screen / Normal size, remembered per window
 node tests/browser/reports.cjs          # reports: the Key Worker rule (current key worker only; workers see their own clients)
 node tests/browser/teams.cjs            # teams: each team kept apart, switching, the owner's Teams card, the lock
 node --test tests/unit/data-health.test.js   # the scoring engine on its own (no browser)
