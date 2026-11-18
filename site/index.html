@@ -1337,7 +1337,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v118';
+const APP_VERSION = 'v119';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -5545,6 +5545,12 @@ function canonicalWorker(name) {
   if (/^[a-z]+([._-][a-z]+)+$/i.test(m) && m === m.toLowerCase()) return m.split(/[._-]/).map(w => w[0].toUpperCase() + w.slice(1)).join(' ');
   return raw;
 }
+function reportKeyWorkers() {
+  const set = new Set();
+  visibleClients(clients).forEach(c => c.keyWorker && set.add(canonicalWorker(c.keyWorker)));
+  (userProfiles || []).forEach(u => u?.name && set.add(canonicalWorker(u.name)));
+  return [...set].filter(Boolean).sort((a, b) => a.localeCompare(b));
+}
 function reportWorkers() {
   const set = new Set();
   (userProfiles || []).forEach(u => u?.name && set.add(canonicalWorker(u.name)));
@@ -5552,6 +5558,25 @@ function reportWorkers() {
   (notes || []).forEach(n => { n.worker && set.add(canonicalWorker(n.worker)); n.worker2 && set.add(canonicalWorker(n.worker2)); });
   return [...set].filter(Boolean).sort((a, b) => a.localeCompare(b));
 }
+// ===== Who a report covers =====
+// A report "for a worker" covers the clients where that person is the CURRENT Key Worker — the Key
+// Worker on the client's file today. Having seen a client, or written a note or time for them, does
+// not count. Every record on those clients is included, whoever wrote it.
+// Staff who aren't managers or supervisors can only run reports on their own Key Worker clients;
+// managers and supervisors can run them for everyone, or pick a Key Worker.
+// A client hidden from the person running the report (restricted file, conflict of interest) is never in it.
+function reportRestricted() { return !_clientOversightRole(); }
+function isCurrentKeyWorker(c, worker) { const k = canonicalWorker(worker); return !!k && !!c && canonicalWorker(c.keyWorker) === k; }
+// The Key Worker a report is limited to: always yourself if you aren't a manager; otherwise the filter.
+function reportKeyWorker(f) { f = f || reportFilter(); return reportRestricted() ? canonicalWorker(currentUser?.name || '') : (f.worker || ''); }
+// The clients a report may cover (before the date range and the Client filter).
+function reportScopeClients(f) {
+  f = f || reportFilter();
+  const cs = visibleClients(clients), w = reportKeyWorker(f);
+  if (reportRestricted() && !w) return [];               // not able to work out who you are: nothing, rather than everything
+  return w ? cs.filter(c => isCurrentKeyWorker(c, w)) : cs;
+}
+function reportClientAllowed(c) { return !!c && reportScopeClients().some(x => x.id === c.id); }
 // Default: the last 90 days, as the Reports page has always opened with.
 function reportFilter() {
   if (!_rptFilter) _rptFilter = { type: 'custom', period: '', from: addDaysStr(today(), -90), to: today(), worker: '', clientId: '' };
@@ -5559,12 +5584,14 @@ function reportFilter() {
 }
 function reportFilterLabel(f, withPeople = true) {
   const c = f.clientId ? clients.find(x => x.id === f.clientId) : null;
-  return [`${fmt(f.from)} – ${fmt(f.to)}`, withPeople && f.worker ? 'Worker: ' + f.worker : '', withPeople && c ? 'Client: ' + c.fullName : ''].filter(Boolean).join(' · ');
+  const w = reportKeyWorker(f);
+  const who = !withPeople ? '' : reportRestricted() ? `My clients (Key Worker: ${w || 'unknown'})` : (w ? `Key Worker: ${w}` : '');
+  return [`${fmt(f.from)} – ${fmt(f.to)}`, who, withPeople && c ? 'Client: ' + c.fullName : ''].filter(Boolean).join(' · ');
 }
 function reportFilterBarHTML() {
   const f = reportFilter();
   const periods = reportPeriods(f.type);
-  const sorted = [...clients].filter(c => c.fullName).sort((a, b) => a.fullName.localeCompare(b.fullName));
+  const sorted = reportScopeClients(f).filter(c => c.fullName).sort((a, b) => a.fullName.localeCompare(b.fullName));
   const opt = (v, l, cur) => `<option value="${sanitize(v)}"${v === cur ? ' selected' : ''}>${sanitize(l)}</option>`;
   return `
   <div class="card no-print report-filter" style="margin-bottom:20px;border-left:4px solid var(--primary)">
@@ -5578,13 +5605,15 @@ function reportFilterBarHTML() {
         <select id="rpt-period" onchange="rptSetPeriod(this.value)">${periods.map(p => opt(p.from + '|' + p.to, p.label, f.period)).join('')}</select></div>` : ''}
       <div class="form-group" style="margin:0"><label>From</label><input type="date" id="rpt-from" value="${sanitize(f.from)}" onchange="rptCustomDates()"></div>
       <div class="form-group" style="margin:0"><label>To</label><input type="date" id="rpt-to" value="${sanitize(f.to)}" onchange="rptCustomDates()"></div>
-      <div class="form-group" style="margin:0"><label>Worker</label>
-        <select id="rpt-worker" onchange="rptSet('worker', this.value)">${opt('', 'All workers', f.worker)}${reportWorkers().map(w => opt(w, w, f.worker)).join('')}</select></div>
+      ${reportRestricted()
+        ? `<div class="form-group" style="margin:0"><label>Clients</label><div id="rpt-mine" style="padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:8px;font-size:13px">My clients — where I am the Key Worker (${reportScopeClients(f).length})</div></div>`
+        : `<div class="form-group" style="margin:0"><label title="Clients where this person is the current Key Worker">Key worker</label>
+        <select id="rpt-worker" onchange="rptSet('worker', this.value)">${opt('', 'All clients', f.worker)}${reportKeyWorkers().map(w => opt(w, w, f.worker)).join('')}</select></div>`}
       <div class="form-group" style="margin:0;min-width:220px"><label>Client</label>
         <select id="rpt-clientf" onchange="rptSet('clientId', this.value)">${opt('', 'All clients', f.clientId)}
           <optgroup label="Open">${sorted.filter(c => c.status !== 'closed').map(c => opt(c.id, c.fullName, f.clientId)).join('')}</optgroup>
           <optgroup label="Closed">${sorted.filter(c => c.status === 'closed').map(c => opt(c.id, c.fullName + ' (closed)', f.clientId)).join('')}</optgroup></select></div>
-      ${(f.worker || f.clientId) ? `<button class="btn btn-outline btn-sm" onclick="rptSet('worker','');rptSet('clientId','')">✕ Clear worker / client</button>` : ''}
+      ${((f.worker && !reportRestricted()) || f.clientId) ? `<button class="btn btn-outline btn-sm" onclick="rptSet('worker','');rptSet('clientId','')">✕ Clear key worker / client</button>` : ''}
     </div>
     <div class="rpt-run" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
       <div class="form-group" style="margin:0;min-width:260px"><label>Report</label>
@@ -5592,7 +5621,8 @@ function reportFilterBarHTML() {
       <button class="btn btn-primary" id="rpt-run-btn" onclick="runSelectedReport()" style="padding:10px 20px">▶ Run report</button>
       <span style="font-size:12px;color:var(--muted)">Opens in a new tab using the filters above. You can also click any report card below.</span>
     </div>
-    <p style="font-size:11px;color:var(--muted);margin-top:8px">Applies to the program, activity, workload, outcomes and feedback reports below. Funding (episode-of-care) reports use the dates but always count every worker and client, because an episode is built from everyone's contacts.</p>
+    <p style="font-size:11px;color:var(--muted);margin-top:8px" id="rpt-rule"><strong>Key worker rule:</strong> a report for a key worker covers only the clients where they are the Key Worker now (the Key Worker on the client’s file) — not clients they have only seen or written about — and includes every record on those clients. ${reportRestricted() ? 'Your reports always cover only your own Key Worker clients.' : 'Workers can only run reports on their own Key Worker clients.'}</p>
+    <p style="font-size:11px;color:var(--muted);margin-top:4px">Applies to the program, activity, workload, outcomes and feedback reports below. Funding (episode-of-care) reports use the dates but always count every worker and client, because an episode is built from everyone's contacts.</p>
   </div>`;
 }
 function _rptRefresh() { if (currentPage === 'reports') showPage('reports'); }
@@ -5612,6 +5642,7 @@ function runSelectedReport() {
   if (r === 'client-full') {
     const c = clients.find(x => x.id === f.clientId);
     if (!c) { alert('Choose a client in the Client filter first.'); return; }
+    if (!reportClientAllowed(c)) { alert(reportRestricted() ? 'You can only run reports on clients where you are the Key Worker.' : 'You can’t run a report on this client.'); return; }
     return openReport(buildFullClientReport(c, f.from, f.to));
   }
   generateProgramReport(r);
@@ -5641,20 +5672,22 @@ function withReportFilters(build, opts = {}) {
   const f = reportFilter();
   const keep = { clients, notes, timeLogs };
   try {
-    if (!opts.datesOnly && (f.worker || f.clientId)) {
-      const inR = d => { const x = String(d || '').slice(0, 10); return x >= f.from && x <= f.to; };
-      let cs = clients, ns = notes, tl = timeLogs;
-      if (f.clientId) { cs = cs.filter(c => c.id === f.clientId); ns = ns.filter(n => n.clientId === f.clientId); tl = tl.filter(t => t.clientId === f.clientId); }
-      if (f.worker) {
-        ns = ns.filter(n => hasWorker(n, f.worker, canonicalWorker));
-        tl = tl.filter(t => hasWorker(t, f.worker, canonicalWorker));
-        const ids = new Set([...ns.filter(n => inR(n.created)).map(n => n.clientId), ...tl.filter(t => inR(t.date)).map(t => t.clientId),
-                             ...cs.filter(c => canonicalWorker(c.keyWorker) === f.worker).map(c => c.id)]);
-        cs = cs.filter(c => ids.has(c.id));
+    // Never a client hidden from the person running the report (restricted file, conflict of interest).
+    const hidden = new Set(clients.filter(c => !canViewClient(c)).map(c => c.id));
+    let cs = clients.filter(c => !hidden.has(c.id)), ns = notes.filter(n => !hidden.has(n.clientId)), tl = timeLogs.filter(t => !hidden.has(t.clientId));
+    // Funding (episode-of-care) reports count every client — except for staff limited to their own clients.
+    const people = !opts.datesOnly || reportRestricted();
+    if (people) {
+      if (f.clientId) { cs = cs.filter(c => c.id === f.clientId); }
+      const w = reportKeyWorker(f);
+      if (w || reportRestricted()) cs = cs.filter(c => isCurrentKeyWorker(c, w));   // the Key Worker rule
+      if (f.clientId || w || reportRestricted()) {
+        const ids = new Set(cs.map(c => c.id));
+        ns = ns.filter(n => ids.has(n.clientId)); tl = tl.filter(t => ids.has(t.clientId));   // every record on those clients, whoever wrote it
       }
-      clients = cs; notes = ns; timeLogs = tl;
     }
-    _rptFilterLabel = reportFilterLabel(f, !opts.datesOnly);
+    clients = cs; notes = ns; timeLogs = tl;
+    _rptFilterLabel = reportFilterLabel(f, people);
     return build(f.from, f.to);
   } finally { clients = keep.clients; notes = keep.notes; timeLogs = keep.timeLogs; _rptFilterLabel = ''; }
 }
@@ -5703,9 +5736,9 @@ let _trOpen = false;            // stays open across page redraws (sync refreshe
 function timeReviewEntries() {
   const f = reportFilter();
   return (timeLogs || []).filter(t => t && t.date >= f.from && t.date <= f.to)
-    .filter(t => !f.worker || hasWorker(t, f.worker, canonicalWorker))
     .filter(t => !f.clientId || t.clientId === f.clientId)
     .filter(t => { const c = clients.find(x => x.id === t.clientId); return !c || canViewClient(c); })
+    .filter(t => { const w = reportKeyWorker(f); if (!w && !reportRestricted()) return true; const c = clients.find(x => x.id === t.clientId); return !!c && isCurrentKeyWorker(c, w); })
     .sort((a, b) => String(b.date).localeCompare(String(a.date)));
 }
 function timeReviewCardHTML() {
@@ -5773,7 +5806,8 @@ function removeTimeEntries(ids, why) {
 }
 
 function renderReportsPage() {
-  const activeClients = clients.filter(c=>c.status==='active');
+  const rc = reportScopeClients();      // what this person's reports can cover (the Key Worker rule)
+  const activeClients = rc.filter(c=>c.status==='active');
   return `
   <style>
     .report-card { background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px;cursor:pointer;transition:all 0.15s;display:flex;flex-direction:column;gap:8px;box-shadow:var(--card-shadow); }
@@ -5796,12 +5830,12 @@ function renderReportsPage() {
   <!-- SECTION: CLIENT REPORTS -->
   <div class="card no-print" style="margin-bottom:20px">
     <div class="card-header"><div class="card-title">👤 Individual Client Reports</div></div>
-    <p style="font-size:13px;color:var(--muted);margin-bottom:16px">Generate a full or program-specific report for any client.</p>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:16px">Generate a full or program-specific report for ${reportRestricted() ? 'a client where you are the Key Worker' : 'any client'}.</p>
     <div class="form-group" style="max-width:380px">
       <label>Select Client</label>
       <select id="rpt-client-select" onchange="updateClientReportButtons()">
         <option value="">— Choose a client —</option>
-        ${[...clients].sort((a,b)=>a.fullName?.localeCompare(b.fullName)).map(c=>`<option value="${sanitize(c.id)}">${sanitize(c.fullName)}${c.status==='closed'?' (Closed)':''}</option>`).join('')}
+        ${[...rc].sort((a,b)=>a.fullName?.localeCompare(b.fullName)).map(c=>`<option value="${sanitize(c.id)}">${sanitize(c.fullName)}${c.status==='closed'?' (Closed)':''}</option>`).join('')}
       </select>
     </div>
     <div id="rpt-client-btns" class="hidden" style="display:flex;gap:10px;flex-wrap:wrap;margin-top:4px">
@@ -5828,49 +5862,49 @@ function renderReportsPage() {
         <div class="rc-icon">💚</div>
         <div class="rc-title">SEWB Program Report</div>
         <div class="rc-desc">All SEWB clients, domain assessments and goals (case notes are in individual client reports)</div>
-        <span class="rc-badge" style="background:#d1fae5;color:#065f46">${clients.filter(c=>c.sewb).length} clients</span>
+        <span class="rc-badge" style="background:#d1fae5;color:#065f46">${rc.filter(c=>c.sewb).length} clients</span>
       </div>
       <div class="report-card" onclick="generateProgramReport('sewb-combined')">
         <div class="rc-icon">🌿</div>
         <div class="rc-title">SEWB Program Report (Combined)</div>
         <div class="rc-desc">SEWB umbrella — Direct, AOD, Justice and Cultural Strengthening as sub-groups. Open + closed, no case notes</div>
-        <span class="rc-badge" style="background:#ccfbf1;color:#0f5257">${clients.filter(c=>c.sewb||SEWB_UMBRELLA_SUBGROUPS.some(g=>c[g.key])).length} clients</span>
+        <span class="rc-badge" style="background:#ccfbf1;color:#0f5257">${rc.filter(c=>c.sewb||SEWB_UMBRELLA_SUBGROUPS.some(g=>c[g.key])).length} clients</span>
       </div>
       <div class="report-card" onclick="generateProgramReport('aod')">
         <div class="rc-icon">🔴</div>
         <div class="rc-title">AOD Program Report</div>
         <div class="rc-desc">All AOD clients, screening scores, treatment types, and risk levels</div>
-        <span class="rc-badge" style="background:#fee2e2;color:#991b1b">${clients.filter(c=>c.aod).length} clients</span>
+        <span class="rc-badge" style="background:#fee2e2;color:#991b1b">${rc.filter(c=>c.aod).length} clients</span>
       </div>
       <div class="report-card" onclick="generateProgramReport('justice')">
         <div class="rc-icon">⚖️</div>
         <div class="rc-title">Justice Program Report</div>
         <div class="rc-desc">All justice clients, matters, diversion programs, and legal supports</div>
-        <span class="rc-badge" style="background:#dbeafe;color:#1e40af">${clients.filter(c=>c.justice).length} clients</span>
+        <span class="rc-badge" style="background:#dbeafe;color:#1e40af">${rc.filter(c=>c.justice).length} clients</span>
       </div>
       <div class="report-card" onclick="generateProgramReport('cultural')">
         <div class="rc-icon">🌀</div>
         <div class="rc-title">Cultural Strengthening Report</div>
         <div class="rc-desc">All cultural clients, connection areas, goals, and activities</div>
-        <span class="rc-badge" style="background:#fef3c7;color:#92400e">${clients.filter(c=>c.cultural).length} clients</span>
+        <span class="rc-badge" style="background:#fef3c7;color:#92400e">${rc.filter(c=>c.cultural).length} clients</span>
       </div>
       <div class="report-card" onclick="generateProgramReport('mensgroup')">
         <div class="rc-icon">🔥</div>
         <div class="rc-title">Men's Group Report</div>
         <div class="rc-desc">Men's Group participants, group sessions attended, goals and notes</div>
-        <span class="rc-badge" style="background:#ccfbf1;color:#115e59">${clients.filter(c=>c.mensgroup).length} clients</span>
+        <span class="rc-badge" style="background:#ccfbf1;color:#115e59">${rc.filter(c=>c.mensgroup).length} clients</span>
       </div>
       <div class="report-card" onclick="generateProgramReport('disability')">
         <div class="rc-icon">♿</div>
         <div class="rc-title">Disability Program Report</div>
         <div class="rc-desc">All disability clients, NDIS status, support plans, and goals</div>
-        <span class="rc-badge" style="background:#f3e8ff;color:#6b21a8">${clients.filter(c=>c.disability).length} clients</span>
+        <span class="rc-badge" style="background:#f3e8ff;color:#6b21a8">${rc.filter(c=>c.disability).length} clients</span>
       </div>
       <div class="report-card" onclick="generateProgramReport('workfoundations')">
         <div class="rc-icon">💼</div>
         <div class="rc-title">Work Foundations Report</div>
         <div class="rc-desc">All Work Foundations clients, employment status, barriers, and outcomes</div>
-        <span class="rc-badge" style="background:#dbeafe;color:#1e40af">${clients.filter(c=>c.workFoundations).length} clients</span>
+        <span class="rc-badge" style="background:#dbeafe;color:#1e40af">${rc.filter(c=>c.workFoundations).length} clients</span>
       </div>
     </div>
     <div style="margin-top:12px">
@@ -5898,7 +5932,7 @@ function renderReportsPage() {
         <div class="rc-icon">⚠️</div>
         <div class="rc-title">Risk Register</div>
         <div class="rc-desc">All medium and high risk clients with safety plan status</div>
-        <span class="rc-badge" style="background:#fee2e2;color:#991b1b">${clients.filter(c=>c.riskLevel==='high'||c.riskLevel==='medium').length} flagged</span>
+        <span class="rc-badge" style="background:#fee2e2;color:#991b1b">${rc.filter(c=>c.riskLevel==='high'||c.riskLevel==='medium').length} flagged</span>
       </div>
     </div>
   </div>
@@ -5948,7 +5982,7 @@ function renderReportsPage() {
         <div class="rc-icon">📊</div>
         <div class="rc-title">Workload &amp; Caseload Report</div>
         <div class="rc-desc">Clients per worker, contact hours, contacts, open tasks and high-risk load — with team totals and capacity flags</div>
-        <span class="rc-badge" style="background:#f3e8ff;color:#6b21a8">${clients.filter(c=>c.status==='active').length} active clients</span>
+        <span class="rc-badge" style="background:#f3e8ff;color:#6b21a8">${rc.filter(c=>c.status==='active').length} active clients</span>
       </div>
       <div class="report-card" onclick="generateProgramReport('activity')">
         <div class="rc-icon">⏱️</div>
@@ -6005,13 +6039,13 @@ function renderReportsPage() {
         <div class="rc-icon">🎯</div>
         <div class="rc-title">Goals Progress Report</div>
         <div class="rc-desc">All client goals, milestones, completion rates across caseload</div>
-        <span class="rc-badge" style="background:#d1fae5;color:#065f46">${clients.filter(c=>c.goalPlan?.length).length} clients with goals</span>
+        <span class="rc-badge" style="background:#d1fae5;color:#065f46">${rc.filter(c=>c.goalPlan?.length).length} clients with goals</span>
       </div>
       <div class="report-card" onclick="generateProgramReport('outcomes')">
         <div class="rc-icon">📈</div>
         <div class="rc-title">Client Outcomes (Board)</div>
         <div class="rc-desc">Goal scores at start vs. latest review, by domain — de-identified, small groups suppressed</div>
-        <span class="rc-badge" style="background:#dbeafe;color:#1e40af">${clients.filter(c=>(c.goalPlan||[]).some(goalIsMeasurable)).length} clients with measured goals</span>
+        <span class="rc-badge" style="background:#dbeafe;color:#1e40af">${rc.filter(c=>(c.goalPlan||[]).some(goalIsMeasurable)).length} clients with measured goals</span>
       </div>
       <div class="report-card" onclick="generateProgramReport('feedback')">
         <div class="rc-icon">⭐</div>
@@ -6029,7 +6063,7 @@ function renderReportsPage() {
         <div class="rc-icon">⚠️</div>
         <div class="rc-title">Risk Register</div>
         <div class="rc-desc">All medium and high risk clients with safety plan status</div>
-        <span class="rc-badge" style="background:#fee2e2;color:#991b1b">${clients.filter(c=>c.riskLevel==='high'||c.riskLevel==='medium').length} flagged</span>
+        <span class="rc-badge" style="background:#fee2e2;color:#991b1b">${rc.filter(c=>c.riskLevel==='high'||c.riskLevel==='medium').length} flagged</span>
       </div>
     </div>
   </div>
@@ -6957,6 +6991,7 @@ function generateReport(type) {
   if(!id) { alert('Please select a client first'); return; }
   const c = clients.find(cl=>cl.id===id);
   if(!c) return;
+  if(!reportClientAllowed(c)) { alert(reportRestricted() ? 'You can only run reports on clients where you are the Key Worker.' : 'You can’t run a report on this client.'); return; }
   const from = document.getElementById('rpt-from')?.value||'2000-01-01';
   const to = document.getElementById('rpt-to')?.value||today();
 
