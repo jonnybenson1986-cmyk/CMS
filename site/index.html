@@ -1345,7 +1345,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v121';
+const APP_VERSION = 'v122';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -7275,7 +7275,79 @@ function renderMensGroup() {
         </tr>`; }).join('')}
       </tbody>
     </table></div>
+  </div>
+  ${SESSION_CARD_CSS}
+  <div class="card" style="padding:0;overflow:hidden;margin-top:20px" id="mg-notes-card">
+    <div style="padding:16px 20px;font-weight:600;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">Men's Group Session Notes
+      <span style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-sm btn-outline" id="mg-to-sessionlog" onclick="openSessionLogMensGroup()">📝 Session Log (Men's Group) ↗</button>
+      <button class="btn btn-sm btn-primary" id="mg-log-btn" onclick="openSessionModal(null,'mensgroup')">➕ Log Men's Group session</button></span></div>
+    <div style="padding:12px 20px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;border-bottom:1px solid var(--border)">
+      <select id="mg-nf-client" onchange="mgNoteSet('client',this.value)" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;max-width:100%">
+        <option value="">All participants</option>
+        ${mgNoteClients().map(c=>`<option value="${sanitize(c.id)}" ${_mgNoteFilter.client===c.id?'selected':''}>${sanitize(c.fullName)}</option>`).join('')}
+      </select>
+      <select id="mg-nf-period" onchange="mgNoteSet('period',this.value)" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px">
+        ${[['month','This month'],['90','Last 3 months'],['365','Last 12 months'],['all','All time']].map(([v,l])=>`<option value="${v}" ${_mgNoteFilter.period===v?'selected':''}>${l}</option>`).join('')}
+      </select>
+      <input type="text" id="mg-nf-q" placeholder="Search notes…" value="${sanitize(_mgNoteFilter.q)}" oninput="mgNoteSet('q',this.value)" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;width:200px;max-width:100%">
+    </div>
+    <div id="mg-notes-list" style="padding:12px 20px">${renderMgNotesList()}</div>
   </div>`;
+}
+// ---- Men's Group session notes (from the Session Log) ----
+// Every Men's Group note logged through Log Session, for clients this person can see (restricted files
+// and conflict-of-interest hidden files stay hidden), newest first. Read-only here — open the client's
+// file to work with a note.
+let _mgNoteFilter = { client: '', period: '90', q: '' };
+function mgNoteClients() {
+  const ids = new Set(notes.filter(n => n.type === 'mensgroup').map(n => n.clientId));
+  return visibleClients(clients).filter(c => c.mensgroup || ids.has(c.id)).filter(c => c.fullName).sort((a, b) => a.fullName.localeCompare(b.fullName));
+}
+function mgNotes(f) {
+  f = f || _mgNoteFilter;
+  const seen = new Map(mgNoteClients().map(c => [c.id, c]));
+  let from = '';
+  if (f.period === 'month') from = today().slice(0, 8) + '01';
+  else if (f.period !== 'all') { const d = new Date(); d.setDate(d.getDate() - (+f.period || 90)); from = d.toISOString().slice(0, 10); }
+  const q = String(f.q || '').trim().toLowerCase();
+  return notes.filter(n => n.type === 'mensgroup' && seen.has(n.clientId))
+    .filter(n => !f.client || n.clientId === f.client)
+    .filter(n => !from || (n.created || '') >= from)
+    .filter(n => !q || [n.text, n.followup, workerNames(n), n.contactType, n.location, seen.get(n.clientId).fullName].join(' ').toLowerCase().includes(q))
+    .sort((a, b) => String(b.created || '').localeCompare(String(a.created || '')));
+}
+function mgNoteSet(k, v) {
+  _mgNoteFilter[k] = v;
+  const el = document.getElementById('mg-notes-list'); if (el) el.innerHTML = renderMgNotesList();
+}
+function renderMgNotesList() {
+  const ns = mgNotes();
+  if (!ns.length) return `<div class="empty-state"><div class="icon">📝</div><p>No Men's Group session notes ${_mgNoteFilter.client || _mgNoteFilter.q ? 'match these filters' : 'for this period'}. Notes logged as “Men's Group” in Log Session appear here.</p></div>`;
+  return `<div style="font-size:12px;color:var(--muted);margin-bottom:8px">${ns.length} note${ns.length === 1 ? '' : 's'}</div>` + ns.map(n => {
+    const cl = clients.find(c => c.id === n.clientId);
+    const tl = timeLogs.find(t => t.fromNoteId === n.id);
+    const mins = (tl && tl.minutes) || n.duration || 0;
+    return `<div class="session-card mensgroup mg-note" data-id="${sanitize(n.id)}">
+        <div class="session-header">
+          <div class="avatar" style="width:36px;height:36px;font-size:13px;flex-shrink:0;background:var(--primary-light)">${initials(cl.fullName)}</div>
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <span style="font-weight:700;font-size:14px;cursor:pointer" onclick="openClientProfile('${sanitize(cl.id)}','mensgroup')">${sanitize(cl.fullName)}</span>
+              ${mins ? `<span class="time-chip">${+mins} min</span>` : ''}
+              ${noteIsLocked(n) ? '<span style="font-size:11px;color:var(--muted)">🔒 Locked</span>' : ''}
+            </div>
+            <div class="session-meta">
+              <span>📅 ${fmtdt(n.created)}</span>
+              ${n.worker ? `<span>👤 ${sanitize(workerNames(n))}</span>` : ''}
+              ${n.contactType ? `<span>📍 ${sanitize(n.contactType)}</span>` : ''}
+              ${n.location ? `<span>🏠 ${sanitize(n.location)}</span>` : ''}
+            </div>
+          </div>
+        </div>
+        <div class="session-body">${sanitize(n.text)}</div>
+        ${n.followup ? `<div class="session-followup">📌 <strong>Follow-up:</strong> ${sanitize(n.followup)}</div>` : ''}
+      </div>`;
+  }).join('');
 }
 function buildMensGroupProgramReport(from, to) {
   const cl = clients.filter(c=>c.mensgroup);
@@ -9458,17 +9530,8 @@ async function deleteReferral(id) {
 let walkins = DB.load('walkins', []);
 function saveWalkins() { DB.save('walkins', walkins); if(FSYNC.isReady()) FSYNC.pushWalkins?.(); }
 
-function renderSessions() {
-  const from = today().slice(0,7); // this month default
-  const allSessions = notes.map(n=>{
-    const tl = timeLogs.find(t=>t.fromNoteId===n.id);
-    return {...n, minutes: tl?.minutes||n.duration||0, activity: tl?.activity||n.contactType||'Session', _type:'session'};
-  }).sort((a,b)=>b.created.localeCompare(a.created));
-
-  const totalMins = timeLogs.reduce((a,t)=>a+(t.minutes||0),0);
-  const thisMonthMins = timeLogs.filter(t=>t.date?.startsWith(from)).reduce((a,t)=>a+(t.minutes||0),0);
-
-  return `
+// The Session Log card styles — shared by the Session Log and the Men's Group page.
+const SESSION_CARD_CSS = `
   <style>
     .session-card { background:#fff;border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:10px;border-left:4px solid var(--border); }
     .session-card.sewb  { border-left-color:#10b981; }
@@ -9487,6 +9550,19 @@ function renderSessions() {
     .session-followup { margin-top:8px;padding:8px 12px;background:#fef3c7;border-radius:6px;font-size:12px; }
     .time-chip { background:var(--primary);color:#fff;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:700; }
   </style>
+`;
+function renderSessions() {
+  const from = today().slice(0,7); // this month default
+  const allSessions = notes.map(n=>{
+    const tl = timeLogs.find(t=>t.fromNoteId===n.id);
+    return {...n, minutes: tl?.minutes||n.duration||0, activity: tl?.activity||n.contactType||'Session', _type:'session'};
+  }).sort((a,b)=>b.created.localeCompare(a.created));
+
+  const totalMins = timeLogs.reduce((a,t)=>a+(t.minutes||0),0);
+  const thisMonthMins = timeLogs.filter(t=>t.date?.startsWith(from)).reduce((a,t)=>a+(t.minutes||0),0);
+
+  return `
+  ${SESSION_CARD_CSS}
 
   <div class="grid-4" style="margin-bottom:16px">
     <div class="stat-card"><div class="label">Total Sessions</div><div class="value">${notes.length}</div></div>
@@ -9498,6 +9574,7 @@ function renderSessions() {
   <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center">
     <span style="font-size:12px;font-weight:600;color:var(--muted)">Filter:</span>
     ${['all','sewb','familyviolence','aod','justice','cultural','mensgroup','disability','workfoundations','general'].map(t=>`<button class="btn btn-sm btn-outline" onclick="filterSessions('${t}')" id="sf-${t}">${t==='all'?'All':noteTypeLabel(t).toUpperCase()}</button>`).join('')}
+    <button class="btn btn-sm btn-outline" id="sf-mg-link" style="display:none" onclick="openMensGroupNotes('')">🔥 Open the Men's Group page ↗</button>
     <div style="flex:1"></div>
     <div class="search-bar" style="position:relative">
       <span class="search-icon">🔍</span>
@@ -9519,7 +9596,9 @@ function renderSessions() {
           <div style="flex:1;min-width:0">
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
               ${cl?`<span style="font-weight:700;font-size:14px;cursor:pointer" onclick="openClientProfile('${cl.id}')">${sanitize(cl.fullName)}</span>`:'<span style="color:var(--muted)">No client</span>'}
-              <span class="section-badge badge-${n.type||'general'}">${noteTypeLabel(n.type).toUpperCase()}</span>
+              ${n.type==='mensgroup'
+                ?`<span class="section-badge badge-mensgroup mg-link" style="cursor:pointer" title="Open the Men's Group page" onclick="openMensGroupNotes('${sanitize(n.clientId||'')}')">${noteTypeLabel(n.type).toUpperCase()} ↗</span>`
+                :`<span class="section-badge badge-${n.type||'general'}">${noteTypeLabel(n.type).toUpperCase()}</span>`}
               ${tl||n.duration?`<span class="time-chip">${tl?.minutes||n.duration||0} min</span>`:''}
               ${locked?'<span style="font-size:11px;color:var(--muted)">🔒 Locked</span>':''}
             </div>
@@ -9546,6 +9625,20 @@ function filterSessions(type) {
   document.querySelectorAll('#sessions-list .session-card').forEach(el=>{
     el.style.display = type==='all'||el.dataset.type===type ? '' : 'none';
   });
+  const mg = document.getElementById('sf-mg-link'); if (mg) mg.style.display = type==='mensgroup' ? '' : 'none';
+}
+// Session Log ⇄ Men's Group: open the Men's Group page at its session notes (optionally one participant's),
+// or the Session Log showing only Men's Group sessions.
+function openMensGroupNotes(clientId) {
+  _mgNoteFilter.client = clientId && mgNoteClients().some(c => c.id === clientId) ? clientId : '';
+  if (clientId) _mgNoteFilter.period = 'all';
+  _mgNoteFilter.q = '';
+  showPage('mensgroup');
+  setTimeout(() => { const el = document.getElementById('mg-notes-card'); if (el && el.scrollIntoView) el.scrollIntoView({ block: 'start' }); }, 50);
+}
+function openSessionLogMensGroup() {
+  showPage('sessions');
+  setTimeout(() => filterSessions('mensgroup'), 0);
 }
 
 function searchSessions(q) {
