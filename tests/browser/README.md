@@ -19,6 +19,7 @@ node tests/browser/msalpopup.cjs         # Microsoft sign-in windows open straig
 node tests/browser/coi.cjs              # conflict of interest: declaring on a file, the register, how it is managed, who sees it
 node tests/browser/fullscreen.cjs       # client profile and Log Session: Full screen / Normal size, remembered per window
 node tests/browser/reports.cjs          # reports: the Key Worker rule (current key worker only; workers see their own clients)
+node tests/browser/mensgroup.cjs        # Men's Group page: session notes from the Session Log, filters, links both ways
 node tests/browser/teams.cjs            # teams: each team kept apart, switching, the owner's Teams card, the lock
 node --test tests/unit/data-health.test.js   # the scoring engine on its own (no browser)
 node --test tests/unit/vpr.test.js           # the VPR rules on their own (no browser)
