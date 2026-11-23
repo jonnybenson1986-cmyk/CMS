@@ -926,6 +926,9 @@ const FSYNC = (() => {
     _listeners.push(col('consentForms').onSnapshot(snap=>{ consentForms = snap.docs.map(d=>{ const x=d.data(); const e=x.expiresAt; return Object.assign({id:d.id}, x, { expiresAt: e && e.toDate ? e.toDate().toISOString() : e }); }); DB.save('consentForms', consentForms); try{ _consentFormsRefresh(); }catch(_){} }, e=>console.warn('consentForms listener:', e.message)));
     _listeners.push(col('smsUsage').doc(smsBudgetMonth()).onSnapshot(doc=>{ smsUsageMonth = doc.exists ? doc.data() : null; DB.save('smsUsageMonth', smsUsageMonth); try{ _smsRefresh(); }catch(_){} }, e=>console.warn('smsUsage listener:', e.message)));
     _listeners.push(col('smsOutbox').onSnapshot(snap=>{ smsOutbox=snap.docs.map(d=>Object.assign({id:d.id},d.data())); DB.save('smsOutbox',smsOutbox); try{ _smsRefresh(); }catch(_){} }, e=>{ window._smsListenErr=e.code||e.message; console.warn('smsOutbox listener:',e.message); }));
+    // 💬 Two-way texts: replies from clients (written by the receiveSms function) and numbers that replied STOP.
+    _listeners.push(col('smsInbox').onSnapshot(snap=>{ smsInbox=snap.docs.map(d=>Object.assign({id:d.id},d.data())); DB.save('smsInbox',smsInbox); try{ _textsRefresh(); }catch(_){} }, e=>console.warn('smsInbox listener:', e.message)));
+    _listeners.push(col('smsOptOut').onSnapshot(snap=>{ smsOptOut=snap.docs.map(d=>Object.assign({id:d.id},d.data())); DB.save('smsOptOut',smsOptOut); try{ _textsRefresh(); }catch(_){} }, e=>console.warn('smsOptOut listener:', e.message)));
     // Outlook set-up: appConfig/outlook, mirrored to staff/outlookSetup (readable under the rules
     // already published, so staff get it before the newer appConfig rules are). Newest copy wins.
     const _outlookCfgIn=(where)=>doc=>{ _outlookCfgSeen[where]=true; if(doc.exists) _applyOutlookConfig(doc.data()||{}); };
@@ -1263,15 +1266,19 @@ const FSYNC = (() => {
     const ref = await col('ideas').add(doc); return Object.assign({ id:ref.id }, doc);
   }
   async function updateIdea(id, patch) { if(!db) throw new Error('Not connected to the cloud'); await col('ideas').doc(id).update(patch); }
-  async function queueSms(clientId, kind, linkId) {
+  // kind 'message' = a worker's two-way text: only its words go with it (never a number).
+  async function queueSms(clientId, kind, linkId, body) {
     if(!db) throw new Error('Not connected to the cloud');
     const u = firebase.auth().currentUser; if(!u) throw new Error('Not signed in');
-    const req = { kind: kind==='intake' ? 'intake' : 'handbook', clientId:String(clientId), requestedBy:u.uid,
+    const req = { kind: kind==='intake' ? 'intake' : kind==='message' ? 'message' : 'handbook', clientId:String(clientId), requestedBy:u.uid,
       requestedByName:(typeof currentUser!=='undefined'&&currentUser&&currentUser.name)||'', requestedAt:new Date().toISOString() };
     if (req.kind==='intake') req.linkId = String(linkId||'');
+    if (req.kind==='message') req.body = String(body||'');
     const ref = await col('smsOutbox').add(req);
     return ref.id;
   }
+  // A reply: mark it seen, dismiss it, or put an unmatched one on a client's file (the rules allow only these).
+  async function updateSmsInbox(id, patch) { if(!db) throw new Error('Not connected to the cloud'); await col('smsInbox').doc(id).update(patch); }
   // 📲 Intake by link. Expiry is a Firestore Timestamp — the rules compare it with the server clock.
   const _ts = d => (firebase.firestore && firebase.firestore.Timestamp) ? firebase.firestore.Timestamp.fromDate(d) : d.toISOString();
   async function createIntakeForm(formId, form, link) {
@@ -1318,7 +1325,7 @@ const FSYNC = (() => {
 
   return { init, isReady, pushAll, pushClients, pushNotes, pushReferrals, pushWorkers, pushTasks, pushAudit, pushBrokerage, deleteDoc, getCfg, saveCfg, showSetupModal, clearConfig,
     storageReady, uploadFile, deleteStorageFile, getStorageURL, pushPolicies,
-    pushFpho, pushWalkins, pushCalEvents, pushResources, resyncAll, pushStaff, fetchStaff, staffSyncStatus, queueSms, setSmsConfig, setAppConfig, submitIdea, updateIdea,
+    pushFpho, pushWalkins, pushCalEvents, pushResources, resyncAll, pushStaff, fetchStaff, staffSyncStatus, queueSms, updateSmsInbox, setSmsConfig, setAppConfig, submitIdea, updateIdea,
     createIntakeForm, updateIntakeForm, cancelIntakeForm, createConsentForm, updateConsentForm, cancelConsentForm, saveCoi, updateCoi };
 })();
 
@@ -1345,13 +1352,15 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v122';
+const APP_VERSION = 'v123';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
 let fphoClients = DB.load('fphoClients', []); // separate client roster for the FPHO program
 let resources = DB.load('resources', []);
 let smsOutbox = DB.load('smsOutbox', []);     // automatic text requests + results (Cloud Function)
+let smsInbox = DB.load('smsInbox', []) || [];    // 💬 replies from clients (receiveSms Cloud Function)
+let smsOptOut = DB.load('smsOptOut', []) || [];  // numbers that replied STOP
 let smsConfig = DB.load('smsConfig', {});
 let outlookOrgConfig = DB.load('outlookOrgConfig', {}) || {};   // { clientId, tenant } — set once by the System Manager, shared
 const _outlookCfgSeen = {};                                       // which cloud copies of the Outlook set-up this device has read
@@ -1981,6 +1990,8 @@ function renderDashboard() {
 
   return `
   ${vprAlertsCardHTML()}
+  ${textAlertsCardHTML()}
+  ${unmatchedTextsCardHTML()}
   ${alertHTML}
   ${returnedIntakeFormsCardHTML()}
   ${returnedConsentFormsCardHTML()}
@@ -2147,7 +2158,7 @@ function profileSectionGroups(c, counts) {
   const hr = homeRiskStatus(c).ok ? '' : ' ⚠️';
   return [
     ['Client file', [{ v:'overview', l:'🏠 Overview' }, { v:'summary', l:'📄 Summary' }, { v:'demographics', l:'👤 Personal details' }, { v:'keyworkers', l:'👷 Key workers' }, { v:'coi', l:`⚖️ Conflict of interest${(n => n ? ` (${n})` : '')(coiVisibleFor(c.id).filter(coiActive).length)}` }]],
-    ['Case work', [{ v:'intake', l:'📋 Intake form' }, { v:'consents', l:`✍️ Consent forms (${consentRecordsOf(c).length})` }, { v:'notes', l:`📝 Case notes (${counts.notes})` }, { v:'goals', l:`🎯 Goals & progress (${counts.goals})` }, { v:'time', l:`⏱️ Time (${counts.time})` }, { v:'files', l:`📎 Files (${counts.files})` }]],
+    ['Case work', [{ v:'intake', l:'📋 Intake form' }, { v:'consents', l:`✍️ Consent forms (${consentRecordsOf(c).length})` }, { v:'notes', l:`📝 Case notes (${counts.notes})` }, { v:'texts', l:`💬 Texts${(n => n ? ` (${n} new)` : '')(textNewCount(c.id))}` }, { v:'goals', l:`🎯 Goals & progress (${counts.goals})` }, { v:'time', l:`⏱️ Time (${counts.time})` }, { v:'files', l:`📎 Files (${counts.files})` }]],
     ['Safety & feedback', [{ v:'safety', l:'🛡️ Safety plan' }, { v:'homerisk', l:`🏠 Home risk assessment${hr}` }, { v:'vpr', l:`🚨 Emergency plan & VPR${vprOnRegister(c) ? ' — on register' : ''}` }, { v:'feedback', l:'⭐ Feedback' }]],
     enrolled.length ? ['Programs — enrolled', enrolled] : null,
     other.length ? ['Programs — not enrolled', other] : null,
@@ -2321,6 +2332,7 @@ function _renderProfileTabBody(tab, c, clientNotes, clientTime) {
   if(tab === 'vpr') return renderVprTab(c);
   if(tab === 'consents') return renderConsentsTab(c);
   if(tab === 'coi') return renderCoiTab(c);
+  if(tab === 'texts') return renderTextsTab(c);
   if(tab === 'overview') {
     const totalMins = clientTime.reduce((a,t)=>a+(t.minutes||0),0);
     const recent = clientNotes.slice(0,3);
@@ -4056,6 +4068,7 @@ function handbookSends(c) {
   return [...(c.handbookSent || []), ...auto].sort((a, b) => String(a.at).localeCompare(String(b.at)));
 }
 function _smsRefresh() {
+  try { _textsRefresh(); } catch (_) {}
   if (currentClientId) {
     const c = clients.find(x => x.id === currentClientId);
     if (c) {
@@ -4268,6 +4281,8 @@ function smsSettingsCardHTML() {
     <p style="font-size:13px;color:var(--muted);margin-bottom:10px">When on, saving an intake with a mobile number (and "Safe to leave calls/texts?" = Yes) sends the SEWB Participant Handbook text automatically from Worn Gundidj — no phone needed. Requires the SMS Cloud Function and an SMS provider account (see <code>docs/SMS-SETUP.md</code>). Each text costs a few cents.</p>
     <label style="display:flex;gap:8px;align-items:center;font-size:14px;font-weight:600"><input type="checkbox" id="sms-auto-toggle" ${on ? 'checked' : ''} ${FSYNC.isReady() ? '' : 'disabled'} onchange="setSmsAuto(this.checked)"> Send the handbook text automatically</label>
     ${on && smsConfig.updatedBy ? `<div style="font-size:11px;color:var(--muted);margin-top:4px">Turned on by ${sanitize(smsConfig.updatedBy)} · ${fmtdt(smsConfig.updatedAt)}</div>` : ''}
+    <label style="display:flex;gap:8px;align-items:center;font-size:14px;font-weight:600;margin-top:12px"><input type="checkbox" id="sms-twoway-toggle" ${smsConfig && smsConfig.twoWay ? 'checked' : ''} ${FSYNC.isReady() ? '' : 'disabled'} onchange="setSmsTwoWay(this.checked)"> 💬 Two-way texts with clients (Twilio)</label>
+    <div style="font-size:12px;color:var(--muted);margin:2px 0 0 26px">Workers send texts from the <strong>💬 Texts</strong> section of a client’s file, and clients’ replies come back there. Turn on only once the Twilio number is set up to send replies to the text service (docs/SMS-SETUP.md, “Two-way texts”).${smsConfig && smsConfig.twoWay && smsConfig.twoWayBy ? ` Turned on by ${sanitize(smsConfig.twoWayBy)} · ${fmtdt(smsConfig.twoWayAt)}` : ''}</div>
     <div id="sms-settings-status" style="margin-top:10px">${smsSettingsStatusHTML()}</div>
     <div id="sms-usage">${smsUsageHTML()}</div>
   </div>`;
@@ -4275,10 +4290,19 @@ function smsSettingsCardHTML() {
 async function setSmsAuto(on) {
   if (currentUser?.role !== 'sysmanager') { showToast('Only the System Manager can change this'); return; }
   if (on && !confirm('Turn on automatic handbook texts?\n\nOnly do this once the SMS Cloud Function is deployed and the provider is set up (docs/SMS-SETUP.md). Otherwise requests will wait and nothing is sent.')) { showPage('settings'); return; }
-  try { await FSYNC.setSmsConfig({ autoHandbook: !!on, updatedBy: currentUser?.name || '', updatedAt: new Date().toISOString() });
+  try { await FSYNC.setSmsConfig(Object.assign({}, smsConfig || {}, { autoHandbook: !!on, updatedBy: currentUser?.name || '', updatedAt: new Date().toISOString() }));
     audit(on ? 'Automatic texts turned on' : 'Automatic texts turned off', 'SEWB Participant Handbook');
-    smsConfig = { autoHandbook: !!on, updatedBy: currentUser?.name || '', updatedAt: new Date().toISOString() }; showToast(on ? 'Automatic texts on' : 'Automatic texts off'); showPage('settings');
+    smsConfig = Object.assign({}, smsConfig || {}, { autoHandbook: !!on, updatedBy: currentUser?.name || '', updatedAt: new Date().toISOString() }); showToast(on ? 'Automatic texts on' : 'Automatic texts off'); showPage('settings');
   } catch (e) { showToast('⚠️ Could not change the setting: ' + (e.message || e)); }
+}
+async function setSmsTwoWay(on) {
+  if (currentUser?.role !== 'sysmanager') { showToast('Only the System Manager can change this'); showPage('settings'); return; }
+  if (on && !confirm('Turn on two-way texts?\n\nOnly do this once the text service is deployed with SMS_PROVIDER=twilio and the Twilio number sends replies to receiveSms (docs/SMS-SETUP.md, "Two-way texts").\n\nWorkers will then be able to text clients from their file.')) { showPage('settings'); return; }
+  const cfg = Object.assign({}, smsConfig || {}, { twoWay: !!on, twoWayBy: currentUser?.name || '', twoWayAt: new Date().toISOString() });
+  try { await FSYNC.setSmsConfig(cfg); smsConfig = cfg;
+    audit(on ? 'Two-way texts turned on' : 'Two-way texts turned off', 'Texts with clients (Twilio)');
+    showToast(on ? '💬 Two-way texts on' : 'Two-way texts off'); showPage('settings');
+  } catch (e) { showToast('⚠️ Could not change the setting: ' + (e.message || e)); showPage('settings'); }
 }
 function handbookRowState(c) {
   if (hasHandbook(c)) return 'done';
@@ -14923,6 +14947,219 @@ function _consentFormsRefresh() {
   }
 }
 
+// ============================================================
+// 💬 TWO-WAY TEXTS WITH CLIENTS (Twilio)
+// A worker writes a text in the 💬 Texts section of the client's file. Only the words go to the cloud
+// (smsOutbox, kind "message"); the text service (functions-sms) reads the number from the file, checks
+// consent, STOP replies, the hourly cap and the monthly budget, sends it from the organisation's
+// Twilio number and writes the result back. A client's reply comes in through the receiveSms webhook
+// into smsInbox, matched to the client by number. The client's Key Worker is alerted on the
+// Dashboard; replies that could not be matched wait in "Unmatched texts" for managers and supervisors.
+// ============================================================
+const TEXT_MAX_CHARS = 640, TEXT_MAX_PARTS = 4;     // the same limits as the text service and the rules
+const _GSM_BASIC = '@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !"#¤%&\'()*+,-./0123456789:;<=>?¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà', _GSM_EXT = '^{}\\[~]|€\f';
+// Same as functions-sms/lib.js normaliseMessage / smsParts (a test checks they agree).
+function textNormalise(t) {
+  return String(t || '').replace(/[‘’‚′]/g, "'").replace(/[“”„″]/g, '"')
+    .replace(/[–—−]/g, '-').replace(/…/g, '...').replace(/[   ]/g, ' ')
+    .replace(/\r\n?/g, '\n').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+function textParts(t) {
+  const s = String(t || ''), gsm = s.split('').every(ch => _GSM_BASIC.includes(ch) || _GSM_EXT.includes(ch));
+  if (gsm) { const len = s.split('').reduce((n, ch) => n + (_GSM_EXT.includes(ch) ? 2 : 1), 0); return len <= 160 ? 1 : Math.ceil(len / 153); }
+  return s.length <= 70 ? 1 : Math.ceil(s.length / 67);
+}
+function textOptedOut(c) { const m = auMobile(c && c.phone); return !!m && (smsOptOut || []).some(o => (o.mobile || o.id) === m); }
+function textNewCount(clientId) { return (smsInbox || []).filter(m => m.clientId === clientId && m.status === 'new').length; }
+// Why a text can't be sent to this client right now ('' = it can).
+function textBlockReason(c) {
+  if (!FSYNC.isReady()) return 'Texts need the cloud connection (Settings → Firebase).';
+  if (!(smsConfig && smsConfig.twoWay)) return 'Two-way texts are not switched on yet. The System Manager turns them on in Settings → Automatic texts, once the Twilio number is set up.';
+  if (!auMobile(c.phone)) return 'There is no Australian mobile number on this file — add one in Edit details.';
+  if (c.ifSafeContact !== 'Yes') return 'The client has not said it is safe to leave texts (“Safe to leave calls/texts?” on the intake is not Yes).';
+  if (textOptedOut(c)) return 'The client replied STOP, so texts to this number are switched off. They can reply START to turn them back on.';
+  return '';
+}
+// Everything texted to and from this client, oldest first: automatic texts (handbook, intake link), workers' texts and replies.
+function textConversation(clientId) {
+  const out = (smsOutbox || []).filter(o => o.clientId === clientId).map(o => ({ dir: 'out', at: o.sentAt || o.processedAt || o.requestedAt || '', o }));
+  const inn = (smsInbox || []).filter(m => m.clientId === clientId).map(m => ({ dir: 'in', at: m.receivedAt || '', m }));
+  return [...out, ...inn].sort((a, b) => String(a.at).localeCompare(String(b.at)));
+}
+function _textBubbleHTML(x) {
+  const time = `<span>${sanitize(fmtdt(x.at))}</span>`;
+  if (x.dir === 'in') {
+    const m = x.m;
+    return `<div class="tx-msg tx-in" data-id="${sanitize(m.id)}"><div class="tx-bubble">${sanitize(m.body || '') || '<em>(no words)</em>'}${m.numMedia ? `<div class="tx-note">📎 ${m.numMedia} picture${m.numMedia === 1 ? '' : 's'} sent — see it in Twilio</div>` : ''}</div>
+      <div class="tx-meta">${time}<span>from ${sanitize(m.from || '')}</span>${m.optOut === 'stop' ? '<span class="tx-flag">Replied STOP — texts switched off</span>' : m.optOut === 'start' ? '<span class="tx-flag">Replied START — texts back on</span>' : ''}${m.status === 'new' ? '<span class="tx-new">New</span>' : m.readBy ? `<span>Seen by ${sanitize(m.readBy)}</span>` : ''}${m.matchedBy === 'manual' && m.assignedBy ? `<span>Put on this file by ${sanitize(m.assignedBy)}</span>` : ''}</div></div>`;
+  }
+  const o = x.o, label = o.kind === 'handbook' ? '📘 Participant Handbook (automatic)' : o.kind === 'intake' ? '📲 Intake form link (automatic)' : '';
+  const words = o.message || o.body || '';
+  const st = smsPending(o) ? (smsStuck(o) ? '<span class="tx-flag">⚠️ Still waiting — the text service may not be running</span>' : '<span>Sending…</span>')
+    : o.status === 'sent' ? `<span>✓ Sent${o.to ? ' to ' + sanitize(o.to) : ''}</span>` : `<span class="tx-flag">✗ Not sent — ${sanitize(o.reason || o.status || '')}</span>`;
+  return `<div class="tx-msg tx-out${o.status === 'sent' ? '' : smsPending(o) ? ' tx-wait' : ' tx-fail'}" data-id="${sanitize(o.id)}"><div class="tx-bubble">${label ? `<div class="tx-note">${label}</div>` : ''}${sanitize(words)}</div>
+    <div class="tx-meta">${time}${o.requestedByName ? `<span>${sanitize(o.requestedByName)}</span>` : ''}${st}</div></div>`;
+}
+function textThreadHTML(c) {
+  const conv = textConversation(c.id);
+  return conv.length ? conv.map(_textBubbleHTML).join('') : `<div class="empty-state" style="padding:24px"><div class="icon">💬</div><p>No texts with ${sanitize(clientGivenName(c) || 'this client')} yet.</p></div>`;
+}
+const _textDraft = {};      // what's typed in each client's message box (kept while the conversation updates)
+function _textDefault(c) {
+  const me = String(currentUser?.name || '').trim().split(/\s+/)[0] || '';
+  const team = (typeof WG_TEAMS !== 'undefined' && WG_TEAMS.name) ? WG_TEAMS.name(ACTIVE_TEAM) : 'Worn Gundidj';
+  return `Hi ${clientGivenName(c) || 'there'}, \n\n- ${me ? me + ', ' : ''}${team}`;
+}
+function textCounterText(v) {
+  const t = textNormalise(v), n = t.length, parts = t ? textParts(t) : 0;
+  const over = n > TEXT_MAX_CHARS || parts > TEXT_MAX_PARTS;
+  return { over, text: `${n}/${TEXT_MAX_CHARS} characters · ${parts} SMS${parts > 1 ? ' (billed as ' + parts + ')' : ''}${over ? ` — too long (at most ${TEXT_MAX_PARTS} SMS)` : ''}` };
+}
+function textInput(clientId, el) {
+  _textDraft[clientId] = el.value;
+  const k = textCounterText(el.value), cn = document.getElementById('tx-count');
+  if (cn) { cn.textContent = k.text; cn.style.color = k.over ? 'var(--danger)' : 'var(--muted)'; }
+}
+function renderTextsTab(c) {
+  const why = textBlockReason(c), mob = auMobile(c.phone);
+  const draft = _textDraft[c.id] != null ? _textDraft[c.id] : _textDefault(c), k = textCounterText(draft);
+  setTimeout(() => markTextsSeen(c.id), 0);
+  return `<style>
+    .tx-thread { display:flex; flex-direction:column; gap:10px; padding:12px; background:var(--bg); border:1px solid var(--border); border-radius:10px; max-height:55vh; overflow-y:auto; }
+    .modal-full .tx-thread { max-height:none; }
+    .tx-msg { display:flex; flex-direction:column; max-width:80%; }
+    .tx-in { align-self:flex-start; } .tx-out { align-self:flex-end; align-items:flex-end; }
+    .tx-bubble { padding:9px 12px; border-radius:14px; font-size:14px; line-height:1.45; white-space:pre-wrap; word-break:break-word; }
+    .tx-in .tx-bubble { background:var(--card,#fff); border:1px solid var(--border); border-bottom-left-radius:4px; }
+    .tx-out .tx-bubble { background:var(--primary); color:#fff; border-bottom-right-radius:4px; }
+    .tx-out.tx-wait .tx-bubble { opacity:.7; } .tx-out.tx-fail .tx-bubble { background:#6b7280; }
+    .tx-note { font-size:11px; opacity:.85; margin-bottom:3px; font-weight:600; }
+    .tx-meta { display:flex; gap:8px; flex-wrap:wrap; font-size:11px; color:var(--muted); margin-top:3px; }
+    .tx-new { background:#dc2626; color:#fff; border-radius:8px; padding:0 6px; font-weight:700; }
+    .tx-flag { color:#b45309; font-weight:600; }
+  </style>
+  <div class="card" style="margin-bottom:12px">
+    <div class="card-header" style="flex-wrap:wrap;gap:8px"><div class="card-title">💬 Texts with ${sanitize(clientGivenName(c) || c.fullName || 'this client')}</div>
+      <span style="font-size:12px;color:var(--muted)">${mob ? '📱 ' + sanitize(_maskPhone(mob)) : 'No mobile on file'}${textOptedOut(c) ? ' · <strong style="color:#b45309">replied STOP</strong>' : ''}</span></div>
+    <div class="tx-thread" id="tx-thread" role="log" aria-label="Texts with this client">${textThreadHTML(c)}</div>
+    <div id="tx-compose" style="margin-top:12px">
+      ${why ? `<div class="alert alert-info" id="tx-blocked" style="font-size:13px;margin:0">${sanitize(why)}</div>` : `
+      <label for="tx-body" style="font-size:12px;font-weight:600">New text</label>
+      <textarea id="tx-body" rows="4" maxlength="${TEXT_MAX_CHARS + 60}" style="width:100%;margin-top:4px;font:inherit;font-size:14px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--card,#fff);color:var(--text);box-sizing:border-box" oninput="textInput('${sanitize(c.id)}',this)">${sanitize(draft)}</textarea>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px">
+        <span id="tx-count" style="font-size:11px;color:${k.over ? 'var(--danger)' : 'var(--muted)'}">${k.text}</span>
+        <button class="btn btn-primary btn-sm" id="tx-send" onclick="sendClientText('${sanitize(c.id)}')">📤 Send text</button></div>
+      <div style="font-size:11px;color:var(--muted);margin-top:6px">Sent from the organisation’s number. Texts and replies are kept on this file and in the audit log (who and when, not the words). Don’t put anything in a text you wouldn’t want someone else holding their phone to read.</div>`}
+    </div>
+  </div>`;
+}
+async function sendClientText(id) {
+  const c = clients.find(x => x.id === id); if (!c || !canViewClient(c)) return;
+  const why = textBlockReason(c); if (why) { alert(why); return; }
+  const el = document.getElementById('tx-body'), body = textNormalise(el ? el.value : '');
+  if (!body || body === textNormalise(_textDefault(c))) { alert('Write your message first.'); return; }
+  if (body.length > TEXT_MAX_CHARS || textParts(body) > TEXT_MAX_PARTS) { alert(`That text is too long — at most ${TEXT_MAX_PARTS} SMS (about ${TEXT_MAX_PARTS * 153} plain characters).`); return; }
+  const btn = document.getElementById('tx-send'); if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+  try {
+    await FSYNC.queueSms(c.id, 'message', null, body);
+    delete _textDraft[c.id];
+    audit('Text message requested', `${c.fullName} — to ${_maskPhone(auMobile(c.phone))}`, c.id);
+    showToast('📤 Text on its way');
+    if (document.getElementById('tx-thread')) switchProfileTab('texts', c.id);
+  } catch (e) {
+    showToast('⚠️ The text could not be sent: ' + (e.message || e));
+    if (btn) { btn.disabled = false; btn.textContent = '📤 Send text'; }
+  }
+}
+// Opening the conversation marks its new replies as seen (by name and time).
+function markTextsSeen(clientId) {
+  if (!FSYNC.isReady() || !document.getElementById('tx-thread')) return;
+  const who = currentUser?.name || '', at = new Date().toISOString();
+  (smsInbox || []).filter(m => m.clientId === clientId && m.status === 'new').forEach(m => {
+    Object.assign(m, { status: 'read', readBy: who, readAt: at });
+    FSYNC.updateSmsInbox(m.id, { status: 'read', readBy: who, readAt: at }).catch(e => console.warn('mark text seen:', e.message));
+  });
+  DB.save('smsInbox', smsInbox);
+  try { _textAlertsRefresh(); } catch (_) {}
+}
+// ---- alerts: the Key Worker's new replies ----
+// New replies on clients where you are the Key Worker now; managers and supervisors also see replies
+// on clients who have no Key Worker.
+function textAlerts() {
+  const me = currentUser?.name || '', mgr = _clientOversightRole();
+  return (smsInbox || []).filter(m => m.status === 'new' && m.clientId).map(m => ({ m, c: clients.find(x => x.id === m.clientId) }))
+    .filter(({ c }) => c && canViewClient(c) && (isCurrentKeyWorker(c, me) || (mgr && !c.keyWorker)))
+    .sort((a, b) => String(b.m.receivedAt || '').localeCompare(String(a.m.receivedAt || '')));
+}
+function textAlertsCardHTML() {
+  const list = textAlerts(); if (!list.length) return '';
+  return `<div class="card" id="tx-alerts" style="margin-bottom:16px;border-left:4px solid #2563eb">
+    <div class="card-header"><div class="card-title">💬 New texts from clients (${list.length})</div></div>
+    ${list.map(({ m, c }) => `<div class="tx-alert-row" data-id="${sanitize(m.id)}" style="display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--border);flex-wrap:wrap">
+      <span style="flex:1;min-width:200px;font-size:13px"><strong>${sanitize(c.fullName)}</strong> <span style="color:var(--muted)">· ${sanitize(fmtdt(m.receivedAt))}</span><br><span style="color:var(--muted)">“${sanitize(String(m.body || '').slice(0, 90))}${String(m.body || '').length > 90 ? '…' : ''}”</span></span>
+      <button class="btn btn-sm btn-primary" onclick="openClientProfile('${sanitize(c.id)}','texts')">Open texts →</button></div>`).join('')}
+  </div>`;
+}
+// ---- replies the service couldn't match to one client (managers and supervisors) ----
+function unmatchedTexts() { return _clientOversightRole() ? (smsInbox || []).filter(m => !m.clientId && m.status === 'new').sort((a, b) => String(b.receivedAt || '').localeCompare(String(a.receivedAt || ''))) : []; }
+function unmatchedTextsCardHTML() {
+  const list = unmatchedTexts(); if (!list.length) return '';
+  const opts = visibleClients(clients).filter(c => c.fullName).sort((a, b) => a.fullName.localeCompare(b.fullName));
+  return `<div class="card" id="tx-unmatched" style="margin-bottom:16px;border-left:4px solid #f59e0b">
+    <div class="card-header"><div class="card-title">📱 Unmatched texts (${list.length})</div></div>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:6px">Texts to the organisation’s number from a number that isn’t on exactly one client’s file. Put each on the right file (the Key Worker is then alerted), or dismiss it.</p>
+    ${list.map(m => { const cand = (m.candidates || []).map(id => opts.find(c => c.id === id)).filter(Boolean);
+      return `<div class="tx-unmatched-row" data-id="${sanitize(m.id)}" style="padding:10px 0;border-top:1px solid var(--border)">
+      <div style="font-size:13px"><strong>${sanitize(m.from || m.fromFull || 'Unknown number')}</strong> <span style="color:var(--muted)">· ${sanitize(fmtdt(m.receivedAt))}</span></div>
+      <div style="font-size:13px;margin:4px 0;white-space:pre-wrap">“${sanitize(m.body || '')}”</div>
+      ${cand.length ? `<div style="font-size:12px;color:var(--muted)">This number is on ${cand.length} files: ${cand.map(c => sanitize(c.fullName)).join(', ')}</div>` : ''}
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;align-items:center">
+        <select id="tx-assign-${sanitize(m.id)}" aria-label="Client file" style="max-width:100%"><option value="">Choose the client…</option>${(cand.length ? [...cand, ...opts.filter(c => !cand.includes(c))] : opts).map(c => `<option value="${sanitize(c.id)}">${sanitize(c.fullName)}</option>`).join('')}</select>
+        <button class="btn btn-sm btn-primary" onclick="assignText('${sanitize(m.id)}')">Put on file</button>
+        <button class="btn btn-sm btn-outline" onclick="dismissText('${sanitize(m.id)}')">Dismiss</button></div></div>`; }).join('')}
+  </div>`;
+}
+async function assignText(id) {
+  const m = (smsInbox || []).find(x => x.id === id), cid = document.getElementById('tx-assign-' + id)?.value, c = clients.find(x => x.id === cid);
+  if (!m || !_clientOversightRole()) return;
+  if (!c) { alert('Choose the client this text is from.'); return; }
+  if (!confirm(`Put this text on ${c.fullName}'s file?\n\n“${String(m.body || '').slice(0, 200)}”`)) return;
+  const patch = { clientId: c.id, matchedBy: 'manual', assignedBy: currentUser?.name || '', assignedAt: new Date().toISOString(), status: 'new' };
+  try { await FSYNC.updateSmsInbox(id, patch); Object.assign(m, patch); DB.save('smsInbox', smsInbox);
+    audit('Text put on a client file', `${c.fullName} — from ${m.from || ''}`, c.id); showToast(`Text put on ${c.fullName}'s file`); showPage('dashboard');
+  } catch (e) { showToast('⚠️ Could not save: ' + (e.message || e)); }
+}
+async function dismissText(id) {
+  const m = (smsInbox || []).find(x => x.id === id); if (!m || !_clientOversightRole()) return;
+  if (!confirm('Dismiss this text? It is kept (and in the audit log) but no longer listed.')) return;
+  try { await FSYNC.updateSmsInbox(id, { status: 'dismissed', readBy: currentUser?.name || '', readAt: new Date().toISOString() });
+    m.status = 'dismissed'; DB.save('smsInbox', smsInbox); audit('Unmatched text dismissed', `from ${m.from || ''}`); showPage('dashboard');
+  } catch (e) { showToast('⚠️ Could not save: ' + (e.message || e)); }
+}
+// ---- keeping the screen up to date as texts arrive ----
+const _textToasted = new Set();
+function _textAlertsRefresh() {
+  textAlerts().forEach(({ m, c }) => { if (_textToasted.has(m.id)) return; _textToasted.add(m.id);
+    if (!(document.getElementById('tx-thread') && currentClientId === c.id)) showToast(`💬 New text from ${clientGivenName(c) || c.fullName}`); });
+  if (currentPage === 'dashboard' && !document.querySelector('#modal-container .modal-overlay')) {
+    const a = document.getElementById('tx-alerts'), b = document.getElementById('tx-unmatched'), ha = textAlertsCardHTML(), hb = unmatchedTextsCardHTML();
+    if (!!a !== !!ha || !!b !== !!hb || (a && a.outerHTML.length !== ha.length) || (b && b.outerHTML.length !== hb.length)) showPage('dashboard');
+  }
+}
+function _textsRefresh() {
+  const th = document.getElementById('tx-thread');
+  if (th && currentClientId) {
+    const c = clients.find(x => x.id === currentClientId);
+    if (c) {
+      const atEnd = th.scrollHeight - th.scrollTop - th.clientHeight < 40;
+      th.innerHTML = textThreadHTML(c); if (atEnd) th.scrollTop = th.scrollHeight;
+      const blocked = !!textBlockReason(c), shown = !document.getElementById('tx-body');
+      if (blocked !== shown) switchProfileTab('texts', c.id); else markTextsSeen(c.id);
+    }
+  }
+  _textAlertsRefresh();
+}
+
 // ---- SMS spend this month (written by the SMS Cloud Function) ----
 let smsUsageMonth = DB.load('smsUsageMonth', null);
 function smsBudgetMonth(d) { return new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Melbourne', year: 'numeric', month: '2-digit' }).format(d || new Date()).slice(0, 7); }
@@ -16459,8 +16696,8 @@ function _resumeTeamSignIn() {
 // (they are read again from the cloud next time).
 function _purgeLocalRecords(auditInCloud) {
   clients=[]; notes=[]; timeLogs=[]; referrals=[];
-  smsOutbox=[]; intakeForms=[]; consentForms=[]; coiList=[];   // cloud-held (re-read at next sign-in); they carry client names, numbers and signatures
-  ['clients','notes','timelogs','referrals','fphoApplications','fphoClients','resources','smsOutbox','intakeForms','consentForms','coi'].forEach(k=>DB.save(k,[]));
+  smsOutbox=[]; smsInbox=[]; smsOptOut=[]; intakeForms=[]; consentForms=[]; coiList=[];   // cloud-held (re-read at next sign-in); they carry client names, numbers, texts and signatures
+  ['clients','notes','timelogs','referrals','fphoApplications','fphoClients','resources','smsOutbox','smsInbox','smsOptOut','intakeForms','consentForms','coi'].forEach(k=>DB.save(k,[]));
   // Calendar and walk-in register (client names) are whole lists held in the cloud and re-read at sign-in.
   calEvents=[]; walkins=[]; DB.save('calevents',[]); DB.save('walkins',[]);
   // Audit log: cleared only once every entry is confirmed in the cloud (it is re-read at sign-in).

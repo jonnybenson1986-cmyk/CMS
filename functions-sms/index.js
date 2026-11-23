@@ -1,4 +1,4 @@
-// Worn Gundidj CMS — automatic texts: the handbook, and intake-form links (Cloud Function, codebase "sms").
+// Worn Gundidj CMS — texts: the handbook, intake-form links and two-way texts with clients (Cloud Functions, codebase "sms").
 //
 // Deploy ONLY this codebase:   firebase deploy --only functions:sms
 // (Never plain "--only functions" — the other codebase holds role functions
@@ -10,12 +10,17 @@
 // through the SMS provider, then writes the result back onto the same outbox
 // document and to the audit log. Firestore rules stop browsers from changing
 // an outbox document after creating it — only this code can.
+//
+// Replies (Twilio only): receiveSms is the webhook Twilio calls when a client texts the number back.
+// It checks Twilio's signature, matches the number to a client and keeps the reply in
+// teams/{team}/smsInbox (the CMS shows it on the client's file). STOP / START switch texts off / on.
 
 const { onDocumentCreated } = require('firebase-functions/v2/firestore');
+const { onRequest } = require('firebase-functions/v2/https');
 const { defineSecret, defineString } = require('firebase-functions/params');
 const admin = require('firebase-admin');
 const lib = require('./lib');
-const { handleOutbox } = require('./handler');
+const { handleOutbox, handleInbound } = require('./handler');
 
 admin.initializeApp();
 const REGION = 'australia-southeast1';          // same region as Firestore (Sydney)
@@ -30,6 +35,9 @@ const SMS_COST_PER_PART = defineString('SMS_COST_PER_PART', { default: '0.10' })
 const SMS_FROM = defineString('SMS_FROM');          // sender number or registered sender name
 const SMS_USERNAME = defineSecret('SMS_USERNAME');
 const SMS_API_KEY = defineSecret('SMS_API_KEY');
+// The exact webhook URL set on the Twilio number (without ?team=…), e.g.
+// https://australia-southeast1-<project>.cloudfunctions.net/receiveSms — Twilio signs this URL.
+const SMS_WEBHOOK_URL = defineString('SMS_WEBHOOK_URL', { default: '' });
 
 exports.sendHandbookSms = onDocumentCreated(
   { document: 'teams/{teamId}/smsOutbox/{id}', region: REGION, secrets: [SMS_USERNAME, SMS_API_KEY], retry: false },
@@ -41,3 +49,10 @@ exports.sendHandbookSms = onDocumentCreated(
     send: (to, body) => lib.sendViaProvider(SMS_PROVIDER.value(),
       { username: SMS_USERNAME.value(), apiKey: SMS_API_KEY.value(), from: SMS_FROM.value() }, to, body),
   }));
+
+// Twilio → a client's reply. Public URL (Twilio must reach it); every request must carry a valid
+// Twilio signature, which only Twilio (holding the auth token) can make.
+exports.receiveSms = onRequest(
+  { region: REGION, secrets: [SMS_API_KEY], maxInstances: 5 },
+  (req, res) => handleInbound(req, res, { db: admin.firestore(), authToken: SMS_API_KEY.value(), webhookUrl: SMS_WEBHOOK_URL.value(), provider: SMS_PROVIDER.value() })
+    .catch((e) => { console.error('receiveSms', e); res.status(500).send('Error'); }));

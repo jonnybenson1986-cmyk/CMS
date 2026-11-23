@@ -156,17 +156,20 @@ service cloud.firestore {
     }
 
     // ── Automatic texts (SMS Cloud Function, functions-sms/) ───────────────
-    // A browser may only ASK for a text: kind (handbook / intake link) + client id
-    // (+ which intake link) + its own uid. It
-    // cannot supply a number or message, and cannot change a request after
+    // A browser may only ASK for a text: kind (handbook / intake link / a worker's message) + client id
+    // (+ which intake link, or the words of the message) + its own uid. It
+    // cannot supply a number (the function reads it from the client's file), cannot add words to a
+    // handbook or intake text, and cannot change a request after
     // creating it — the Cloud Function (Admin SDK) writes the result.
     match /teams/{teamId}/smsOutbox/{id} {
       allow read: if inTeam(teamId);
       allow create: if inTeam(teamId)
-        && request.resource.data.keys().hasOnly(['kind', 'clientId', 'requestedBy', 'requestedByName', 'requestedAt', 'linkId'])
-        && request.resource.data.kind in ['handbook', 'intake']
+        && request.resource.data.keys().hasOnly(['kind', 'clientId', 'requestedBy', 'requestedByName', 'requestedAt', 'linkId', 'body'])
+        && request.resource.data.kind in ['handbook', 'intake', 'message']
         && (request.resource.data.kind == 'handbook'
-            || (request.resource.data.linkId is string && request.resource.data.linkId.size() >= 16 && request.resource.data.linkId.size() <= 64))
+            || (request.resource.data.kind == 'intake' && request.resource.data.linkId is string && request.resource.data.linkId.size() >= 16 && request.resource.data.linkId.size() <= 64)
+            || (request.resource.data.kind == 'message' && request.resource.data.body is string && request.resource.data.body.size() > 0 && request.resource.data.body.size() <= 640))
+        && (request.resource.data.kind == 'message' || !('body' in request.resource.data))
         && request.resource.data.clientId is string
         && request.resource.data.clientId.size() > 0 && request.resource.data.clientId.size() < 100
         && request.resource.data.requestedBy == request.auth.uid;
@@ -258,6 +261,29 @@ service cloud.firestore {
     }
     // Monthly text spend, written only by the SMS Cloud Function (Admin SDK).
     match /teams/{teamId}/smsUsage/{month} {
+      allow read: if inTeam(teamId);
+      allow write: if false;
+    }
+    // ── Replies from clients (Twilio → the receiveSms Cloud Function) ───────
+    // Only the function creates them (Admin SDK). Staff can read them and do three things:
+    // mark one as seen, dismiss one that needs nothing, or put an unmatched one on a client's file.
+    // The number, the words and when it came in can never be changed or deleted.
+    match /teams/{teamId}/smsInbox/{id} {
+      allow read: if inTeam(teamId);
+      allow update: if inTeam(teamId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'readBy', 'readAt', 'clientId', 'matchedBy', 'assignedBy', 'assignedAt'])
+        && request.resource.data.status in ['new', 'read', 'dismissed']
+        && request.resource.data.clientId is string && request.resource.data.clientId.size() < 100
+        && (resource.data.clientId == '' || request.resource.data.clientId == resource.data.clientId)
+        && request.resource.data.get('readBy', '') is string && request.resource.data.get('readBy', '').size() <= 120
+        && request.resource.data.get('readAt', '') is string && request.resource.data.get('readAt', '').size() <= 40
+        && request.resource.data.get('assignedBy', '') is string && request.resource.data.get('assignedBy', '').size() <= 120
+        && request.resource.data.get('assignedAt', '') is string && request.resource.data.get('assignedAt', '').size() <= 40
+        && request.resource.data.get('matchedBy', '') in ['', 'last-text', 'phone', 'manual'];
+      allow create, delete: if false;
+    }
+    // Numbers that replied STOP (no texts go to them until they reply START). Written only by the function.
+    match /teams/{teamId}/smsOptOut/{mobile} {
       allow read: if inTeam(teamId);
       allow write: if false;
     }

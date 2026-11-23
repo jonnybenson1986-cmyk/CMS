@@ -95,9 +95,10 @@ GitHub → *Settings → Secrets and variables → Actions*:
 | `HANDBOOK_URL` | `https://candid-trifle-167698.netlify.app/hb` |
 | `APP_URL` | `https://candid-trifle-167698.netlify.app` |
 | `SMS_FROM` | your sender number or registered name |
-| `SMS_PROVIDER` | `clicksend` |
+| `SMS_PROVIDER` | `clicksend` (or `twilio` — needed for two-way texts, see SMS-SETUP.md) |
 | `SMS_MONTHLY_BUDGET` | `10` |
 | `SMS_COST_PER_PART` | `0.10` |
+| `SMS_WEBHOOK_URL` | only for two-way texts with Twilio — the exact `receiveSms` address you give Twilio, without `?team=…` (SMS-SETUP.md, “Two-way texts”). Leave unset otherwise. |
 
 ## 5. Go live
 

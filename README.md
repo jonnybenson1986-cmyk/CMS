@@ -59,7 +59,7 @@ storage.rules               File rules — CURRENTLY DEPLOYED
 storage.rules.strict        File rules — role-based, NOT yet deployed
 
 functions/                  Cloud Functions that set role custom claims (not deployed)
-functions-sms/              Automatic text service (handbook + intake links) and its tests
+functions-sms/              Text service (handbook, intake links, two-way texts + replies via Twilio) and its tests
 scripts/                    One-off operational scripts
 tests/rules/                Firestore and Storage rules tests (run by the GitHub workflow)
 tests/browser/              End-to-end browser checks against a fake cloud (synthetic data)
@@ -70,7 +70,7 @@ docs/TEAMS.md               Teams: Worn Gundidj, the Spare team and the Test tea
 docs/DEPLOY-FIREBASE.md     Publishing rules / text service from GitHub
 docs/SECURITY-DEPLOY.md     How to roll out the strict rules safely
 docs/PRIVACY-ASSESSMENT.md  Privacy law assessment: findings, what changed, what the organisation must do
-docs/SMS-SETUP.md           Automatic texts: provider, budget, go-live
+docs/SMS-SETUP.md           Texts: provider, budget, go-live, two-way texts with Twilio
 ```
 
 The `.strict` rule files are the hardened, role-aware versions. **Do not publish
@@ -356,6 +356,15 @@ or the **✍️ Consent forms** section of the file.
   links in netlify.toml). The text service stops at **$10 a month**
   (`SMS_MONTHLY_BUDGET`) and hands texts to workers' phones until the 1st;
   Settings → Automatic texts shows the month's spend.
+* **💬 Two-way texts (Twilio)** — a **Texts** section on every client file: workers
+  write a text (the text service reads the number from the file and checks consent,
+  STOP replies and the budget), and the client's replies come back into the same
+  conversation through the `receiveSms` webhook (Twilio's signature is checked).
+  The client's Key Worker is alerted on the Dashboard; replies from a number not
+  on exactly one file go to **Unmatched texts** for managers and supervisors.
+  Replying STOP switches texts to that number off until START. Off until the
+  System Manager ticks it in Settings → Automatic texts. Set-up (Twilio number,
+  webhook address, privacy): **docs/SMS-SETUP.md → Two-way texts**.
 
 ## 💡 Ideas button
 

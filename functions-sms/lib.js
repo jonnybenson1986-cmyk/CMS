@@ -1,15 +1,19 @@
-// Worn Gundidj CMS — server-side texts (the SEWB Participant Handbook, and the
-// link to a client's own intake form). Pure logic, no Firebase imports, so it
-// can be tested on its own (see test/). index.js wires it to Firestore and the
-// SMS provider.
+// Worn Gundidj CMS — server-side texts (the SEWB Participant Handbook, the
+// link to a client's own intake form, and two-way texts a worker writes on the
+// client's file), plus replies coming back from the client (Twilio).
+// Pure logic, no Firebase imports, so it can be tested on its own (see test/).
+// index.js wires it to Firestore and the SMS provider.
 //
-// The browser never supplies a phone number or any message text. It only asks
-// "send the handbook / the intake link to client X". Everything else is
-// decided here, from the client's own record:
+// The browser never supplies a phone number. It asks "send the handbook / the
+// intake link / this message to client X". For the handbook and intake link
+// the message is written here; for a worker's message only its words come from
+// the browser. Everything else is decided here, from the client's own record:
 //   • the requester must be a signed-in account listed in the staff directory
 //   • the client must have said it's safe to leave texts ("Yes" on intake)
 //   • the number must be an Australian mobile
 //   • the handbook goes once per number; an intake link once per link
+//   • a client who replied STOP gets no more texts (until they reply START)
+//   • a worker's message is at most MESSAGE_MAX_PARTS SMS long
 //   • a cap on texts per hour limits the damage of any misuse or bug
 //   • a MONTHLY BUDGET (default $10) stops all automatic texts once reached —
 //     the CMS then hands the text back to the worker's own phone
@@ -22,6 +26,9 @@ const ORG_PHONE = '(03) 5561 5315';
 const HOURLY_CAP = 150;
 const DEFAULT_MONTHLY_BUDGET = 10;      // AUD
 const DEFAULT_COST_PER_PART = 0.10;     // AUD per SMS part — ClickSend ≈7.2¢ + GST + carrier fee, rounded up
+const MESSAGE_MAX_CHARS = 640;          // a worker's message (the Firestore rules allow the same)
+const MESSAGE_MAX_PARTS = 4;            // …and at most this many billed SMS
+const INBOUND_MAX_CHARS = 1600;         // a reply is kept up to this length (Twilio's own limit)
 
 // Australian mobile → 04xxxxxxxx, or '' if it can't take a text.
 function auMobile(v) {
@@ -44,6 +51,14 @@ function toGsm(text) {
     .replace(/[\u2013\u2014\u2212]/g, '-').replace(/\u2026/g, '...').replace(/[\u00A0\u2007\u202F]/g, ' ')
     .split('').filter(ch => GSM_BASIC.includes(ch) || GSM_EXT.includes(ch)).join('');
 }
+// A worker's message: typographic quotes/dashes made plain (they would make the text cost 2-3x as
+// much), other characters kept, spaces tidied. Emoji etc. are kept — the text is then billed as UCS-2.
+function normaliseMessage(text) {
+  return String(text || '')
+    .replace(/[\u2018\u2019\u201A\u2032]/g, "'").replace(/[\u201C\u201D\u201E\u2033]/g, '"')
+    .replace(/[\u2013\u2014\u2212]/g, '-').replace(/\u2026/g, '...').replace(/[\u00A0\u2007\u202F]/g, ' ')
+    .replace(/\r\n?/g, '\n').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+}
 // How many billed SMS parts a text takes.
 function smsParts(text) {
   const s = String(text || '');
@@ -52,7 +67,7 @@ function smsParts(text) {
     const len = s.split('').reduce((n, ch) => n + (GSM_EXT.includes(ch) ? 2 : 1), 0);
     return len <= 160 ? 1 : Math.ceil(len / 153);
   }
-  const len = [...s].length;
+  const len = s.length;          // UCS-2 is billed in 16-bit units: an emoji counts as 2
   return len <= 70 ? 1 : Math.ceil(len / 67);
 }
 
@@ -102,16 +117,16 @@ const teamLinkPart = (teamId, linkId) => (!teamId || teamId === 'worngundidj' ||
 
 // Decide and (if allowed) send. deps are injected so this runs without
 // Firebase or a real provider in tests.
-//   req  — the outbox document: { kind: 'handbook'|'intake', clientId, requestedBy, linkId? }
+//   req  — the outbox document: { kind: 'handbook'|'intake'|'message', clientId, requestedBy, linkId?, body? }
 //   deps — { handbookUrl, appUrl, monthlyBudget, costPerPart,
 //            getRequesterEmail(uid), getStaffEmails(), getClient(id),
 //            alreadySent(clientId, mobile), sentInLastHour(), monthSpend() → $ so far this month,
 //            getIntakeForm(linkId) → { clientId, status, expiresAtMs }, alreadySentLink(linkId),
-//            send(e164, body) }
+//            isOptedOut(mobile) → true if they replied STOP, send(e164, body) }
 async function processRequest(req, deps) {
   const out = (status, reason, extra) => Object.assign({ status, reason: reason || '' }, extra || {});
   const kind = req && req.kind;
-  if (kind !== 'handbook' && kind !== 'intake') return out('skipped', 'Unknown request type');
+  if (kind !== 'handbook' && kind !== 'intake' && kind !== 'message') return out('skipped', 'Unknown request type');
   if (kind === 'handbook' && (!deps.handbookUrl || !/^https:\/\//.test(deps.handbookUrl))) return out('failed', 'HANDBOOK_URL is not set on the function');
   if (kind === 'intake' && (!deps.appUrl || !/^https:\/\//.test(deps.appUrl))) return out('failed', 'APP_URL is not set on the function');
   const email = String((await deps.getRequesterEmail(req.requestedBy)) || '').toLowerCase();
@@ -122,9 +137,14 @@ async function processRequest(req, deps) {
   if (client.ifSafeContact !== 'Yes') return out('skipped', 'Client has not agreed to texts ("Safe to leave calls/texts?" is not Yes)');
   const mobile = auMobile(client.phone);
   if (!mobile) return out('skipped', 'No Australian mobile number on the client file');
+  if (deps.isOptedOut && await deps.isOptedOut(mobile)) return out('skipped', 'The client replied STOP - texts to this number are switched off until they reply START', { to: maskPhone(mobile) });
 
   let body;
-  if (kind === 'handbook') {
+  if (kind === 'message') {
+    body = normaliseMessage(req.body);
+    if (!body) return out('skipped', 'The message is empty');
+    if (body.length > MESSAGE_MAX_CHARS || smsParts(body) > MESSAGE_MAX_PARTS) return out('skipped', `The message is too long (at most ${MESSAGE_MAX_PARTS} SMS)`, { to: maskPhone(mobile) });
+  } else if (kind === 'handbook') {
     if (await deps.alreadySent(req.clientId, mobile)) return out('skipped', 'Handbook already sent to this number', { to: maskPhone(mobile) });
     body = handbookMessage(client, deps.handbookUrl);
   } else {
@@ -148,7 +168,7 @@ async function processRequest(req, deps) {
   if ((await deps.sentInLastHour()) >= HOURLY_CAP) return out('failed', `Hourly limit of ${HOURLY_CAP} texts reached - try again later`, { to: maskPhone(mobile) });
   try {
     const providerId = await deps.send(toE164(mobile), body);
-    return out('sent', '', { to: maskPhone(mobile), toFull: mobile, providerId: String(providerId || ''), parts, cost: Math.round(cost * 10000) / 10000 });
+    return out('sent', '', { to: maskPhone(mobile), toFull: mobile, providerId: String(providerId || ''), parts, cost: Math.round(cost * 10000) / 10000, message: body });
   } catch (e) {
     return out('failed', 'SMS provider error: ' + String(e && e.message || e).slice(0, 200), { to: maskPhone(mobile) });
   }
@@ -191,5 +211,66 @@ async function sendViaProvider(provider, creds, to, body, fetchImpl) {
   return data.sid;
 }
 
-module.exports = { givenName, teamLinkPart, auMobile, toE164, maskPhone, firstName, handbookMessage, intakeMessage, toGsm, smsParts, budgetMonth, processRequest, providerRequest, sendViaProvider,
+// ---- Replies (Twilio → receiveSms) ------------------------------------------------
+// Twilio signs every webhook: base64(HMAC-SHA1(auth token, the exact URL + each POST field name
+// and value, sorted by name)). https://www.twilio.com/docs/usage/webhooks/webhooks-security
+function twilioSignature(authToken, url, params) {
+  const crypto = require('crypto');
+  const data = Object.keys(params || {}).sort().reduce((acc, k) => {
+    const v = params[k];
+    return acc + (Array.isArray(v) ? v.slice().sort().map(x => k + x).join('') : k + (v == null ? '' : String(v)));
+  }, String(url || ''));
+  return crypto.createHmac('sha1', String(authToken || '')).update(Buffer.from(data, 'utf-8')).digest('base64');
+}
+// True when the signature matches any of the URLs the request may have been sent to.
+function validTwilioSignature(authToken, urls, params, signature) {
+  const crypto = require('crypto');
+  if (!authToken || !signature) return false;
+  const got = Buffer.from(String(signature));
+  return (urls || []).filter(Boolean).some(u => { const want = Buffer.from(twilioSignature(authToken, u, params)); return want.length === got.length && crypto.timingSafeEqual(want, got); });
+}
+// STOP / START words (the whole reply, any case). "Yes", "No" etc. are ordinary replies.
+function optOutWord(body) {
+  const w = String(body || '').trim().toUpperCase().replace(/[^A-Z]/g, '');
+  if (['STOP', 'STOPALL', 'UNSUBSCRIBE', 'CANCEL', 'END', 'QUIT', 'OPTOUT'].includes(w)) return 'stop';
+  if (['START', 'UNSTOP', 'OPTIN'].includes(w)) return 'start';
+  return '';
+}
+// Any number → E.164-ish for display/storage: Australian mobiles as 04xxxxxxxx, others as given.
+function inboundNumber(v) { const m = auMobile(v); return m || String(v || '').replace(/[^\d+]/g, '').slice(0, 20); }
+
+// Work out which client a reply is from, and the record to keep.
+//   p    — Twilio's POST fields: { MessageSid, From, To, Body, NumMedia }
+//   deps — { lastTextTo(mobile) → [{ clientId, at }] (texts we sent to that number),
+//            clientsWithMobile(mobile) → [{ id, status }] (clients whose phone is that number),
+//            clientHasMobile(clientId, mobile) → bool }
+// Matching: the client we last texted at that number (if it's still their number); otherwise the one
+// client on file with that mobile (active files first). If it can't be told apart, it is left
+// unmatched (with the possible clients) for a manager to assign.
+async function processInbound(p, deps) {
+  const sid = String(p.MessageSid || p.SmsSid || '');
+  if (!/^[A-Za-z0-9]{10,64}$/.test(sid)) return { error: 'No message id' };
+  const mobile = auMobile(p.From), fromFull = inboundNumber(p.From);
+  const body = String(p.Body || '').replace(/\r\n?/g, '\n').slice(0, INBOUND_MAX_CHARS);
+  let clientId = '', matchedBy = '', candidates = [];
+  if (mobile) {
+    const sentTo = (await deps.lastTextTo(mobile) || []).filter(x => x && x.clientId).sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
+    for (const x of sentTo) { if (await deps.clientHasMobile(x.clientId, mobile)) { clientId = x.clientId; matchedBy = 'last-text'; break; } }
+    if (!clientId) {
+      const all = await deps.clientsWithMobile(mobile) || [];
+      const active = all.filter(c => (c.status || 'active') === 'active');
+      const pick = active.length ? active : all;
+      if (pick.length === 1) { clientId = pick[0].id; matchedBy = 'phone'; }
+      else candidates = pick.map(c => c.id).slice(0, 5);
+    }
+  }
+  return {
+    id: sid,
+    doc: { providerId: sid, from: mobile ? maskPhone(mobile) : fromFull, fromFull, to: String(p.To || '').slice(0, 20), body,
+      numMedia: Math.max(0, Math.min(10, parseInt(p.NumMedia, 10) || 0)), receivedAt: new Date().toISOString(),
+      clientId, matchedBy, candidates, status: 'new', optOut: optOutWord(body) },
+  };
+}
+
+module.exports = { givenName, normaliseMessage, twilioSignature, validTwilioSignature, optOutWord, inboundNumber, processInbound, MESSAGE_MAX_CHARS, MESSAGE_MAX_PARTS, INBOUND_MAX_CHARS, teamLinkPart, auMobile, toE164, maskPhone, firstName, handbookMessage, intakeMessage, toGsm, smsParts, budgetMonth, processRequest, providerRequest, sendViaProvider,
   HOURLY_CAP, DEFAULT_MONTHLY_BUDGET, DEFAULT_COST_PER_PART };
