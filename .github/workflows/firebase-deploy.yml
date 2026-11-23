@@ -99,6 +99,7 @@ jobs:
           SMS_FROM: ${{ vars.SMS_FROM }}
           SMS_MONTHLY_BUDGET: ${{ vars.SMS_MONTHLY_BUDGET }}
           SMS_COST_PER_PART: ${{ vars.SMS_COST_PER_PART }}
+          SMS_WEBHOOK_URL: ${{ vars.SMS_WEBHOOK_URL }}
         run: |
           for v in HANDBOOK_URL APP_URL SMS_FROM; do
             if [ -z "${!v}" ]; then echo "::error::Repository variable $v isn't set. See docs/DEPLOY-FIREBASE.md (step 4)."; exit 1; fi
@@ -110,6 +111,7 @@ jobs:
             echo "SMS_FROM=$SMS_FROM"
             echo "SMS_MONTHLY_BUDGET=${SMS_MONTHLY_BUDGET:-10}"
             echo "SMS_COST_PER_PART=${SMS_COST_PER_PART:-0.10}"
+            echo "SMS_WEBHOOK_URL=$SMS_WEBHOOK_URL"
           } > "functions-sms/.env.$FIREBASE_PROJECT"
           echo "Monthly SMS budget: \$${SMS_MONTHLY_BUDGET:-10} at \$${SMS_COST_PER_PART:-0.10} per SMS"
       - name: SMS provider login (stored in Google Secret Manager, never in the code)

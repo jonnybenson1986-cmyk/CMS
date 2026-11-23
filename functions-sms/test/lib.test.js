@@ -155,3 +155,71 @@ test('greeting name: the text service and the CMS use exactly the same rule', ()
     { fullName: 'Taylor "Sam" Samantha' }, { fullName: '<b>Smith</b> Zoe' }, { fullName: '' }, { fullName: 'Lee,  Ann  Marie' }, { preferredName: '  ', fullName: 'Ng Tom' }];
   for (const c of cases) assert.equal(lib.givenName(c), cms(c), JSON.stringify(c));
 });
+
+// ---- two-way texts ----
+test('a worker\'s message: sent to the number on file, words tidied, typographic dashes/quotes made plain', async () => {
+  const d = deps(), sent = d.sent;
+  const r = await lib.processRequest({ kind: 'message', clientId: 'c1', requestedBy: 'u1', body: '  Hi Jordy — see you at 2pm “tomorrow”?  \n\n\n\n- Sam  ', to: '0400000000' }, d);
+  assert.equal(r.status, 'sent');
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].to, '+61491570156');
+  assert.equal(sent[0].body, 'Hi Jordy - see you at 2pm "tomorrow"?\n\n- Sam');
+  assert.equal(r.message, sent[0].body);
+  assert.equal(r.parts, 1);
+});
+test('a worker\'s message: empty or too long is not sent; consent and the staff check still apply', async () => {
+  let d = deps(), sent = d.sent;
+  assert.match((await lib.processRequest({ kind: 'message', clientId: 'c1', requestedBy: 'u1', body: '   ' }, d)).reason, /empty/);
+  assert.match((await lib.processRequest({ kind: 'message', clientId: 'c1', requestedBy: 'u1', body: 'x'.repeat(641) }, d)).reason, /too long/);
+  assert.match((await lib.processRequest({ kind: 'message', clientId: 'c1', requestedBy: 'u1', body: '\u{1F600}'.repeat(140) }, d)).reason, /too long/);  // emoji → UCS-2 → 5 SMS
+  assert.equal(sent.length, 0);
+  d = deps({ getClient: async () => ({ fullName: 'X Y', phone: '0491570156', ifSafeContact: 'No' }) }); sent = d.sent;
+  assert.match((await lib.processRequest({ kind: 'message', clientId: 'c1', requestedBy: 'u1', body: 'Hi' }, d)).reason, /not agreed to texts/);
+  d = deps({ getRequesterEmail: async () => 'stranger@example.com' }); sent = d.sent;
+  assert.match((await lib.processRequest({ kind: 'message', clientId: 'c1', requestedBy: 'u1', body: 'Hi' }, d)).reason, /staff directory/);
+  assert.equal(sent.length, 0);
+});
+test('a client who replied STOP gets no texts of any kind', async () => {
+  const d = deps({ isOptedOut: async (m) => m === '0491570156' }), sent = d.sent;
+  for (const req of [{ kind: 'message', body: 'Hi' }, { kind: 'handbook' }]) {
+    const r = await lib.processRequest(Object.assign({ clientId: 'c1', requestedBy: 'u1' }, req), d);
+    assert.equal(r.status, 'skipped'); assert.match(r.reason, /replied STOP/);
+  }
+  assert.equal(sent.length, 0);
+});
+test('Twilio signature: matches Twilio\'s published example, and any change breaks it', () => {
+  const url = 'https://mycompany.com/myapp.php?foo=1&bar=2';
+  const p = { CallSid: 'CA1234567890ABCDE', Caller: '+12349013030', Digits: '1234', From: '+12349013030', To: '+18005551212' };
+  assert.equal(lib.twilioSignature('12345', url, p), '0/KCTR6DLpKmkAf8muzZqo1nDgQ=');
+  assert.ok(lib.validTwilioSignature('12345', ['https://other.example/x', url], p, '0/KCTR6DLpKmkAf8muzZqo1nDgQ='));
+  assert.ok(!lib.validTwilioSignature('12345', [url], Object.assign({}, p, { Digits: '9999' }), '0/KCTR6DLpKmkAf8muzZqo1nDgQ='));
+  assert.ok(!lib.validTwilioSignature('12345', [url + '&team=spare'], p, '0/KCTR6DLpKmkAf8muzZqo1nDgQ='));
+  assert.ok(!lib.validTwilioSignature('wrong', [url], p, '0/KCTR6DLpKmkAf8muzZqo1nDgQ='));
+  assert.ok(!lib.validTwilioSignature('12345', [url], p, ''));
+  assert.ok(!lib.validTwilioSignature('', [url], p, '0/KCTR6DLpKmkAf8muzZqo1nDgQ='));
+});
+test('STOP / START words; ordinary replies are not', () => {
+  for (const w of ['STOP', 'stop', ' Stop. ', 'UNSUBSCRIBE', 'Cancel', 'quit', 'STOP ALL']) assert.equal(lib.optOutWord(w), 'stop', w);
+  for (const w of ['START', 'start', 'Unstop']) assert.equal(lib.optOutWord(w), 'start', w);
+  for (const w of ['Yes', 'No', 'stop calling me at work please', 'ok thanks', '']) assert.equal(lib.optOutWord(w), '', w);
+});
+test('a reply is matched to the client last texted at that number, else the one client with it', async () => {
+  const base = { MessageSid: 'SM0123456789abcdef0123456789abcdef', From: '+61491570156', To: '+61400000001', Body: 'Thanks, see you then', NumMedia: '0' };
+  const dep = (o) => Object.assign({ lastTextTo: async () => [], clientsWithMobile: async () => [], clientHasMobile: async () => true }, o);
+  let r = await lib.processInbound(base, dep({ lastTextTo: async () => [{ clientId: 'old', at: '2026-01-01' }, { clientId: 'c1', at: '2026-11-01' }] }));
+  assert.equal(r.id, base.MessageSid); assert.equal(r.doc.clientId, 'c1'); assert.equal(r.doc.matchedBy, 'last-text');
+  assert.equal(r.doc.fromFull, '0491570156'); assert.equal(r.doc.from, '0491 ••• 156'); assert.equal(r.doc.status, 'new'); assert.equal(r.doc.body, 'Thanks, see you then');
+  // the last client texted no longer has that number → fall back to the phone on file
+  r = await lib.processInbound(base, dep({ lastTextTo: async () => [{ clientId: 'moved', at: '2026-11-01' }], clientHasMobile: async (id) => id !== 'moved', clientsWithMobile: async () => [{ id: 'c2', status: 'active' }] }));
+  assert.equal(r.doc.clientId, 'c2'); assert.equal(r.doc.matchedBy, 'phone');
+  // two files with the number: the active one wins; two active → unmatched, with both as candidates
+  r = await lib.processInbound(base, dep({ clientsWithMobile: async () => [{ id: 'a', status: 'closed' }, { id: 'b', status: 'active' }] }));
+  assert.equal(r.doc.clientId, 'b');
+  r = await lib.processInbound(base, dep({ clientsWithMobile: async () => [{ id: 'a', status: 'active' }, { id: 'b', status: 'active' }] }));
+  assert.equal(r.doc.clientId, ''); assert.deepEqual(r.doc.candidates, ['a', 'b']);
+  // unknown or overseas number → unmatched
+  r = await lib.processInbound(Object.assign({}, base, { From: '+14155550100' }), dep());
+  assert.equal(r.doc.clientId, ''); assert.equal(r.doc.fromFull, '+14155550100');
+  assert.equal((await lib.processInbound(Object.assign({}, base, { MessageSid: '' }), dep())).error, 'No message id');
+  assert.equal((await lib.processInbound(Object.assign({}, base, { Body: 'x'.repeat(5000) }), dep())).doc.body.length, 1600);
+});

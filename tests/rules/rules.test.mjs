@@ -93,6 +93,38 @@ for (const file of Object.keys(RULES)) {
   await check(f + ' signed-out cannot read the outbox', assertFails(getDoc(doc(anon, T + '/smsOutbox/r1'))));
   await check(f + ' staff can read the outbox', assertSucceeds(getDoc(doc(wkr, T + '/smsOutbox/r1'))));
   await check(f + ' the app\'s own addDoc shape is accepted', assertSucceeds(addDoc(collection(sys, T + '/smsOutbox'), { ...ok, requestedBy: 'u-sys' })));
+  // two-way texts: a worker's message carries its words — but never a number, and only kind "message" may have words
+  const msg = { kind: 'message', clientId: 'c1', requestedBy: 'u-wkr', requestedByName: 'Sam', requestedAt: '2026-11-23T10:00:00Z', body: 'Hi Jordan, see you at 2pm' };
+  await check(f + ' two-way: staff can send a client a message', assertSucceeds(addDoc(collection(wkr, T + '/smsOutbox'), msg)));
+  await check(f + ' two-way: a message cannot be empty, over 640 characters, or carry a number', Promise.all([
+    assertFails(addDoc(collection(wkr, T + '/smsOutbox'), { ...msg, body: '' })),
+    assertFails(addDoc(collection(wkr, T + '/smsOutbox'), { ...msg, body: 'x'.repeat(641) })),
+    assertFails(addDoc(collection(wkr, T + '/smsOutbox'), { ...msg, body: 42 })),
+    assertFails(addDoc(collection(wkr, T + '/smsOutbox'), (({ body, ...m }) => m)(msg))),
+    assertFails(addDoc(collection(wkr, T + '/smsOutbox'), { ...msg, to: '+61400000000' })),
+    assertFails(addDoc(collection(wkr, T + '/smsOutbox'), { ...msg, requestedBy: 'u-sys' })),
+    assertFails(addDoc(collection(wkr, T + '/smsOutbox'), { ...msg, status: 'sent' }))]));
+  await check(f + ' two-way: an intake-link text cannot carry words either', assertFails(addDoc(collection(wkr, T + '/smsOutbox'), { kind: 'intake', clientId: 'c1', linkId: 'L1nkL1nkL1nkL1nkL1nk', requestedBy: 'u-wkr', requestedByName: 'Sam', requestedAt: 'x', body: 'spam' })));
+  // replies: only the text service creates them; staff mark them seen / dismiss / put an unmatched one on a file
+  await env.withSecurityRulesDisabled(async ctx => { const d = ctx.firestore();
+    const base = { providerId: 'x', from: '0491 ••• 156', fromFull: '0491570156', to: '+61400000001', body: 'Thanks', numMedia: 0, receivedAt: '2026-11-23T10:00:00Z', matchedBy: 'last-text', candidates: [], status: 'new', optOut: '' };
+    await setDoc(doc(d, T + '/smsInbox/IN1'), { ...base, clientId: 'c1' });
+    await setDoc(doc(d, T + '/smsInbox/IN2'), { ...base, clientId: '', matchedBy: '' });
+    await setDoc(doc(d, T + '/smsOptOut/0491570156'), { mobile: '0491570156', at: 'x', via: 'Replied STOP' }); });
+  await check(f + ' replies: staff can read replies and the STOP list; signed-out visitors cannot', Promise.all([
+    assertSucceeds(getDoc(doc(wkr, T + '/smsInbox/IN1'))), assertSucceeds(getDocs(collection(wkr, T + '/smsInbox'))), assertSucceeds(getDocs(collection(wkr, T + '/smsOptOut'))),
+    assertFails(getDoc(doc(anon, T + '/smsInbox/IN1'))), assertFails(getDocs(collection(anonUser, T + '/smsInbox'))), assertFails(getDocs(collection(anon, T + '/smsOptOut')))]));
+  await check(f + ' replies: nobody can create, fake or delete a reply, or change the STOP list, from a browser', Promise.all([
+    assertFails(setDoc(doc(sys, T + '/smsInbox/FAKE'), { clientId: 'c1', body: 'I agree to everything', status: 'new', fromFull: '0491570156' })),
+    assertFails(deleteDoc(doc(sys, T + '/smsInbox/IN1'))),
+    assertFails(setDoc(doc(wkr, T + '/smsOptOut/0491570156'), { mobile: '0491570156' })), assertFails(deleteDoc(doc(sys, T + '/smsOptOut/0491570156')))]));
+  await check(f + ' replies: the words, number and time can never be changed', Promise.all([
+    assertFails(updateDoc(doc(sys, T + '/smsInbox/IN1'), { body: 'changed' })), assertFails(updateDoc(doc(sys, T + '/smsInbox/IN1'), { fromFull: '0400000000' })),
+    assertFails(updateDoc(doc(sys, T + '/smsInbox/IN1'), { receivedAt: '2020-01-01' })), assertFails(updateDoc(doc(sys, T + '/smsInbox/IN1'), { status: 'deleted' }))]));
+  await check(f + ' replies: staff can mark a reply as seen', assertSucceeds(updateDoc(doc(wkr, T + '/smsInbox/IN1'), { status: 'read', readBy: 'Sam Worker', readAt: '2026-11-23T10:05:00Z' })));
+  await check(f + ' replies: a reply on one client\'s file cannot be moved to another', assertFails(updateDoc(doc(sys, T + '/smsInbox/IN1'), { clientId: 'c2', matchedBy: 'manual' })));
+  await check(f + ' replies: an unmatched reply can be put on a client\'s file', assertSucceeds(updateDoc(doc(sys, T + '/smsInbox/IN2'), { clientId: 'c2', matchedBy: 'manual', assignedBy: 'Jon Benson', assignedAt: '2026-11-23T10:06:00Z', status: 'new' })));
+  await check(f + ' replies: …or dismissed', assertSucceeds(updateDoc(doc(sys, T + '/smsInbox/IN2'), { status: 'dismissed' })));
   await check(f + ' System Manager can switch automatic texts on', assertSucceeds(setDoc(doc(sys, T + '/smsConfig/settings'), { autoHandbook: true, updatedBy: 'Jon', updatedAt: 'x' })));
   if (file === 'strict.rules') await check(f + ' (strict) a worker cannot switch it', assertFails(setDoc(doc(wkr, T + '/smsConfig/settings'), { autoHandbook: false })));
   await check(f + ' signed-out cannot read the switch', assertFails(getDoc(doc(anon, T + '/smsConfig/settings'))));
@@ -374,7 +406,7 @@ for (const file of Object.keys(RULES)) {
   const others = [['a Worn Gundidj account', wgM, [TT, TS]], ['a Test team account', testM, [T, TS]], ['a Spare team account', spareM, [T, TT]], ['an account removed from every team', none, [T, TT, TS]]];
   for (const [who, ctx, teams] of others) for (const tp of teams) {
     await check(f + ` teams: ${who} cannot read, list or write ${tp}`, Promise.all([
-      ...['clients', 'notes', 'timelogs', 'referrals', 'staff', 'auditlog', 'calevents', 'walkins', 'intakeForms', 'consentForms', 'smsOutbox', 'appConfig', 'userAccess', 'chatMsgs', 'ideas', 'workersList', 'policies', 'fpho', 'resources', 'smsConfig', 'smsUsage', 'roles', 'workflowTasks', 'chatConvs', 'coi']
+      ...['clients', 'notes', 'timelogs', 'referrals', 'staff', 'auditlog', 'calevents', 'walkins', 'intakeForms', 'consentForms', 'smsOutbox', 'appConfig', 'userAccess', 'chatMsgs', 'ideas', 'workersList', 'policies', 'fpho', 'resources', 'smsConfig', 'smsUsage', 'smsInbox', 'smsOptOut', 'roles', 'workflowTasks', 'chatConvs', 'coi']
         .map(c => assertFails(getDocs(collection(ctx, tp + '/' + c)))),
       assertFails(getDoc(doc(ctx, tp + '/clients/tt1'))), assertFails(getDoc(doc(ctx, tp + '/clients/seed'))),
       assertFails(setDoc(doc(ctx, tp + '/clients/evil'), client('evil'))), assertFails(setDoc(doc(ctx, tp + '/notes/evil'), { id: 'evil', text: 'x' })),
