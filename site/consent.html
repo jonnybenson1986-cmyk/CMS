@@ -37,6 +37,7 @@
 <script src="vendor/firebase/firebase-app-compat.js"></script>
 <script src="vendor/firebase/firebase-firestore-compat.js"></script>
 <script src="teams.js"></script>
+<script>(function(){ var l = WG_TEAMS.parseLink(location.hash); if (l && !WG_TEAMS.showLogo(l.team)) { document.documentElement.classList.add('no-logo'); document.querySelectorAll('.wg-top img').forEach(function(i){ i.remove(); }); } })();</script>
 <script src="forms/signing.js"></script>
 <script src="consent/consent-text.js"></script>
 <script>
@@ -357,7 +358,7 @@
   function copyHTML(F) {
     const A = F.answers || {}, S = F.signature || {}, when = S.at ? new Date(S.at) : null;
     const sig = S.method === 'drawn' && PNG.test(S.image || '') ? `<img src="${S.image}" alt="Signature of ${esc(S.name)}">` : `<div style="font:italic 28px/1.2 'Brush Script MT','Segoe Script',cursive;border-bottom:1px solid #111;padding:6px 2px">${esc(S.name)}</div>`;
-    return `<div class="wg-top"><img src="intake/wg-logo.png" alt="Worn Gundidj"><div><h1>Consent Form</h1><p>Your signed copy · Worn Gundidj Aboriginal Co-operative</p></div></div>
+    return `<div class="wg-top">${WG_TEAMS.showLogo(TEAM) ? '<img src="intake/wg-logo.png" alt="Worn Gundidj">' : ''}<div><h1>Consent Form</h1><p>Your signed copy · Worn Gundidj Aboriginal Co-operative</p></div></div>
       <div class="wg-addr">1-3 Rooneys Rd, Warrnambool VIC 3280 <span>|</span> Phone (03) 5561 5315</div>
       <div class="bar-h">What I agreed to</div>
       <div class="rowsx">${C.CHOICES.map(c => `<div><b>${esc(c.q)}</b><br>${esc(c.d)}<br><strong>${esc(ansText(A[c.key]))}</strong></div>`).join('')}</div>

@@ -9,7 +9,7 @@
 (function (root) {
   const LIST = [
     { id: 'worngundidj', name: 'Worn Gundidj', note: 'The Worn Gundidj team’s own records.' },
-    { id: 'spare', name: 'Spare team', note: 'An empty team, ready for another team to use.' },
+    { id: 'spare', name: 'Spare team', logo: false, note: 'An empty team, ready for another team to use.' },
     { id: 'test', name: 'Test team', test: true, note: 'For trying things out and training. Made-up people only — never real client information.' },
   ];
   const DEFAULT = 'worngundidj';                 // the team every account belonged to before teams existed
@@ -18,6 +18,8 @@
   const valid = id => IDS.includes(id);
   const get = id => LIST.find(t => t.id === id) || null;
   const name = id => (get(id) || { name: id || '' }).name;
+  // Does this team show the Worn Gundidj logo? (The Spare team doesn't: it may be used by another organisation.)
+  const showLogo = id => (get(id) || get(DEFAULT)).logo !== false;
 
   // What is kept on a device is kept apart per team, so one team's records can never be
   // mixed into (or uploaded to) another's. Worn Gundidj keeps the original key prefix.
@@ -38,7 +40,7 @@
   // Which team should this account open? `mine` = the teams it belongs to, `wanted` = the device's last team.
   const pick = (mine, wanted) => (Array.isArray(mine) && mine.length) ? (mine.includes(wanted) ? wanted : (mine.includes(DEFAULT) ? DEFAULT : mine[0])) : null;
 
-  const api = { LIST, IDS, DEFAULT, DEVICE_KEY, valid, get, name, storagePrefix, linkPart, parseLink, pick };
+  const api = { LIST, IDS, DEFAULT, DEVICE_KEY, valid, get, name, showLogo, storagePrefix, linkPart, parseLink, pick };
   root.WG_TEAMS = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

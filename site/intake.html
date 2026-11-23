@@ -39,6 +39,7 @@
 <script src="vendor/firebase/firebase-app-compat.js"></script>
 <script src="vendor/firebase/firebase-firestore-compat.js"></script>
 <script src="teams.js"></script>
+<script>(function(){ var l = WG_TEAMS.parseLink(location.hash); if (l && !WG_TEAMS.showLogo(l.team)) { document.documentElement.classList.add('no-logo'); document.querySelectorAll('.wg-top img').forEach(function(i){ i.remove(); }); } })();</script>
 <script src="forms/signing.js"></script>
 <script src="intake/intake-fields.js"></script>
 <script>
