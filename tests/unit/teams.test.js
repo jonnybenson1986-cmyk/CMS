@@ -38,3 +38,9 @@ test('which team an account opens: the device\'s last team if it is theirs, else
   assert.equal(T.pick([], 'worngundidj'), null);
   assert.equal(T.pick(undefined, 'worngundidj'), null);
 });
+test('the Worn Gundidj logo: shown for Worn Gundidj and the Test team, not for the Spare team', () => {
+  assert.equal(T.showLogo('worngundidj'), true);
+  assert.equal(T.showLogo('test'), true);
+  assert.equal(T.showLogo('spare'), false);
+  assert.equal(T.showLogo('unknown'), true);      // an unknown id falls back to Worn Gundidj
+});
