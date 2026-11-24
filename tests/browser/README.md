@@ -23,6 +23,7 @@ node tests/browser/texts.cjs           # two-way texts (Twilio): the Texts secti
 node tests/browser/teamlogo.cjs        # the Spare team shows no Worn Gundidj logo (sidebar, sign-in, print, client pages)
 node tests/browser/removeworker.cjs    # Settings → Remove a worker's name: worker list, joint sessions, assigned files, time (if ticked)
 node tests/browser/mensgroup-eoc.cjs   # Men's Group sessions count toward SEWB episodes of care (retrospective)
+node tests/browser/kpitotal.cjs        # Annual KPI: total of completed episodes including partial (Reports, funding report, Dashboard)
 node tests/browser/mensgroup.cjs        # Men's Group page: session notes from the Session Log, filters, links both ways
 node tests/browser/teams.cjs            # teams: each team kept apart, switching, the owner's Teams card, the lock
 node --test tests/unit/data-health.test.js   # the scoring engine on its own (no browser)
