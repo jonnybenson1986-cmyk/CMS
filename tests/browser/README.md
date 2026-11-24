@@ -21,6 +21,7 @@ node tests/browser/fullscreen.cjs       # client profile and Log Session: Full s
 node tests/browser/reports.cjs          # reports: the Key Worker rule (current key worker only; workers see their own clients)
 node tests/browser/texts.cjs           # two-way texts (Twilio): the Texts section, sending, replies, STOP, alerts, unmatched texts
 node tests/browser/teamlogo.cjs        # the Spare team shows no Worn Gundidj logo (sidebar, sign-in, print, client pages)
+node tests/browser/removeworker.cjs    # Settings → Remove a worker's name: worker list, joint sessions, assigned files, time (if ticked)
 node tests/browser/mensgroup.cjs        # Men's Group page: session notes from the Session Log, filters, links both ways
 node tests/browser/teams.cjs            # teams: each team kept apart, switching, the owner's Teams card, the lock
 node --test tests/unit/data-health.test.js   # the scoring engine on its own (no browser)
