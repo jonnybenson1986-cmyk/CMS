@@ -16,7 +16,7 @@ const {start}=require('./harness.cjs');
   const r=await p.evaluate(()=>({ g:clientEpisodeStats('g','sewb').completeEpisodes, n:clientEpisodeStats('n','sewb').totalContacts, mS:clientEpisodeStats('m','sewb').totalContacts, mM:clientEpisodeStats('m','mensgroup').completeEpisodes }));
   ok('R1 GENERAL contacts still count toward SEWB for a SEWB client', r.g===1, JSON.stringify(r));
   ok('R2 …but not for an NDIS-only client', r.n===0, JSON.stringify(r));
-  ok('R3 Men\'s Group stays its own program (not added to SEWB)', r.mS===0 && r.mM===1, JSON.stringify(r));
+  ok('R3 Men\'s Group sessions count toward SEWB episodes of care (since v126, like Family Violence)', r.mS===5, JSON.stringify(r));
   await p.evaluate(()=>openClientProfile('g','overview')); await p.waitForTimeout(200);
   ok('R4 the file header has the single Log session button', await p.evaluate(()=>[...document.querySelectorAll('.pf-actions button')].some(b=>/Log session/.test(b.textContent)) && ![...document.querySelectorAll('.pf-actions button')].some(b=>/Add note/.test(b.textContent))));
   await p.click('.pf-actions button:has-text("Log session")'); await p.waitForTimeout(250);
