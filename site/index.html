@@ -879,7 +879,7 @@ const FSYNC = (() => {
     if (!ns.empty) { notes   = _keep(notes, _live(ns.docs.map(d=>d.data()))); DB.save('notes',notes); _seedHashes('notes', ns.docs); }
     if (!ts.empty) { timeLogs= _keep(timeLogs, _live(ts.docs.map(d=>d.data()))); DB.save('timelogs',timeLogs); _seedHashes('timelogs', ts.docs); }
     if (!rs.empty) { referrals=_keep(referrals, _live(rs.docs.map(d=>d.data()))); DB.save('referrals',referrals); _seedHashes('referrals', rs.docs); }
-    if (!ws.empty) { const w=ws.docs[0]?.data()?.list; if(w){workersList=w;DB.save('workersList',workersList);} }
+    if (!ws.empty) { _workersFromCloud(ws.docs); }
     if (!wks.empty){ const t=wks.docs[0]?.data()?.list; if(t){workflowTasks=t;DB.save('workflowTasks',workflowTasks);} }
   }
 
@@ -931,6 +931,8 @@ const FSYNC = (() => {
     // 💬 Two-way texts: replies from clients (written by the receiveSms function) and numbers that replied STOP.
     _listeners.push(col('smsInbox').onSnapshot(snap=>{ smsInbox=snap.docs.map(d=>Object.assign({id:d.id},d.data())); DB.save('smsInbox',smsInbox); try{ _textsRefresh(); }catch(_){} }, e=>console.warn('smsInbox listener:', e.message)));
     _listeners.push(col('smsOptOut').onSnapshot(snap=>{ smsOptOut=snap.docs.map(d=>Object.assign({id:d.id},d.data())); DB.save('smsOptOut',smsOptOut); try{ _textsRefresh(); }catch(_){} }, e=>console.warn('smsOptOut listener:', e.message)));
+    // The worker list and the names a System Manager removed (Settings → Remove a worker's name), kept up to date on every device.
+    _listeners.push(col('workersList').onSnapshot(snap=>{ if(snap.metadata && snap.metadata.hasPendingWrites) return; _workersFromCloud(snap.docs); }, e=>console.warn('workersList listener:', e.message)));
     // Outlook set-up: appConfig/outlook, mirrored to staff/outlookSetup (readable under the rules
     // already published, so staff get it before the newer appConfig rules are). Newest copy wins.
     const _outlookCfgIn=(where)=>doc=>{ _outlookCfgSeen[where]=true; if(doc.exists) _applyOutlookConfig(doc.data()||{}); };
@@ -1036,7 +1038,8 @@ const FSYNC = (() => {
   async function pushBrokerage(clientId) { const c=clients.find(cl=>cl.id===clientId);if(!db||!c)return; col('clients').doc(clientId).set(_sanitiseClient(c),{merge:true}).catch(e=>console.warn(e.message)); }
   async function pushNotes()    { await _batch('notes',notes,n=>n.id); }
   async function pushReferrals(){ await _batch('referrals',referrals,r=>r.id||uid()); }
-  async function pushWorkers()  { if(db) col('workersList').doc('list').set({list:workersList}).catch(()=>{}); }
+  async function pushWorkers()  { if(db) col('workersList').doc('list').set({list:workersList.filter(w=>!_isRemovedWorker(w))}).catch(()=>{}); }
+  async function pushRemovedWorkers() { if(db) await col('workersList').doc('removed').set({names:_removedWorkers}); }
   async function pushTasks()    { if(db) col('workflowTasks').doc('list').set({list:workflowTasks}).catch(()=>{}); }
   // Staff directory: name/role/page-access per person, shared across devices so
   // a role is a property of the PERSON, not of whichever browser they used.
@@ -1327,7 +1330,7 @@ const FSYNC = (() => {
 
   return { init, isReady, pushAll, pushClients, pushNotes, pushReferrals, pushWorkers, pushTasks, pushAudit, pushBrokerage, deleteDoc, getCfg, saveCfg, showSetupModal, clearConfig,
     storageReady, uploadFile, deleteStorageFile, getStorageURL, pushPolicies,
-    pushFpho, pushWalkins, pushCalEvents, pushResources, resyncAll, pushStaff, fetchStaff, staffSyncStatus, queueSms, updateSmsInbox, setSmsConfig, setAppConfig, submitIdea, updateIdea,
+    pushFpho, pushWalkins, pushCalEvents, pushResources, resyncAll, pushStaff, fetchStaff, staffSyncStatus, queueSms, updateSmsInbox, pushRemovedWorkers, setSmsConfig, setAppConfig, submitIdea, updateIdea,
     createIntakeForm, updateIntakeForm, cancelIntakeForm, createConsentForm, updateConsentForm, cancelConsentForm, saveCoi, updateCoi };
 })();
 
@@ -1347,14 +1350,26 @@ const DEFAULT_WORKERS = [
   'SEWB Student',
 ];
 let workersList = DB.load('workersList', []);
+// Names a System Manager removed (Settings → Remove a worker's name). Shared through the cloud
+// (workersList/removed) so a device still holding the old list can't put them back.
+let _removedWorkers = DB.load('removedWorkers', []) || [];
+const _wkKey = s => String(s || '').toLowerCase().replace(/[^a-z]/g, '');
+function _isRemovedWorker(w) { const k = _wkKey(w); return !!k && _removedWorkers.some(r => _wkKey(r) === k); }
 // Seed default workers if list is empty
-if(workersList.length === 0) { workersList = [...DEFAULT_WORKERS]; DB.save('workersList', workersList); }
-else { DEFAULT_WORKERS.forEach(w=>{ if(!workersList.includes(w)) { workersList.push(w); DB.save('workersList', workersList); } }); }
+if(workersList.length === 0) { workersList = DEFAULT_WORKERS.filter(w => !_isRemovedWorker(w)); DB.save('workersList', workersList); }
+else { DEFAULT_WORKERS.forEach(w=>{ if(!workersList.includes(w) && !_isRemovedWorker(w)) { workersList.push(w); DB.save('workersList', workersList); } }); }
+workersList = workersList.filter(w => !_isRemovedWorker(w));
+function _workersFromCloud(docs) {
+  const get = id => { const d = (docs || []).find(x => x.id === id); return d ? d.data() : null; };
+  const rm = get('removed'); if (rm && Array.isArray(rm.names)) { _removedWorkers = rm.names.filter(Boolean); DB.save('removedWorkers', _removedWorkers); }
+  const l = get('list'); if (l && Array.isArray(l.list)) workersList = l.list;
+  workersList = workersList.filter(w => !_isRemovedWorker(w)); DB.save('workersList', workersList);
+}
 function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWorkers(); }
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v124';
+const APP_VERSION = 'v125';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -12031,6 +12046,7 @@ function addWorkerFromInput(selectId, inputId) {
   const name = inp.value.trim();
   if(!name) { sel.style.display=''; inp.style.display='none'; sel.value=''; return; }
   if(!workersList.includes(name)) {
+    if (_isRemovedWorker(name)) { _removedWorkers = _removedWorkers.filter(r => _wkKey(r) !== _wkKey(name)); DB.save('removedWorkers', _removedWorkers); FSYNC.pushRemovedWorkers().catch(()=>{}); }
     workersList.push(name); saveWorkersList();
     const opt = new Option(name, name, true, true);
     sel.insertBefore(opt, sel.querySelector('option[value="__add__"]'));
@@ -12060,6 +12076,110 @@ function workerSelectHTML(selectId, inputId, selectedVal, emptyLabel) {
       onkeydown="if(event.key==='Enter'){addWorkerFromInput('${selectId}','${inputId}');event.preventDefault()}"
       onblur="addWorkerFromInput('${selectId}','${inputId}')">
   </div>`;
+}
+
+// ===== REMOVE A WORKER'S NAME (Settings, System Manager) =====
+// A name typed into a worker box stays in the shared worker list, and on any session or time entry it
+// was put on, so it shows in reports (e.g. Activity & Time → By Worker). This finds everywhere a name
+// appears and removes it where that's safe:
+//   • the worker list (it stops being offered anywhere)                     — ticked by default
+//   • "second worker" on joint sessions (the time stays with the main worker) — ticked by default
+//   • "assigned workers" on client files                                      — ticked by default
+//   • time entries logged UNDER the name — removed only if ticked (a tracked delete, audited)
+// Case notes the person wrote keep their name (they are client records), and Key Worker is changed
+// in each file (Assign workers) so no client is left without one by accident. Logins are removed in
+// Staff Accounts. Every change goes in the audit log.
+let _rwName = '';
+function _rwSame(x, name) { const a = canonicalWorker(x), b = canonicalWorker(name); return !!a && !!b && _wkKey(a) === _wkKey(b); }
+function removeWorkerNames() {
+  const set = new Map(), add = v => { const c = canonicalWorker(v); if (c && !set.has(_wkKey(c))) set.set(_wkKey(c), c); };
+  workersList.forEach(add);
+  notes.forEach(n => { add(n.worker); add(n.worker2); }); timeLogs.forEach(t => { add(t.worker); add(t.worker2); });
+  clients.forEach(c => { add(c.keyWorker); (c.assignedWorkers || []).forEach(add); });
+  (calEvents || []).forEach(e => add(e.worker)); (referrals || []).forEach(r => { add(r.allocatedTo); add(r.receivedBy); });
+  (workflowTasks || []).forEach(t => add(t.worker));
+  return [...set.values()].sort((a, b) => a.localeCompare(b));
+}
+function removeWorkerFind(name) {
+  const S = x => _rwSame(x, name);
+  return {
+    inList: workersList.filter(S),
+    account: [...(userProfiles || []), ...((typeof _staffDirectory !== 'undefined' && _staffDirectory) || [])].find(u => u && (S(u.name) || S(String(u.email || '').split('@')[0]))) || null,
+    second: { notes: notes.filter(n => n.worker2 && S(n.worker2)), time: timeLogs.filter(t => t.worker2 && S(t.worker2)) },
+    mainTime: timeLogs.filter(t => S(t.worker)),
+    mainNotes: notes.filter(n => S(n.worker)),
+    assigned: clients.filter(c => (c.assignedWorkers || []).some(S)),
+    keyWorker: clients.filter(c => S(c.keyWorker)),
+    events: (calEvents || []).filter(e => S(e.worker)),
+    referrals: (referrals || []).filter(r => S(r.allocatedTo) || S(r.receivedBy)),
+    tasks: (workflowTasks || []).filter(t => S(t.worker)),
+  };
+}
+function removeWorkerCardHTML() {
+  const names = removeWorkerNames();
+  if (_rwName && !names.some(n => _wkKey(n) === _wkKey(_rwName))) _rwName = '';
+  return `<div class="card" id="rw-card" style="border-left:4px solid #9ca3af">
+    <div class="card-header"><div class="card-title">🧹 Remove a worker’s name</div></div>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:10px">For a name that shouldn’t be in the CMS — someone who isn’t staff, a misspelling, or a person who has left. Shows everywhere the name appears and removes it where that’s safe. Every change is recorded in the audit log.</p>
+    <select id="rw-name" onchange="_rwName=this.value;document.getElementById('rw-body').innerHTML=removeWorkerBodyHTML()" style="max-width:100%">
+      <option value="">Choose a name…</option>${names.map(n => `<option value="${sanitize(n)}" ${_wkKey(n) === _wkKey(_rwName) ? 'selected' : ''}>${sanitize(n)}</option>`).join('')}</select>
+    <div id="rw-body" style="margin-top:12px">${removeWorkerBodyHTML()}</div>
+  </div>`;
+}
+function removeWorkerBodyHTML() {
+  if (!_rwName) return '';
+  const f = removeWorkerFind(_rwName), n = sanitize(_rwName);
+  const cname = id => sanitize(clients.find(c => c.id === id)?.fullName || 'Unknown client');
+  const mins = arr => arr.reduce((a, t) => a + (Number(t.minutes) || 0), 0);
+  const row = (id, checked, label, detail, list) => `<label class="rw-opt" style="display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-top:1px solid var(--border);cursor:pointer">
+      <input type="checkbox" id="${id}" ${checked ? 'checked' : ''} style="margin-top:3px"><span style="flex:1"><strong>${label}</strong><br><span style="font-size:12px;color:var(--muted)">${detail}</span>${list || ''}</span></label>`;
+  const info = (label, detail) => `<div class="rw-info" style="padding:10px 0;border-top:1px solid var(--border);font-size:13px"><strong>${label}</strong><br><span style="font-size:12px;color:var(--muted)">${detail}</span></div>`;
+  const small = items => items.length ? `<ul style="font-size:12px;margin:6px 0 0 16px;color:var(--text)">${items.slice(0, 12).join('')}${items.length > 12 ? `<li>…and ${items.length - 12} more</li>` : ''}</ul>` : '';
+  const sec = f.second.time.length + f.second.notes.length;
+  const parts = [
+    f.account ? `<div class="alert alert-warning" id="rw-account" style="font-size:13px">${n} has a staff account${f.account.email ? ' (' + sanitize(f.account.email) + ')' : ''}. This tool doesn’t remove logins — remove the account in <strong>Staff Accounts</strong> below.</div>` : '',
+    f.inList.length ? row('rw-list', true, 'Take the name off the worker list', 'It will no longer be offered in any worker box (Log Session, second worker, Assign workers, calendar, referrals) on any device.') : info('Not on the worker list', 'Nothing to do here.'),
+    sec ? row('rw-second', true, `Take the name off ${f.second.time.length} joint session time entr${f.second.time.length === 1 ? 'y' : 'ies'} and ${f.second.notes.length} note${f.second.notes.length === 1 ? '' : 's'} where ${n} is the second worker`,
+      `The time stays recorded once, under the main worker. ${mins(f.second.time)} min.`, small(f.second.time.map(t => `<li>${fmt(t.date)} · ${cname(t.clientId)} · ${Number(t.minutes) || 0} min · main worker ${sanitize(canonicalWorker(t.worker) || '—')}</li>`))) : '',
+    f.mainTime.length ? row('rw-maintime', false, `Remove ${f.mainTime.length} time entr${f.mainTime.length === 1 ? 'y' : 'ies'} logged under ${n} (${_hm(mins(f.mainTime))})`,
+      'Only tick this if the time should not count at all. Removed entries can’t come back from another device or a CorePlus re-import. Case notes they came from are kept.', small(f.mainTime.map(t => `<li>${fmt(t.date)} · ${cname(t.clientId)} · ${Number(t.minutes) || 0} min · ${sanitize(TIME_SOURCES[timeLogSource(t)])}${t.worker2 ? ' · with ' + sanitize(canonicalWorker(t.worker2)) : ''}</li>`))) : '',
+    f.assigned.length ? row('rw-assigned', true, `Take ${n} off the assigned workers of ${f.assigned.length} client file${f.assigned.length === 1 ? '' : 's'}`, f.assigned.map(c => sanitize(c.fullName)).slice(0, 10).join(', ') + (f.assigned.length > 10 ? '…' : '')) : '',
+    f.keyWorker.length ? info(`Key Worker on ${f.keyWorker.length} client file${f.keyWorker.length === 1 ? '' : 's'} — change these first`, `Open each file → Actions → Assign workers, and choose the new Key Worker: ${f.keyWorker.map(c => `<a href="#" onclick="event.preventDefault();openClientProfile('${sanitize(c.id)}')">${sanitize(c.fullName)}</a>`).join(', ')}`) : '',
+    f.mainNotes.length ? info(`Wrote ${f.mainNotes.length} case note${f.mainNotes.length === 1 ? '' : 's'} — kept`, 'Case notes are client records and keep the name of the worker who wrote them.') : '',
+    (f.events.length || f.referrals.length || f.tasks.length) ? info('Also named on', [f.events.length ? `${f.events.length} calendar event${f.events.length === 1 ? '' : 's'}` : '', f.referrals.length ? `${f.referrals.length} referral${f.referrals.length === 1 ? '' : 's'}` : '', f.tasks.length ? `${f.tasks.length} task${f.tasks.length === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ') + ' — left as they are (history).') : '',
+  ].filter(Boolean).join('');
+  const canAct = f.inList.length || sec || f.mainTime.length || f.assigned.length;
+  return parts + (canAct ? `<div style="margin-top:12px"><button class="btn btn-danger" id="rw-go" onclick="removeWorkerApply()">🧹 Remove ${n} as ticked</button></div>`
+    : `<div class="alert alert-info" id="rw-nothing" style="font-size:13px;margin-top:10px">Nothing left that this tool can remove.</div>`);
+}
+function removeWorkerApply() {
+  if (currentUser?.role !== 'sysmanager' || !_rwName) return;
+  const name = _rwName, f = removeWorkerFind(name), on = id => !!document.getElementById(id)?.checked;
+  const doList = on('rw-list') && f.inList.length, doSec = on('rw-second'), doMain = on('rw-maintime') && f.mainTime.length, doAs = on('rw-assigned') && f.assigned.length;
+  const plan = [doList ? 'take the name off the worker list' : '', doSec ? `take it off ${f.second.time.length + f.second.notes.length} joint session record(s) (second worker)` : '',
+    doMain ? `REMOVE ${f.mainTime.length} time entr${f.mainTime.length === 1 ? 'y' : 'ies'} logged under the name` : '', doAs ? `take it off the assigned workers of ${f.assigned.length} client file(s)` : ''].filter(Boolean);
+  if (!plan.length) { alert('Tick at least one thing to remove.'); return; }
+  if (!confirm(`Remove "${name}"?\n\nThis will:\n• ${plan.join('\n• ')}\n\nIt is recorded in the audit log.`)) return;
+  const done = [];
+  if (doSec) {
+    // Blanked, not deleted: the cloud sync merges fields, so a deleted field would come back. A blank second worker counts as none everywhere.
+    f.second.notes.forEach(x => { x.worker2 = ''; }); f.second.time.forEach(x => { x.worker2 = ''; });
+    done.push(`second worker removed from ${f.second.notes.length} note(s) and ${f.second.time.length} time entr${f.second.time.length === 1 ? 'y' : 'ies'}`);
+  }
+  if (doAs) { f.assigned.forEach(c => { c.assignedWorkers = (c.assignedWorkers || []).filter(w => !_rwSame(w, name)); }); done.push(`taken off assigned workers on ${f.assigned.length} file(s)`); }
+  if (doMain) { const k = removeTimeEntries(f.mainTime.map(t => t.id).filter(Boolean), `Logged under ${name}, removed with Remove a worker's name`); done.push(`${k} time entr${k === 1 ? 'y' : 'ies'} removed`); }
+  if (doList) {
+    workersList = workersList.filter(w => !_rwSame(w, name));
+    if (!_isRemovedWorker(name)) _removedWorkers.push(name);
+    f.inList.forEach(w => { if (!_isRemovedWorker(w)) _removedWorkers.push(w); });
+    DB.save('removedWorkers', _removedWorkers); saveWorkersList(); FSYNC.pushRemovedWorkers().catch(e => console.warn('removed workers:', e.message));
+    done.push('taken off the worker list');
+  }
+  audit("Worker name removed", `${name} — ${done.join('; ')}`);
+  saveAll();
+  showToast(`🧹 ${name}: ${done.join('; ')}`);
+  showPage('settings');
+  setTimeout(() => document.getElementById('rw-card')?.scrollIntoView?.({ block: 'start' }), 50);
 }
 
 // ===== AUDIT LOG PAGE =====
@@ -12253,6 +12373,7 @@ function renderSettings() {
   </div>
 
   ${currentUser?.role==='sysmanager' ? smsSettingsCardHTML() : ''}
+  ${currentUser?.role==='sysmanager' ? removeWorkerCardHTML() : ''}
 
   <!-- STAFF ACCOUNTS CARD -->
   <div class="card" style="border-left:4px solid var(--primary)">
