@@ -1369,7 +1369,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v126';
+const APP_VERSION = 'v127';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -2016,7 +2016,7 @@ function renderDashboard() {
   <div class="grid-4" style="margin-bottom:20px">
     <div class="stat-card"><div class="label">Active Clients</div><div class="value" style="color:var(--primary-light)">${active}</div><div class="sub">${clients.length} total</div></div>
     <div class="stat-card"><div class="label">Notes This Month</div><div class="value" style="color:var(--info)">${thisMonth}</div><div class="sub">${notes.length} total</div></div>
-    ${(()=>{ const k=fundingKPI(['sewb','aod','justice']); return `<div class="stat-card" style="cursor:pointer" onclick="showPage('reports')" title="Open Reports for the full KPI tracker"><div class="label">Episodes of Care</div><div class="value" style="color:var(--accent)">${k.episodesFY} / ${k.target}</div><div class="sub">${k.pct}% of annual target (${sanitize(k.fy.label)})</div></div>`; })()}
+    ${(()=>{ const k=fundingKPI(['sewb','aod','justice']); return `<div class="stat-card" style="cursor:pointer" onclick="showPage('reports')" title="Open Reports for the full KPI tracker"><div class="label">Episodes of Care</div><div class="value" style="color:var(--accent)">${k.episodesFY} / ${k.target}</div><div class="sub">${k.pct}% of annual target (${sanitize(k.fy.label)}) · ${sanitize(k.withPartial)} incl. partial</div></div>`; })()}
     <div class="stat-card"><div class="label">High Risk</div><div class="value" style="color:var(--danger)">${highRisk}</div><div class="sub">clients flagged</div></div>
   </div>
   <div class="grid-2">
@@ -5990,7 +5990,7 @@ function renderReportsPage() {
   <div class="card no-print" style="margin-bottom:20px;border-left:4px solid var(--primary)">
     <div class="card-header"><div class="card-title">🏛️ SEWB Official Funding Reports</div></div>
     <p style="font-size:13px;color:var(--muted);margin-bottom:6px">Completed <strong>episodes of care</strong> for SEWB, AOD and Justice clients — for official funding acquittal.</p>
-    <p style="font-size:12px;color:var(--muted);margin-bottom:16px">Episode criteria: <strong>12 weeks</strong> engaged with the program <strong>and</strong> a minimum of <strong>5 client contacts</strong>. A contact is a case note whose Session Type is that program, or time logged against that program. Notes left as <strong>GENERAL</strong>, and time left as “Not program-specific”, count once, toward <strong>SEWB</strong> (the umbrella program), so the same contact is never counted for AOD or Justice as well. A general contact on the same day as another counted contact for that client is the same contact. First Peoples Home Ownership is excluded.</p>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:16px">Episode criteria: <strong>12 weeks</strong> engaged with the program <strong>and</strong> a minimum of <strong>5 client contacts</strong>. A contact is a case note whose Session Type is that program, or time logged against that program. <strong>Family Violence</strong> and <strong>Men’s Group</strong> sessions count as <strong>SEWB</strong>. Notes left as <strong>GENERAL</strong>, and time left as “Not program-specific”, count once, toward <strong>SEWB</strong> (the umbrella program), so the same contact is never counted for AOD or Justice as well. A general contact on the same day as another counted contact for that client is the same contact. First Peoples Home Ownership is excluded.</p>
     ${renderFundingKPIWidget()}
     <div class="grid-3">
       <div class="report-card" onclick="generateFundingReport('sewb')">
@@ -7802,8 +7802,11 @@ function fundingKPI(programs, fy){
     episodesFY += s.allEpisodeDates.filter(t=>t>=fy.start && t<=fy.end).length;
   });
   const target = fundingKPITarget();
+  // Total including partial: completed episodes this year + the partial episode-equivalents still building.
+  const withPartial = Math.round((episodesFY + partial) * 10) / 10;
   return { fy, target, episodesFY, episodesAll, partial: Math.round(partial*10)/10,
-    pct: target ? Math.round(episodesFY/target*100) : 0, stats };
+    pct: target ? Math.round(episodesFY/target*100) : 0,
+    withPartial, pctWithPartial: target ? Math.round(withPartial/target*100) : 0, stats };
 }
 
 // On-page KPI tracker widget for the SEWB Official Funding Reports section
@@ -7826,15 +7829,19 @@ function renderFundingKPIWidget(){
       <div class="stat-card" style="flex:1;min-width:120px"><div class="label">Target</div><div class="value" style="font-size:22px">${sanitize(kpi.target)}</div></div>
       <div class="stat-card" style="flex:1;min-width:120px"><div class="label">Progress</div><div class="value" style="font-size:22px;color:${color}">${sanitize(kpi.pct)}%</div></div>
       <div class="stat-card" style="flex:1;min-width:120px"><div class="label">Partial in progress</div><div class="value" style="font-size:22px;color:#d97706">${sanitize(kpi.partial)}</div></div>
+      <div class="stat-card" id="kpi-with-partial" style="flex:1;min-width:150px;border-color:#2d6a4f"><div class="label">Total incl. partial</div><div class="value" style="font-size:22px;color:var(--primary)">${sanitize(kpi.withPartial)}</div><div class="sub" style="font-size:11px;color:var(--muted)">${sanitize(kpi.episodesFY)} completed + ${sanitize(kpi.partial)} partial · ${sanitize(kpi.pctWithPartial)}% of target</div></div>
     </div>
-    <div style="height:18px;background:#e5e7eb;border-radius:9px;overflow:hidden">
+    <div style="height:18px;background:#e5e7eb;border-radius:9px;overflow:hidden;display:flex" role="img" aria-label="${sanitize(kpi.pct)}% of the target completed, ${sanitize(kpi.pctWithPartial)}% including partial episodes">
       <div style="height:100%;width:${bar}%;background:${color};transition:width .3s;display:flex;align-items:center;justify-content:flex-end;padding-right:6px;color:#fff;font-size:10px;font-weight:700">${bar>=12?kpi.pct+'%':''}</div>
+      <div style="height:100%;width:${Math.max(0, Math.min(100, kpi.pctWithPartial) - bar)}%;background:repeating-linear-gradient(45deg,#fcd9a8,#fcd9a8 6px,#fde8c8 6px,#fde8c8 12px)" title="Partial episodes in progress"></div>
     </div>
+    <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--muted);margin-top:5px"><span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${color};vertical-align:-1px"></span> Completed ${sanitize(kpi.pct)}%</span><span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#fcd9a8;vertical-align:-1px"></span> Including partial ${sanitize(kpi.pctWithPartial)}%</span></div>
     <div style="font-size:12px;color:var(--muted);margin-top:8px">
       ${kpi.episodesFY>=kpi.target
         ? '✅ <strong style="color:#16a34a">Annual target met.</strong>'
         : `<strong>${sanitize(kpi.target-kpi.episodesFY)}</strong> more completed episode${kpi.target-kpi.episodesFY!==1?'s':''} needed to reach the target.`}
-      &nbsp;·&nbsp; <strong>${sanitize(kpi.partial)}</strong> partial episode-equivalents are currently building toward completion.
+      &nbsp;·&nbsp; <strong>${sanitize(kpi.partial)}</strong> partial episode-equivalents are currently building toward completion
+      &nbsp;·&nbsp; Total including partial: <strong>${sanitize(kpi.withPartial)}</strong> of ${sanitize(kpi.target)}.
     </div>
   </div>`;
 }
@@ -7929,15 +7936,17 @@ function buildFundingReport(program) {
   body += `<div style="border:2px solid ${kpiColor};border-radius:8px;padding:14px 16px;margin-bottom:16px;background:#f8fbf9">
     <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px">
       <div style="font-size:14px;font-weight:700;color:#1a3a2a">Annual KPI — Completed Episodes of Care (${sanitize(kpi.fy.label)})</div>
-      <div style="font-size:13px;font-weight:700;color:${kpiColor}">${sanitize(kpi.episodesFY)} of ${sanitize(kpi.target)} &nbsp;(${sanitize(kpi.pct)}%)</div>
+      <div style="font-size:13px;font-weight:700;color:${kpiColor}">${sanitize(kpi.episodesFY)} of ${sanitize(kpi.target)} &nbsp;(${sanitize(kpi.pct)}%) <span style="color:#1a3a2a">· incl. partial ${sanitize(kpi.withPartial)} (${sanitize(kpi.pctWithPartial)}%)</span></div>
     </div>
-    <div style="height:16px;background:#e5e7eb;border-radius:8px;overflow:hidden;margin-top:8px">
+    <div style="height:16px;background:#e5e7eb;border-radius:8px;overflow:hidden;margin-top:8px;display:flex">
       <div style="height:100%;width:${kpiBar}%;background:${kpiColor}"></div>
+      <div style="height:100%;width:${Math.max(0, Math.min(100, kpi.pctWithPartial) - kpiBar)}%;background:#fcd9a8"></div>
     </div>
     <div style="font-size:11px;color:#6b7280;margin-top:6px">${kpi.episodesFY>=kpi.target?'✓ Target met.':`${sanitize(kpi.target-kpi.episodesFY)} to go.`} &nbsp;·&nbsp; ${sanitize(kpi.partial)} partial episode-equivalents currently in progress toward the next milestones.</div>
   </div>`;
   body += `<div class="stat-row">
     <div class="stat-box"><div class="sv">${sanitize(kpi.episodesFY)}</div><div class="sl">Complete Episodes (${sanitize(kpi.fy.label)})</div></div>
+    <div class="stat-box"><div class="sv">${sanitize(kpi.withPartial)}</div><div class="sl">Total incl. Partial (${sanitize(kpi.episodesFY)} + ${sanitize(kpi.partial)})</div></div>
     <div class="stat-box"><div class="sv">${grandEpisodes}</div><div class="sl">Complete Episodes (all time)</div></div>
     <div class="stat-box"><div class="sv">${Math.round(grandPartial*10)/10}</div><div class="sl">Partial Episode-Equivalents</div></div>
     <div class="stat-box"><div class="sv">${grandWithEp}/${grandClients}</div><div class="sl">Clients with ≥1 Episode</div></div>
