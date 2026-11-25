@@ -1369,7 +1369,7 @@ function saveWorkersList() { DB.save('workersList', workersList); FSYNC.pushWork
 let referrals = DB.load('referrals', []);
 // Shown under Sign Out so anyone can check which build they are running.
 // Bump together with CACHE_NAME in service-worker.js on every release.
-const APP_VERSION = 'v127';
+const APP_VERSION = 'v128';
 function saveReferrals() { DB.save('referrals', referrals); FSYNC.pushReferrals(); }
 let timeLogs = DB.load('timelogs', []);
 let fphoApplications = DB.load('fphoApplications', []);
@@ -4213,7 +4213,7 @@ function openHandbookSendModal(clientId, ctx, notice) {
       ${smsAutoOn() && !notice ? `<button class="btn btn-primary" id="hb-auto" ${safe && mob ? '' : 'disabled'} onclick="handbookAutoFromModal('${c.id}','${ctx}')">📤 Send automatically</button>` : ''}
       ${btn('sms', smsAutoOn() ? '💬 Send from my phone' : '💬 Send text', smsAutoOn() && !notice ? 'btn-outline' : 'btn-primary', !(safe && mob), 'hb-sms')}
       ${btn('copy', '📋 Copy message', 'btn-outline', !safe)}
-      ${c.email ? btn('email', '✉️ Email instead', 'btn-outline', false) : ''}
+      ${c.email ? btn('email', '✉️ Email from the CMS', 'btn-outline', false, 'hb-email') : ''}
       ${btn('in person', '🗂️ Given in person (printed)', 'btn-outline', false)}
       <button class="btn btn-outline" onclick="handbookNotNow('${c.id}','${ctx}')">Not now</button>
       <a class="btn btn-outline" href="${sanitize(handbookUrl())}" target="_blank" rel="noopener">👁️ Open handbook</a>
@@ -4237,17 +4237,30 @@ function sendHandbook(clientId, channel, ctx) {
   const msg = document.getElementById('hb-msg')?.value || handbookMessage(c);
   const to = channel === 'email' ? c.email : auMobile(document.getElementById('hb-to')?.value || c.phone);
   if (channel === 'sms' && !to) { alert('Enter a mobile number (04…)'); return; }
+  // Email goes from the CMS (the worker's Outlook); it is recorded — handbook given, note, time — once it has been sent.
+  if (channel === 'email' && !_hbFallback) {
+    const body = msg.replace(/ Questions\?/, '\n\nQuestions?');
+    emailClientFromCms(c, { subject: 'Your Worn Gundidj Participant Handbook', body,
+      onSent: () => { _handbookRecordSend(c, 'email', c.email); _handbookReturn(clientId, ctx); },
+      fallback: () => { _hbFallback = true; try { sendHandbook(clientId, 'email', ctx); } finally { _hbFallback = false; } } });
+    return;
+  }
   if (channel === 'sms') openExternalLink(`sms:${to}?&body=${encodeURIComponent(msg)}`);
   else if (channel === 'email') openExternalLink(`mailto:${encodeURIComponent(c.email)}?subject=${encodeURIComponent('Your Worn Gundidj Participant Handbook')}&body=${encodeURIComponent(msg)}`);
   else if (channel === 'copy') { try { navigator.clipboard.writeText(msg); } catch (_) {} }
+  _handbookRecordSend(c, channel, to);
+  const person = channel === 'in person';
+  showToast(channel === 'copy' ? 'Message copied — paste it into a text. Recorded on the file.' : person ? 'Recorded: handbook given in person' : 'Handbook send recorded on the file');
+  _handbookReturn(clientId, ctx);
+}
+let _hbFallback = false;     // sending the handbook by the device's email app (Outlook can't be used in the CMS)
+function _handbookRecordSend(c, channel, to) {
   const person = channel === 'in person';
   c.handbookSent = c.handbookSent || [];
   c.handbookSent.push({ id: uid(), at: now(), by: currentUser?.name || '', channel,
     to: person ? 'in person' : channel === 'email' ? c.email : _maskPhone(to), toFull: person || channel === 'email' ? '' : to, doc: HANDBOOK.title });
   audit('Handbook sent', `${c.fullName} — ${HANDBOOK.title} ${person ? 'given in person (printed copy)' : 'by ' + (channel === 'sms' ? 'text' : channel) + (channel === 'email' ? '' : ' to ' + _maskPhone(to))}`, c.id);
   saveAll();
-  showToast(channel === 'copy' ? 'Message copied — paste it into a text. Recorded on the file.' : person ? 'Recorded: handbook given in person' : 'Handbook send recorded on the file');
-  _handbookReturn(clientId, ctx);
 }
 function handbookNotNow(clientId, ctx) {
   const c = clients.find(x => x.id === clientId); if (!c) return;
@@ -13520,6 +13533,31 @@ function mailSafeNote() {
   if (tm) { const key = c && rec ? c.id : ''; if (tm.dataset.client !== key) { tm.dataset.client = key; tm.innerHTML = key ? mailTimeFieldsHTML(c, 'mc') : ''; } }   // keep what was typed unless the client changes
   el.innerHTML = c && c.ifSafeContact !== 'Yes' ? `<div class="alert alert-warning" id="mc-safe-warn" style="font-size:12px;margin:0;display:block">"Safe to leave calls/texts?" on ${sanitize(c.fullName)}'s intake is <strong>${sanitize(c.ifSafeContact || 'not answered')}</strong>. Check they have agreed to email at this address, and that it is safe, before sending.</div>` : '';
 }
+// Email a client from the CMS's own Email (the worker's Outlook, through Microsoft) — used by the
+// handbook, intake form, consent form and feedback request. The email window opens filled in, with
+// "Record on the client's file" ticked: once it has actually been sent, the email goes on the file as a
+// note and the minutes are logged (15 unless changed), then onSent runs (e.g. "link emailed").
+// Outlook not connected yet → connect first (the sign-in window opens from the click). Only if Outlook
+// can't be used here (not set up, or connected as someone else) does it fall back to the device's email
+// app — and then the time is not logged automatically, which it says.
+async function emailClientFromCms(c, o) {
+  if (!c) return false;
+  if (!c.email) { showToast('This client has no email address on file.'); return false; }
+  let b = mailBlocker();
+  if (b === 'connect') { try { await outlookConnect(); } catch (e) { console.warn('Outlook connect:', e); } b = mailBlocker(); }
+  if (b) {
+    if (o.fallback) {
+      o.fallback();
+      showToast(b === 'setup' ? 'Opened in your email app — Outlook isn’t set up in the CMS yet, so the time wasn’t logged. Log it with Log Session.'
+        : b === 'wrong' ? 'Opened in your email app — the CMS is connected to someone else’s Outlook (see Email), so the time wasn’t logged.'
+        : 'Opened in your email app — connect Outlook (Email page) to send from the CMS and log the time automatically.');
+    } else showToast('Connect your own Outlook first (Email page).');
+    return false;
+  }
+  closeModal();
+  mailCompose({ to: c.email, clientId: c.id, record: true, subject: o.subject, body: o.body, onSent: o.onSent });
+  return true;
+}
 function emailClient(id) {            // from a client's file
   const c = clients.find(x => x.id === id); if (!c) return;
   if (!c.email) { showToast('This client has no email address on file.'); return; }
@@ -14518,7 +14556,7 @@ function _ifLiveHTML(c, f) {
       <button class="btn btn-outline" id="if-open" onclick="sendIntakeLink('${sanitize(f.id)}','open')" title="Opens the form here. Hand the phone or tablet to ${sanitize(smsFirstName(c))} to fill in and sign.">📱 Open on this device</button>
       ${smsAutoOn() ? `<button class="btn btn-primary" id="if-auto" ${safe && mob ? '' : 'disabled'} onclick="sendIntakeLink('${sanitize(f.id)}','auto')">📤 Text it automatically</button>` : ''}
       <button class="btn ${smsAutoOn() ? 'btn-outline' : 'btn-primary'}" id="if-sms" ${mob ? '' : 'disabled'} onclick="sendIntakeLink('${sanitize(f.id)}','sms')">💬 Text from my phone</button>
-      ${c.email ? `<button class="btn btn-outline" onclick="sendIntakeLink('${sanitize(f.id)}','email')">✉️ Email it</button>` : ''}
+      ${c.email ? `<button class="btn btn-outline" id="if-email" onclick="sendIntakeLink('${sanitize(f.id)}','email')" title="Sends from your Outlook through the CMS and logs the time on the file">✉️ Email from the CMS</button>` : ''}
       <button class="btn btn-outline" style="color:#991b1b;border-color:#fca5a5" onclick="cancelIntakeLink('${sanitize(f.id)}')">🔒 Cancel link</button>
     </div>
     ${obText ? `<div style="font-size:12px;margin-top:10px">${obText}</div>` : ''}
@@ -14574,8 +14612,10 @@ async function sendIntakeLink(formId, channel) {
     return _ifRecordSend(f, c, 'text from ' + (currentUser?.name ? currentUser.name.split(' ')[0] + '’s' : 'worker’s') + ' phone to ' + _maskPhone(mob));
   }
   if (channel === 'email') {
-    openExternalLink(`mailto:${encodeURIComponent(c.email)}?subject=${encodeURIComponent('Your Worn Gundidj intake form')}&body=${encodeURIComponent(msg.replace(/ Questions\?/, '\n\nQuestions?'))}`);
-    return _ifRecordSend(f, c, 'email');
+    const body = msg.replace(/ Questions\?/, '\n\nQuestions?');
+    return emailClientFromCms(c, { subject: 'Your Worn Gundidj intake form', body,
+      onSent: () => _ifRecordSend(f, c, 'email from the CMS'),
+      fallback: () => { openExternalLink(`mailto:${encodeURIComponent(c.email)}?subject=${encodeURIComponent('Your Worn Gundidj intake form')}&body=${encodeURIComponent(body)}`); _ifRecordSend(f, c, 'email'); } });
   }
 }
 async function _ifRecordSend(f, c, channel) {
@@ -14799,7 +14839,7 @@ function _cfLiveHTML(c, f) {
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
       <button class="btn btn-primary" id="cf-open" onclick="sendConsentLink('${sanitize(f.id)}','open')" title="Opens the form here. Hand the phone or tablet to ${sanitize(smsFirstName(c))} to sign.">📱 Open on this device</button>
       <button class="btn btn-outline" id="cf-sms" ${mob ? '' : 'disabled'} onclick="sendConsentLink('${sanitize(f.id)}','sms')">💬 Text from my phone</button>
-      ${c.email ? `<button class="btn btn-outline" id="cf-email" onclick="sendConsentLink('${sanitize(f.id)}','email')">✉️ Email it</button>` : ''}
+      ${c.email ? `<button class="btn btn-outline" id="cf-email" onclick="sendConsentLink('${sanitize(f.id)}','email')" title="Sends from your Outlook through the CMS and logs the time on the file">✉️ Email from the CMS</button>` : ''}
       <button class="btn btn-outline" style="color:#991b1b;border-color:#fca5a5" onclick="cancelConsentLink('${sanitize(f.id)}')">🔒 Cancel link</button>
     </div>
     ${c.email ? `<p style="font-size:12px;color:var(--muted);margin:8px 0 0">Email goes from your own Outlook to ${sanitize(c.email)}${mailBlocker() ? ' — Outlook isn’t connected here, so it opens your email app instead' : ''}.</p>` : ''}
@@ -14846,13 +14886,9 @@ async function sendConsentLink(formId, channel) {
     return _cfRecordSend(f, c, 'text from ' + (currentUser?.name ? currentUser.name.split(' ')[0] + '’s' : 'worker’s') + ' phone to ' + _maskPhone(mob));
   }
   if (channel === 'email') {
-    if (!c.email) { showToast('This client has no email address on file.'); return; }
-    if (!mailBlocker()) {            // from the worker's own Outlook, and the send is noted once it has gone
-      closeModal();
-      return mailCompose({ to: c.email, clientId: c.id, record: false, subject: 'Your Worn Gundidj consent form', body: consentEmailBody(c, f), onSent: () => _cfRecordSend(f, c, 'email from Outlook') });
-    }
-    openExternalLink(`mailto:${encodeURIComponent(c.email)}?subject=${encodeURIComponent('Your Worn Gundidj consent form')}&body=${encodeURIComponent(consentEmailBody(c, f))}`);
-    return _cfRecordSend(f, c, 'email');
+    return emailClientFromCms(c, { subject: 'Your Worn Gundidj consent form', body: consentEmailBody(c, f),
+      onSent: () => _cfRecordSend(f, c, 'email from the CMS'),
+      fallback: () => { openExternalLink(`mailto:${encodeURIComponent(c.email)}?subject=${encodeURIComponent('Your Worn Gundidj consent form')}&body=${encodeURIComponent(consentEmailBody(c, f))}`); _cfRecordSend(f, c, 'email'); } });
   }
 }
 async function _cfRecordSend(f, c, channel) {
@@ -18412,25 +18448,35 @@ function openFeedbackSendModal(clientId, point) {
     <div class="form-group"><label>Feedback point</label><select id="qf-point">${selOpts(Object.entries(QF_POINTS).map(([v, l]) => ({ v, l })), point || 'other')}</select></div>
     <div class="form-group"><label>Message (plain language — edit if needed)</label><textarea id="qf-msg" style="min-height:220px;font-size:13px">${sanitize(feedbackMessage(c, point))}</textarea></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button class="btn btn-primary" ${c.email ? '' : 'disabled title="No email address on file"'} onclick="sendFeedbackRequest('${c.id}','email')">✉️ Email ${c.email ? '' : '(no email on file)'}</button>
+      <button class="btn btn-primary" ${c.email ? '' : 'disabled title="No email address on file"'} id="qf-email" onclick="sendFeedbackRequest('${c.id}','email')">✉️ Email from the CMS ${c.email ? '' : '(no email on file)'}</button>
       <button class="btn btn-primary" ${mob ? '' : 'disabled title="No mobile number on file"'} onclick="sendFeedbackRequest('${c.id}','sms')">💬 Text message ${mob ? '' : '(no mobile on file)'}</button>
       <button class="btn btn-outline" onclick="sendFeedbackRequest('${c.id}','copy')">📋 Copy message</button>
       <button class="btn btn-outline" onclick="sendFeedbackRequest('${c.id}','in person')">🗣️ Asked in person / by phone</button>
     </div>
-    <p style="font-size:11px;color:var(--muted);margin-top:10px">Email and text open on this device ready to send, from your own mailbox or phone. When the client replies, record their answers in <strong>⭐ Feedback → Quick feedback</strong>.</p>`;
+    <p style="font-size:11px;color:var(--muted);margin-top:10px">Email goes from the CMS (your Outlook) and the time is logged on the file once it has been sent; a text opens on this device ready to send. When the client replies, record their answers in <strong>⭐ Feedback → Quick feedback</strong>.</p>`;
   showModal('⭐ Ask for feedback', html, null, '620px', true);
 }
 function sendFeedbackRequest(clientId, channel) {
   const c = clients.find(x => x.id === clientId); if (!c) return;
   const msg = document.getElementById('qf-msg')?.value || feedbackMessage(c);
   const point = document.getElementById('qf-point')?.value || 'other';
+  if (channel === 'email' && !_qfFallback) {
+    return emailClientFromCms(c, { subject: 'How are we going? — Worn Gundidj', body: msg,
+      onSent: () => _feedbackRecordRequest(c, point, 'email'),
+      fallback: () => { _qfFallback = true; try { sendFeedbackRequest(clientId, 'email'); } finally { _qfFallback = false; } } });
+  }
   if (channel === 'email') openExternalLink(`mailto:${encodeURIComponent(c.email)}?subject=${encodeURIComponent('How are we going? — Worn Gundidj')}&body=${encodeURIComponent(msg)}`);
   else if (channel === 'sms') openExternalLink(`sms:${String(c.phone || '').replace(/[^\d+]/g, '')}?&body=${encodeURIComponent(msg)}`);
   else if (channel === 'copy') { try { navigator.clipboard.writeText(msg); } catch (_) {} }
+  _feedbackRecordRequest(c, point, channel);
+  closeModal(); showToast(channel === 'copy' ? 'Message copied — request recorded' : 'Feedback request recorded');
+}
+let _qfFallback = false;     // sending the request by the device's email app (Outlook can't be used in the CMS)
+function _feedbackRecordRequest(c, point, channel) {
   c.feedbackRequests = c.feedbackRequests || [];
   c.feedbackRequests.push({ id: uid(), point, channel, sentAt: now(), sentBy: currentUser?.name || '' });
   audit('Feedback requested', `${c.fullName} — ${QF_POINTS[point] || point} by ${channel}`, c.id);
-  saveAll(); closeModal(); showToast(channel === 'copy' ? 'Message copied — request recorded' : 'Feedback request recorded');
+  saveAll();
 }
 function renderQuickFeedbackCard(c) {
   const list = (c.quickFeedback || []).slice().sort((a, b) => String(b.date).localeCompare(String(a.date)));
